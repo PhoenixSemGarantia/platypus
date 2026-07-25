@@ -1,10 +1,34 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createWebFetchTools } from "./fetch.ts";
 import { callTool, callOkTool } from "../test-utils.ts";
+import { checkEgress, EGRESS_BLOCKED_MESSAGE } from "../utils/egress-guard.ts";
 
 // `ignoreRobotsTxt` is now a plugin-config value (ADR-0013) passed into the
 // factory, not a module-level env read — so tests build the tool with the flag
 // they want rather than mutating process.env.
+
+// The egress guard resolves hostnames, so it is mocked here to keep these tests
+// off real DNS — `example.com` and friends are stand-ins, not lookups. The
+// guard's own behaviour is covered in utils/egress-guard.test.ts; what matters
+// here is that fetchUrl consults it and honours a block.
+vi.mock("../utils/egress-guard.ts", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../utils/egress-guard.ts")>();
+  return {
+    ...actual,
+    checkEgress: vi.fn(() => Promise.resolve({ allowed: true })),
+  };
+});
+
+vi.mock("../logger.ts", () => ({
+  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+
+const mockCheckEgress = vi.mocked(checkEgress);
+
+beforeEach(() => {
+  mockCheckEgress.mockResolvedValue({ allowed: true });
+});
 
 describe("fetchUrl", () => {
   // Build with robots.txt checks skipped so these content tests don't need to
@@ -200,5 +224,72 @@ describe("robots.txt checking", () => {
     });
 
     expect(result.content).toBe("content");
+  });
+});
+
+describe("egress guarding", () => {
+  // robots.txt checks enabled, to prove the guard runs first: a blocked URL must
+  // not even reach the robots.txt probe, which would itself hit the network.
+  const { fetchUrl } = createWebFetchTools(false);
+  const mockFetch = vi.fn();
+
+  beforeEach(() => {
+    global.fetch = mockFetch;
+    mockFetch.mockReset();
+  });
+
+  it("refuses a URL the guard blocks and makes no request at all", async () => {
+    mockCheckEgress.mockResolvedValue({
+      allowed: false,
+      reason: "'x' resolves to 169.254.169.254 (link-local)",
+    });
+
+    const result = await callTool(fetchUrl, {
+      url: "http://169.254.169.254/latest/meta-data/",
+      max_length: 5000,
+      start_index: 0,
+      raw: false,
+    });
+
+    expect(result).toHaveProperty("error");
+    if (!("error" in result)) throw new Error("expected an error result");
+    expect(result.error).toBe(EGRESS_BLOCKED_MESSAGE);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("does not leak the block reason to the model", async () => {
+    mockCheckEgress.mockResolvedValue({
+      allowed: false,
+      reason: "'secret.internal' resolves to 10.1.2.3 (private network)",
+    });
+
+    const result = await callTool(fetchUrl, {
+      url: "http://secret.internal/",
+      max_length: 5000,
+      start_index: 0,
+      raw: false,
+    });
+
+    if (!("error" in result)) throw new Error("expected an error result");
+    expect(result.error).not.toContain("secret.internal");
+    expect(result.error).not.toContain("10.1.2.3");
+  });
+
+  it("consults the guard with the model-supplied URL", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: false });
+    mockFetch.mockResolvedValueOnce({
+      url: "https://example.com/page",
+      headers: new Headers({ "content-type": "text/plain" }),
+      text: vi.fn().mockResolvedValue("content"),
+    });
+
+    await callOkTool(fetchUrl, {
+      url: "https://example.com/page",
+      max_length: 5000,
+      start_index: 0,
+      raw: false,
+    });
+
+    expect(mockCheckEgress).toHaveBeenCalledWith("https://example.com/page");
   });
 });

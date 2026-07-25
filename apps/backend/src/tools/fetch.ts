@@ -4,6 +4,8 @@ import { JSDOM } from "jsdom";
 import { Readability } from "@mozilla/readability";
 import TurndownService from "turndown";
 import robotsParser from "robots-parser";
+import { logger } from "../logger.ts";
+import { checkEgress, EGRESS_BLOCKED_MESSAGE } from "../utils/egress-guard.ts";
 
 const USER_AGENT = "PlatypusBot/1.0";
 
@@ -40,6 +42,12 @@ const turndown = new TurndownService({ headingStyle: "atx" });
 // `@platypus/web-fetch` manifest resolves `ignoreRobotsTxt` from
 // PLATYPUS_PLUGIN_CONFIG (ADR-0013) and passes it in here, so the flag is a
 // plugin-config value rather than a bare process.env read.
+//
+// Egress is guarded by core, not by this plugin: `checkEgress` is shared with the
+// Web-search backend's `read_url` (ADR-0014), so both tools that fetch a
+// model-supplied URL apply one policy. Its knob is core-level
+// (`EGRESS_ALLOW_PRIVATE_NETWORKS`) rather than a key in this plugin's config
+// namespace, since the policy spans plugins.
 export const createWebFetchTools = (ignoreRobotsTxt: boolean) => ({
   fetchUrl: tool({
     description:
@@ -65,6 +73,19 @@ export const createWebFetchTools = (ignoreRobotsTxt: boolean) => ({
         .describe("Return raw content without markdown conversion"),
     }),
     execute: async ({ url, max_length, start_index, raw }) => {
+      // The URL comes from the model, so it is guarded before anything reaches
+      // the network. This must precede the robots.txt probe below, which fetches
+      // `${origin}/robots.txt` itself — checking afterwards would already have
+      // sent a request to the very host being vetted.
+      const egress = await checkEgress(url);
+      if (!egress.allowed) {
+        logger.warn(
+          { tool: "fetchUrl", url, reason: egress.reason },
+          "Blocked a model-supplied URL by network policy",
+        );
+        return { error: EGRESS_BLOCKED_MESSAGE };
+      }
+
       const allowed = await checkRobotsTxt(url, ignoreRobotsTxt);
       if (!allowed) {
         return {
