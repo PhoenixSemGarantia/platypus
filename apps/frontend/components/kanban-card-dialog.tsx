@@ -48,6 +48,11 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   Trash2,
   Calendar as CalendarIcon,
   Check,
@@ -192,6 +197,64 @@ function AssigneePicker({
   );
 }
 
+// Rendered next to the card title in both the mobile and desktop layouts.
+function CardTitleActions({
+  onCopyLink,
+  onCopyMarkdown,
+  onEdit,
+}: {
+  onCopyLink: () => void;
+  onCopyMarkdown: () => void;
+  onEdit: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-0.5">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            aria-label="Copy link to card"
+            onClick={onCopyLink}
+          >
+            <Link2 className="h-3.5 w-3.5" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Copy link to card</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            aria-label="Copy card as Markdown"
+            onClick={onCopyMarkdown}
+          >
+            <Copy className="h-3.5 w-3.5" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Copy card as Markdown</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            aria-label="Edit card"
+            onClick={onEdit}
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Edit card</TooltipContent>
+      </Tooltip>
+    </div>
+  );
+}
+
 export function KanbanCardDialog({
   card,
   labels,
@@ -306,17 +369,25 @@ export function KanbanCardDialog({
 
   if (!card) return null;
 
-  const handleCopyToClipboard = () => {
+  const handleCopyToClipboard = async () => {
     const markdown = body ? `# ${title}\n\n${body}` : `# ${title}`;
-    navigator.clipboard.writeText(markdown);
-    toast.success("Copied to clipboard");
+    try {
+      await navigator.clipboard.writeText(markdown);
+      toast.success("Copied to clipboard");
+    } catch {
+      toast.error("Failed to copy to clipboard");
+    }
   };
 
-  const handleCopyLink = () => {
+  const handleCopyLink = async () => {
     const url = new URL(window.location.href);
     url.searchParams.set("cardId", card.id);
-    navigator.clipboard.writeText(url.toString());
-    toast.success("Link copied to clipboard");
+    try {
+      await navigator.clipboard.writeText(url.toString());
+      toast.success("Link copied to clipboard");
+    } catch {
+      toast.error("Failed to copy link");
+    }
   };
 
   const toggleLabel = (labelId: string) => {
@@ -422,34 +493,11 @@ export function KanbanCardDialog({
                       <h1 className="text-xl font-semibold [overflow-wrap:anywhere]">
                         {title}
                       </h1>
-                      <div className="flex items-center gap-0.5">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          aria-label="Copy link to card"
-                          title="Copy link to card"
-                          onClick={handleCopyLink}
-                        >
-                          <Link2 className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          onClick={handleCopyToClipboard}
-                        >
-                          <Copy className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          onClick={() => enterEditing("title")}
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
+                      <CardTitleActions
+                        onCopyLink={handleCopyLink}
+                        onCopyMarkdown={handleCopyToClipboard}
+                        onEdit={() => enterEditing("title")}
+                      />
                     </div>
                   )}
                 </div>
@@ -775,34 +823,11 @@ export function KanbanCardDialog({
                     <h1 className="text-xl font-semibold [overflow-wrap:anywhere]">
                       {title}
                     </h1>
-                    <div className="flex items-center gap-0.5">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7"
-                        aria-label="Copy link to card"
-                        title="Copy link to card"
-                        onClick={handleCopyLink}
-                      >
-                        <Link2 className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7"
-                        onClick={handleCopyToClipboard}
-                      >
-                        <Copy className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7"
-                        onClick={() => enterEditing("title")}
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
+                    <CardTitleActions
+                      onCopyLink={handleCopyLink}
+                      onCopyMarkdown={handleCopyToClipboard}
+                      onEdit={() => enterEditing("title")}
+                    />
                   </div>
                 )}
               </div>
