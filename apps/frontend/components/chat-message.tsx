@@ -30,9 +30,9 @@ import {
 import { DynamicToolHeader } from "./dynamic-tool-header";
 import {
   DynamicToolUIPart,
-  ToolUIPart,
   FileUIPart,
   TextUIPart,
+  isToolUIPart,
   type ChatStatus,
 } from "ai";
 import { Agent } from "@platypus/schemas";
@@ -48,18 +48,6 @@ import {
 import { Textarea } from "./ui/textarea";
 import { LoadSkillTool } from "./load-skill-tool";
 import { SubAgentTool } from "./sub-agent-tool";
-
-/**
- * Re-type a `tool-` prefixed message part as a tool part.
- *
- * Only tools with bespoke UI are enumerated in the message's static part union
- * (see `CustomUITools` in the backend types); plugin- and MCP-contributed
- * tools are not known at compile time, so the runtime `tool-` prefix is the
- * only signal we have. Intersecting keeps the assertion honest — the result is
- * still the part we were handed.
- */
-const asToolUIPart = <T extends { type: string }>(part: T) =>
-  part as T & ToolUIPart;
 
 interface ChatMessageProps {
   /** The message object to render */
@@ -234,39 +222,29 @@ export const ChatMessage = memo(function ChatMessage({
             </Tool>
           );
         } else if (part.type === "tool-loadSkill") {
-          return (
-            <LoadSkillTool
-              key={`${message.id}-${i}`}
-              toolPart={part as ToolUIPart}
-            />
-          );
-        } else if (part.type.startsWith("tool-delegateTo")) {
+          return <LoadSkillTool key={`${message.id}-${i}`} toolPart={part} />;
+        } else if (
+          isToolUIPart(part) &&
+          part.type.startsWith("tool-delegateTo")
+        ) {
           // Sub-agent tools get custom UI with robot icon and nested chat
-          return (
-            <SubAgentTool
-              key={`${message.id}-${i}`}
-              toolPart={asToolUIPart(part)}
-            />
-          );
-        } else if (part.type.startsWith("tool-")) {
-          const toolPart = asToolUIPart(part);
-          const toolInput = toolPart.input as
-            Record<string, unknown> | undefined;
+          return <SubAgentTool key={`${message.id}-${i}`} toolPart={part} />;
+        } else if (isToolUIPart(part)) {
+          // Plugin- and MCP-contributed tools aren't enumerated in the part
+          // union (see `CustomUITools`), so they land on the generic renderer.
+          const toolInput = part.input as Record<string, unknown> | undefined;
           const toolLabel = (toolInput?.label ?? toolInput?.name) as
             string | undefined;
           return (
             <Tool key={`${message.id}-${i}`}>
               <ToolHeader
-                state={toolPart.state}
-                type={toolPart.type}
+                state={part.state}
+                type={part.type}
                 label={toolLabel}
               />
               <ToolContent>
-                <ToolInput input={toolPart.input} />
-                <ToolOutput
-                  output={toolPart.output}
-                  errorText={toolPart.errorText}
-                />
+                <ToolInput input={part.input} />
+                <ToolOutput output={part.output} errorText={part.errorText} />
               </ToolContent>
             </Tool>
           );

@@ -41,16 +41,23 @@ const getStatusBadge = (status: ToolUIPart["state"]) => {
   );
 };
 
+/**
+ * `loadSkill` is enumerated in `CustomUITools`, so its part carries real
+ * input/output types — no assertion needed to read them.
+ */
+type LoadSkillToolPart = Extract<
+  ToolUIPart<CustomUITools>,
+  { type: "tool-loadSkill" }
+>;
+
 interface LoadSkillToolProps {
-  toolPart: ToolUIPart;
+  toolPart: LoadSkillToolPart;
 }
 
 export const LoadSkillTool = ({ toolPart }: LoadSkillToolProps) => {
-  const input = toolPart.input as CustomUITools["loadSkill"]["input"];
-  const output = toolPart.output as CustomUITools["loadSkill"]["output"];
+  const { input, output } = toolPart;
   const errorText =
-    toolPart.errorText ||
-    (output && "error" in output ? (output.error as string) : null);
+    toolPart.errorText || (output && "error" in output ? output.error : null);
 
   return (
     <div className="not-prose mb-4 w-full rounded-md border">

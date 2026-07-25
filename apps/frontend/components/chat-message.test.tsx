@@ -13,13 +13,15 @@ vi.mock("streamdown", () => ({
 
 import { ChatMessage } from "./chat-message";
 
-const agents: Agent[] = [
-  {
+const makeAgent = (overrides: Partial<Agent>): Agent =>
+  ({
     id: "agent-1",
     name: "Research Agent",
     avatarUrl: "https://example.com/agent-1.png",
-  } as unknown as Agent,
-];
+    ...overrides,
+  }) as Agent;
+
+const agents = [makeAgent({})];
 
 const assistantMessage = (
   metadata?: PlatypusUIMessage["metadata"],
@@ -60,17 +62,17 @@ describe("ChatMessage agent attribution", () => {
     expect(avatar).toHaveAttribute("src", "https://example.com/agent-1.png");
   });
 
-  it("falls back to the generic bot avatar for a run with no attribution", () => {
-    const { container } = renderMessage(assistantMessage());
+  // A direct provider/model run carries no attribution; an agentId that no
+  // longer resolves (deleted agent) has to degrade the same way.
+  it.each([
+    ["a run with no attribution", undefined],
+    ["an agentId that resolves to no agent", { agentId: "gone" }],
+  ] as const)("falls back to the generic bot avatar for %s", (_, metadata) => {
+    const { container } = renderMessage(assistantMessage(metadata));
 
     expect(screen.queryByAltText("Research Agent")).toBeNull();
-    expect(container.querySelector("svg.lucide-bot")).not.toBeNull();
-  });
-
-  it("falls back to the generic bot avatar when the agent is unknown", () => {
-    const { container } = renderMessage(assistantMessage({ agentId: "gone" }));
-
-    expect(screen.queryByAltText("Research Agent")).toBeNull();
-    expect(container.querySelector("svg.lucide-bot")).not.toBeNull();
+    // The fallback is our own `bg-muted` circle wrapping an icon — asserted
+    // via markup we own rather than a lucide-generated class name.
+    expect(container.querySelector("div.bg-muted > svg")).not.toBeNull();
   });
 });
