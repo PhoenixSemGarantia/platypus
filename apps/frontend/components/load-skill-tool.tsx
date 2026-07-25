@@ -10,7 +10,7 @@ import {
 import type { ToolUIPart } from "ai";
 import type { ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
-import { type PlatypusTools } from "@platypus/backend/src/types";
+import { type CustomUITools } from "@platypus/backend/src/types";
 
 const getStatusBadge = (status: ToolUIPart["state"]) => {
   const labels: Record<ToolUIPart["state"], string> = {
@@ -41,16 +41,23 @@ const getStatusBadge = (status: ToolUIPart["state"]) => {
   );
 };
 
+/**
+ * `loadSkill` is enumerated in `CustomUITools`, so its part carries real
+ * input/output types — no assertion needed to read them.
+ */
+type LoadSkillToolPart = Extract<
+  ToolUIPart<CustomUITools>,
+  { type: "tool-loadSkill" }
+>;
+
 interface LoadSkillToolProps {
-  toolPart: ToolUIPart;
+  toolPart: LoadSkillToolPart;
 }
 
 export const LoadSkillTool = ({ toolPart }: LoadSkillToolProps) => {
-  const input = toolPart.input as PlatypusTools["loadSkill"]["input"];
-  const output = toolPart.output as PlatypusTools["loadSkill"]["output"];
+  const { input, output } = toolPart;
   const errorText =
-    toolPart.errorText ||
-    (output && "error" in output ? (output.error as string) : null);
+    toolPart.errorText || (output && "error" in output ? output.error : null);
 
   return (
     <div className="not-prose mb-4 w-full rounded-md border">

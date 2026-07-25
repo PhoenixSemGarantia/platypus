@@ -268,14 +268,20 @@ The `ChatMessage` component in `apps/frontend/components/chat-message.tsx` check
 **Steps to add custom tool UI:**
 
 1. **Create component** in `/apps/frontend/components/your-tool.tsx`
-2. **Add conditional rendering** in `chat-message.tsx` (before the generic `tool-*` fallback):
+2. **Add the tool to `CustomUITools`** in `apps/backend/src/types.ts`. That type
+   enumerates only the tools with bespoke UI — being listed there is what gives
+   your tool part real `input`/`output` types instead of `unknown`.
+3. **Add conditional rendering** in `chat-message.tsx` (before the generic `tool-*` fallback):
    ```typescript
    else if (part.type === "tool-yourToolName") {
-     return <YourToolComponent toolPart={part as ToolUIPart} />;
+     return <YourToolComponent toolPart={part} />;
    }
    ```
-3. **Import component** at top of `chat-message.tsx`
-4. **Handle tool states**: `input-streaming`, `input-available`, `output-available`, `output-error`
+   No cast is needed — matching the literal `type` narrows the part. The generic
+   fallback branches use the `isToolUIPart` guard from `ai`, since plugin- and
+   MCP-contributed tools aren't known at compile time.
+4. **Import component** at top of `chat-message.tsx`
+5. **Handle tool states**: `input-streaming`, `input-available`, `output-available`, `output-error`
 
 **Existing custom tool components** (check `apps/frontend/components/` for current list):
 

@@ -30,9 +30,9 @@ import {
 import { DynamicToolHeader } from "./dynamic-tool-header";
 import {
   DynamicToolUIPart,
-  ToolUIPart,
   FileUIPart,
   TextUIPart,
+  isToolUIPart,
   type ChatStatus,
 } from "ai";
 import { Agent } from "@platypus/schemas";
@@ -99,8 +99,7 @@ export const ChatMessage = memo(function ChatMessage({
   onCopyMessage,
   copiedMessageId,
 }: ChatMessageProps) {
-  const messageAgentId = (message.metadata as Record<string, unknown>)
-    ?.agentId as string | undefined;
+  const messageAgentId = message.metadata?.agentId;
   const messageAgent = messageAgentId
     ? agents.find((a) => a.id === messageAgentId)
     : undefined;
@@ -223,39 +222,29 @@ export const ChatMessage = memo(function ChatMessage({
             </Tool>
           );
         } else if (part.type === "tool-loadSkill") {
-          return (
-            <LoadSkillTool
-              key={`${message.id}-${i}`}
-              toolPart={part as ToolUIPart}
-            />
-          );
-        } else if (part.type.startsWith("tool-delegateTo")) {
+          return <LoadSkillTool key={`${message.id}-${i}`} toolPart={part} />;
+        } else if (
+          isToolUIPart(part) &&
+          part.type.startsWith("tool-delegateTo")
+        ) {
           // Sub-agent tools get custom UI with robot icon and nested chat
-          return (
-            <SubAgentTool
-              key={`${message.id}-${i}`}
-              toolPart={part as ToolUIPart}
-            />
-          );
-        } else if (part.type.startsWith("tool-")) {
-          const toolPart = part as ToolUIPart;
-          const toolInput = toolPart.input as
-            Record<string, unknown> | undefined;
+          return <SubAgentTool key={`${message.id}-${i}`} toolPart={part} />;
+        } else if (isToolUIPart(part)) {
+          // Plugin- and MCP-contributed tools aren't enumerated in the part
+          // union (see `CustomUITools`), so they land on the generic renderer.
+          const toolInput = part.input as Record<string, unknown> | undefined;
           const toolLabel = (toolInput?.label ?? toolInput?.name) as
             string | undefined;
           return (
             <Tool key={`${message.id}-${i}`}>
               <ToolHeader
-                state={toolPart.state}
-                type={toolPart.type}
+                state={part.state}
+                type={part.type}
                 label={toolLabel}
               />
               <ToolContent>
-                <ToolInput input={toolPart.input} />
-                <ToolOutput
-                  output={toolPart.output}
-                  errorText={toolPart.errorText}
-                />
+                <ToolInput input={part.input} />
+                <ToolOutput output={part.output} errorText={part.errorText} />
               </ToolContent>
             </Tool>
           );
