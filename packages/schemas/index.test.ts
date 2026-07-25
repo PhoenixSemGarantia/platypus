@@ -16,6 +16,9 @@ import {
   SANDBOX_ENV_MAX_VALUE_BYTES,
   providerCreateSchema,
   classifyFile,
+  extractableDocumentFormat,
+  resolveExtractedTextCap,
+  DEFAULT_MAX_EXTRACTED_TEXT_CHARS,
 } from "./index";
 
 describe("Organization Schema", () => {
@@ -390,6 +393,39 @@ describe("Provider modelIds (per-model config)", () => {
       providerCreateSchema.safeParse({ ...base, modelIds: [] }).success,
     ).toBe(false);
   });
+
+  it("accepts a per-model maxExtractedTextChars override", () => {
+    const result = providerCreateSchema.safeParse({
+      ...base,
+      modelIds: [{ id: "qwen", maxExtractedTextChars: 20000 }],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.modelIds[0].maxExtractedTextChars).toBe(20000);
+    }
+  });
+
+  it("leaves maxExtractedTextChars undefined when not declared", () => {
+    const result = providerCreateSchema.safeParse({
+      ...base,
+      modelIds: [{ id: "qwen" }],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.modelIds[0].maxExtractedTextChars).toBeUndefined();
+    }
+  });
+
+  it("rejects a non-positive or fractional maxExtractedTextChars", () => {
+    for (const value of [0, -1, 1.5]) {
+      expect(
+        providerCreateSchema.safeParse({
+          ...base,
+          modelIds: [{ id: "qwen", maxExtractedTextChars: value }],
+        }).success,
+      ).toBe(false);
+    }
+  });
 });
 
 describe("Organization identityContext", () => {
@@ -498,12 +534,103 @@ describe("classifyFile", () => {
     ).toBe("reject");
   });
 
-  it("rejects unsupported binary file types", () => {
+  it("marks a non-native PDF for extraction", () => {
     expect(
       classifyFile(
         { mediaType: "application/pdf", filename: "report.pdf" },
         passthroughFileTypes,
       ),
+    ).toBe("extract");
+  });
+
+  it("marks a non-native DOCX for extraction", () => {
+    expect(
+      classifyFile(
+        {
+          mediaType:
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          filename: "spec.docx",
+        },
+        passthroughFileTypes,
+      ),
+    ).toBe("extract");
+  });
+
+  it("still rejects binary types nothing can extract", () => {
+    expect(
+      classifyFile(
+        { mediaType: "application/zip", filename: "bundle.zip" },
+        passthroughFileTypes,
+      ),
     ).toBe("reject");
+    expect(
+      classifyFile(
+        { mediaType: "application/octet-stream", filename: "blob.bin" },
+        passthroughFileTypes,
+      ),
+    ).toBe("reject");
+  });
+
+  it("prefers native passthrough over extraction", () => {
+    expect(
+      classifyFile({ mediaType: "application/pdf", filename: "report.pdf" }, [
+        "application/pdf",
+      ]),
+    ).toBe("passthrough");
+  });
+});
+
+describe("extractableDocumentFormat", () => {
+  it("recognizes PDF and DOCX by extension regardless of case", () => {
+    expect(extractableDocumentFormat({ filename: "report.PDF" })).toBe("pdf");
+    expect(extractableDocumentFormat({ filename: "spec.docx" })).toBe("docx");
+  });
+
+  it("recognizes PDF and DOCX by media type when the filename is missing", () => {
+    expect(extractableDocumentFormat({ mediaType: "application/pdf" })).toBe(
+      "pdf",
+    );
+    expect(
+      extractableDocumentFormat({
+        mediaType:
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      }),
+    ).toBe("docx");
+  });
+
+  it("prefers the extension over a mismatched media type", () => {
+    expect(
+      extractableDocumentFormat({
+        mediaType: "application/octet-stream",
+        filename: "spec.docx",
+      }),
+    ).toBe("docx");
+  });
+
+  it("does not claim formats Phase 2 cannot extract", () => {
+    for (const filename of ["sheet.xlsx", "slides.pptx", "legacy.doc"]) {
+      expect(extractableDocumentFormat({ filename })).toBeNull();
+    }
+    expect(extractableDocumentFormat({})).toBeNull();
+  });
+});
+
+describe("resolveExtractedTextCap", () => {
+  it("keeps a positive declared cap", () => {
+    expect(resolveExtractedTextCap(8000)).toBe(8000);
+  });
+
+  it("falls back to the default for a missing or nonsense cap", () => {
+    for (const value of [
+      undefined,
+      0,
+      -5,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+    ]) {
+      expect(resolveExtractedTextCap(value)).toBe(
+        DEFAULT_MAX_EXTRACTED_TEXT_CHARS,
+      );
+    }
   });
 });

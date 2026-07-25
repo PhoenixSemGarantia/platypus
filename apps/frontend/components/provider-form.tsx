@@ -45,7 +45,10 @@ import { Switch } from "@/components/ui/switch";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { type Provider } from "@platypus/schemas";
+import {
+  DEFAULT_MAX_EXTRACTED_TEXT_CHARS,
+  type Provider,
+} from "@platypus/schemas";
 import useSWR from "swr";
 import { fetcher, parseValidationErrors, joinUrl } from "@/lib/utils";
 import {
@@ -285,6 +288,13 @@ const ProviderForm = ({
       .split(",")
       .map((t) => t.trim())
       .filter((t) => t.length > 0);
+
+  // An empty (or nonsense) cap means "use the shared default" rather than 0 —
+  // sending 0 would truncate every extracted document to nothing (issue #342).
+  const parseExtractedTextCap = (value: string): number | undefined => {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+  };
 
   // Placeholder for the native-file-types input: the provider-type default an
   // empty field falls back to at resolve time (e.g. images-only for an OpenAI
@@ -615,6 +625,29 @@ const ProviderForm = ({
                         disabled={isSubmitting || isReadOnly}
                       />
                     </div>
+                    <div className="flex flex-col gap-1">
+                      <FieldLabel
+                        htmlFor={`extracted-chars-${index}`}
+                        className="text-xs text-muted-foreground"
+                      >
+                        Max extracted text characters
+                      </FieldLabel>
+                      <Input
+                        id={`extracted-chars-${index}`}
+                        type="number"
+                        min={1}
+                        placeholder={String(DEFAULT_MAX_EXTRACTED_TEXT_CHARS)}
+                        value={model.maxExtractedTextChars ?? ""}
+                        onChange={(e) =>
+                          updateModel(index, {
+                            maxExtractedTextChars: parseExtractedTextCap(
+                              e.target.value,
+                            ),
+                          })
+                        }
+                        disabled={isSubmitting || isReadOnly}
+                      />
+                    </div>
                   </div>
                   <Button
                     type="button"
@@ -646,9 +679,12 @@ const ProviderForm = ({
               Models this provider exposes. For each model, list the file media
               types it can ingest <strong>natively</strong> (comma-separated,
               wildcards like <code>image/*</code> allowed). Files of other types
-              are converted to text where possible — this is a capability
+              are converted to text where possible — text and code files are
+              inlined, PDF and DOCX are extracted — so this is a capability
               setting, <strong>not a security filter</strong>. Leave the types
-              empty to use the provider-type default.
+              empty to use the provider-type default. The character cap limits
+              how much extracted document text a single file may add, protecting
+              a small context window.
             </FieldDescription>
             {validationErrors.modelIds && (
               <FieldError>{validationErrors.modelIds}</FieldError>
