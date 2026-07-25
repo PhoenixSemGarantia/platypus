@@ -49,6 +49,18 @@ import { Textarea } from "./ui/textarea";
 import { LoadSkillTool } from "./load-skill-tool";
 import { SubAgentTool } from "./sub-agent-tool";
 
+/**
+ * Re-type a `tool-` prefixed message part as a tool part.
+ *
+ * Only tools with bespoke UI are enumerated in the message's static part union
+ * (see `CustomUITools` in the backend types); plugin- and MCP-contributed
+ * tools are not known at compile time, so the runtime `tool-` prefix is the
+ * only signal we have. Intersecting keeps the assertion honest — the result is
+ * still the part we were handed.
+ */
+const asToolUIPart = <T extends { type: string }>(part: T) =>
+  part as T & ToolUIPart;
+
 interface ChatMessageProps {
   /** The message object to render */
   message: PlatypusUIMessage;
@@ -99,8 +111,7 @@ export const ChatMessage = memo(function ChatMessage({
   onCopyMessage,
   copiedMessageId,
 }: ChatMessageProps) {
-  const messageAgentId = (message.metadata as Record<string, unknown>)
-    ?.agentId as string | undefined;
+  const messageAgentId = message.metadata?.agentId;
   const messageAgent = messageAgentId
     ? agents.find((a) => a.id === messageAgentId)
     : undefined;
@@ -234,11 +245,11 @@ export const ChatMessage = memo(function ChatMessage({
           return (
             <SubAgentTool
               key={`${message.id}-${i}`}
-              toolPart={part as ToolUIPart}
+              toolPart={asToolUIPart(part)}
             />
           );
         } else if (part.type.startsWith("tool-")) {
-          const toolPart = part as ToolUIPart;
+          const toolPart = asToolUIPart(part);
           const toolInput = toolPart.input as
             Record<string, unknown> | undefined;
           const toolLabel = (toolInput?.label ?? toolInput?.name) as

@@ -10,7 +10,7 @@ import {
 import type { ToolUIPart } from "ai";
 import type { ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
-import { type PlatypusTools } from "@platypus/backend/src/types";
+import { type CustomUITools } from "@platypus/backend/src/types";
 
 const getStatusBadge = (status: ToolUIPart["state"]) => {
   const labels: Record<ToolUIPart["state"], string> = {
@@ -46,8 +46,8 @@ interface LoadSkillToolProps {
 }
 
 export const LoadSkillTool = ({ toolPart }: LoadSkillToolProps) => {
-  const input = toolPart.input as PlatypusTools["loadSkill"]["input"];
-  const output = toolPart.output as PlatypusTools["loadSkill"]["output"];
+  const input = toolPart.input as CustomUITools["loadSkill"]["input"];
+  const output = toolPart.output as CustomUITools["loadSkill"]["output"];
   const errorText =
     toolPart.errorText ||
     (output && "error" in output ? (output.error as string) : null);
