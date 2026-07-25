@@ -88,9 +88,40 @@ run sooner.
 
 ## Tools
 
-| Variable       | Purpose                                                          | Default                 | Required |
-| -------------- | ---------------------------------------------------------------- | ----------------------- | -------- |
-| `FRONTEND_URL` | Frontend URL used to build resource links inside tool responses. | `http://localhost:3001` | No       |
+| Variable                        | Purpose                                                                                                                                   | Default                 | Required |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- | -------- |
+| `FRONTEND_URL`                  | Frontend URL used to build resource links inside tool responses.                                                                          | `http://localhost:3001` | No       |
+| `EGRESS_ALLOW_PRIVATE_NETWORKS` | Whether tools that fetch a **model-chosen** URL may reach private networks (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7`). | `true`                  | No       |
+
+### Egress guard
+
+Any tool that fetches a URL the _model_ picked — the `fetchUrl` tool today, a
+[Web-search backend](/extending)'s `read_url` next — runs the target through a
+core guard first. It resolves the hostname and refuses the fetch if **any**
+resolved address is blocked, so a name with one public and one internal record is
+refused. Non-`http(s)` schemes are refused, and a hostname that fails to resolve
+fails closed.
+
+Blocked whatever `EGRESS_ALLOW_PRIVATE_NETWORKS` says, because no legitimate page
+read targets them: loopback (`127.0.0.0/8`, `::1`), `0.0.0.0/8` (which reaches
+localhost on Linux), link-local (`169.254.0.0/16`, `fe80::/10`) where AWS, Azure
+and GCP serve instance metadata, and `100.64.0.0/10`, home to Alibaba Cloud's
+metadata service at `100.100.100.200`.
+
+Private networks are **allowed by default** — the opposite of a textbook
+default-deny — because reading an internal wiki or intranet page is a first-class
+use case for self-hosted deployments. Set
+`EGRESS_ALLOW_PRIVATE_NETWORKS=false` on an internet-facing deployment where
+Agents have no reason to read internal hosts.
+
+<Callout type="warning">
+  The guard is a pre-flight check on the URL, so it removes the easy path rather
+  than every path. Redirects are followed by the HTTP client after the check,
+  and `fetch()` resolves the hostname again independently — so a host that
+  passes and then redirects inward, or whose DNS records change in between, is
+  not caught. Treat it as defence against a prompt-injected model, not as an
+  SSRF boundary.
+</Callout>
 
 `robots.txt` handling for the fetch tool moved to plugin config: set
 `config.ignoreRobotsTxt` on `@platypus/web-fetch` via `PLATYPUS_PLUGIN_CONFIG`
