@@ -130,11 +130,12 @@ From the dashboard's **Agents** section, click **Create agent**.
 - **Name** — what to call the agent.
 - **Model** — pick one of the models you enabled on your Provider (the dropdown
   groups models under each Provider).
-- **System prompt** _(optional)_ — instructions that shape its behaviour, e.g.
-  _"You are a concise, helpful assistant."_
+- **Instructions** _(optional)_ — how the assistant should behave, e.g. _"You are
+  a concise, helpful assistant."_ Platypus composes the system prompt around
+  this; see [The system prompt](/concepts/system-prompt).
 
-Click **Save**. An **Agent** pins a Provider, model, and prompt (and, later,
-Tools, Skills, and Sub-Agents) into a reusable preset.
+Click **Save**. An **Agent** pins a Provider, model, and Instructions (and,
+later, Tools, Skills, and Sub-Agents) into a reusable preset.
 
 ### Start a Chat and send a message
 

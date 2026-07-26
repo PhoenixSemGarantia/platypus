@@ -9,6 +9,7 @@ const meta = {
   sandboxes: "Sandboxes",
   skills: "Skills",
   "memory-and-context": "Memory & context",
+  "system-prompt": "The system prompt",
   sharing: "Sharing across workspaces",
 };
 

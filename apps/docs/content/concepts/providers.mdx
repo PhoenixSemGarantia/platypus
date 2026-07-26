@@ -98,9 +98,11 @@ steering. Put the guarding where the weakness is.
   authentication](/self-hosting/providers-and-auth) for the three-layer model.
 </Callout>
 
-The field is **append-only and non-suppressible**: an Agent's own system prompt
-cannot opt out of it. The escape hatch is to point the Agent at a different
-Provider.
+The field is **append-only and non-suppressible**: an Agent's own **Instructions**
+cannot opt out of it — they are the _first_ fragment of the composed system
+prompt, and this is the last (see [The system
+prompt](/concepts/system-prompt)). The escape hatch is to point the Agent at a
+different Provider.
 
 ### Starter snippets
 
