@@ -1,16 +1,14 @@
 import { serve } from "@hono/node-server";
 import app from "./src/server.ts";
 import { db } from "./src/index.ts";
-import {
-  organization,
-  workspace,
-  organizationMember,
-  user,
-} from "./src/db/schema.ts";
-import { nanoid } from "nanoid";
-import { count, eq, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { auth } from "./src/auth.ts";
 import { logger } from "./src/logger.ts";
+import {
+  NonRetryableSeedError,
+  seedFirstBoot,
+  type AdminSignUp,
+} from "./src/db/seed.ts";
 import { startMemoryScheduler } from "./src/jobs/memory-scheduler.ts";
 import { startTriggerScheduler } from "./src/jobs/trigger-scheduler.ts";
 import { loadPlugins } from "./src/plugins/loader.ts";
@@ -18,90 +16,39 @@ import { setLoadedPlugins } from "./src/plugins/registry.ts";
 
 const PORT = process.env.PORT || "4001";
 
+/** The production admin-User creator handed to the seed: better-auth sign-up. */
+const signUpAdmin: AdminSignUp = async (input) => {
+  const result = await auth.api.signUpEmail({ body: input });
+  if (!result.user) {
+    throw new Error("Sign up returned no user");
+  }
+  return { id: result.user.id };
+};
+
 const main = async () => {
   logger.info(`Serving on port: ${PORT}`);
 
-  await exponentialBackoff(async () => {
-    // Enable pgvector extension for embedding storage (needed before drizzle-kit push in dev)
-    await db.execute(sql`CREATE EXTENSION IF NOT EXISTS vector`);
+  // A seed that cannot complete must not reach `serve()`: an HTTP server nobody
+  // can authenticate against reports healthy while being unusable (#369). Retry
+  // the transient failures, then exit non-zero so the orchestrator says so.
+  try {
+    await exponentialBackoff(async () => {
+      // Enable pgvector extension for embedding storage (needed before drizzle-kit push in dev)
+      await db.execute(sql`CREATE EXTENSION IF NOT EXISTS vector`);
 
-    const [orgCount] = await db.select({ value: count() }).from(organization);
-
-    if (orgCount.value === 0) {
-      logger.info("No organizations found. Creating initial organization...");
-      const orgId = nanoid();
-      await db.insert(organization).values({
-        id: orgId,
-        name: "Default Organization",
-      });
-      logger.info(`- Organization created: ${orgId}`);
-
-      logger.info("Creating default user...");
-      const defaultEmail = process.env.ADMIN_EMAIL;
-      const defaultPassword = process.env.ADMIN_PASSWORD;
-
-      if (!defaultEmail || !defaultPassword) {
-        throw new Error(
-          "ADMIN_EMAIL and ADMIN_PASSWORD environment variables are required for initial setup",
-        );
-      }
-
-      try {
-        const result = await auth.api.signUpEmail({
-          body: {
-            email: defaultEmail,
-            password: defaultPassword,
-            name: "Admin User",
-          },
-        });
-
-        if (!result.user) {
-          throw new Error("Failed to get user from sign up response");
-        }
-
-        logger.info(`- User created: ${defaultEmail}`);
-
-        // Update role to admin and verify email after creation
-        await db
-          .update(user)
-          .set({ role: "admin", emailVerified: true })
-          .where(eq(user.id, result.user.id));
-
-        logger.info(`- User upgraded to admin role`);
-
-        // Create organization membership with admin role
-        logger.info("Creating organization membership...");
-        await db.insert(organizationMember).values({
-          id: nanoid(),
-          organizationId: orgId,
-          userId: result.user.id,
-          role: "admin",
-        });
-        logger.info(`- Organization membership created for ${defaultEmail}`);
-
-        // Create default workspace owned by the admin user
-        logger.info("Creating initial workspace...");
-        const workspaceId = nanoid();
-        await db.insert(workspace).values({
-          id: workspaceId,
-          organizationId: orgId,
-          ownerId: result.user.id,
-          name: "Default Workspace",
-        });
-        logger.info(`- Workspace created: ${workspaceId}`);
-
-        logger.info(
-          `- Default credentials: ${defaultEmail} / ${defaultPassword}`,
-        );
-        logger.info(
-          "⚠️  Please change the default password after first login!",
-        );
-      } catch (error) {
-        logger.error({ error }, "Failed to create default user");
-        throw error;
-      }
-    }
-  });
+      await seedFirstBoot(db, { signUpAdmin });
+    });
+  } catch (error) {
+    // The message goes in the log line, not just the serialised error: it is
+    // the one thing the Operator has to work from (#369).
+    logger.fatal(
+      { err: error },
+      `Startup failed, not starting the HTTP server: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    process.exit(1);
+  }
 
   // Load plugins before the HTTP server accepts traffic so their Tool set
   // contributions are registered by the time Chat turns resolve tools. Fail-loud
@@ -145,9 +92,11 @@ const exponentialBackoff = async <T>(
   try {
     return await fn();
   } catch (error) {
-    if (retries > 0) {
+    // A missing environment variable or input better-auth rejected fails the
+    // same way every time — retrying only delays the message the Operator needs.
+    if (retries > 0 && !(error instanceof NonRetryableSeedError)) {
       logger.warn(
-        { error },
+        { err: error },
         `Operation failed, retrying in ${delay / 1000} seconds...`,
       );
       await new Promise((resolve) => setTimeout(resolve, delay));
