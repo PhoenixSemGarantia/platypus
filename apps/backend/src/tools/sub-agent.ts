@@ -64,7 +64,7 @@ interface SubAgentToolOptions {
   id: string;
   name: string;
   description?: string;
-  systemPrompt?: string;
+  instructions?: string;
   model: LanguageModel;
   tools: Record<string, Tool>;
   maxSteps?: number;
@@ -91,7 +91,7 @@ export const createSubAgentTool = (options: SubAgentToolOptions) => {
   const {
     name,
     description,
-    systemPrompt,
+    instructions,
     model,
     tools,
     maxSteps = 50,
@@ -102,20 +102,21 @@ export const createSubAgentTool = (options: SubAgentToolOptions) => {
   const toolName = subAgentToolName({ name });
 
   // Append the provider's security directives to the base instructions —
-  // whether those come from the sub-agent's own systemPrompt OR the canned
-  // fallback. Appending only to systemPrompt would silently drop guardrails for
-  // prompt-less sub-agents, breaking the non-suppressible guarantee.
+  // whether those come from the sub-agent's own instructions OR the canned
+  // fallback. Appending only to the sub-agent's own instructions would silently
+  // drop guardrails for instruction-less sub-agents, breaking the
+  // non-suppressible guarantee.
   const baseInstructions =
-    systemPrompt ||
+    instructions ||
     `You are a specialized sub-agent named "${name}". Complete the task you are given thoroughly and accurately.`;
   const securityBlock = renderSecurityGuardrails(securityGuardrails);
-  const instructions = securityBlock
+  const composedInstructions = securityBlock
     ? `${baseInstructions}\n\n${securityBlock}`
     : baseInstructions;
 
   const agent = new ToolLoopAgent({
     model,
-    instructions,
+    instructions: composedInstructions,
     tools,
     stopWhen: [stepCountIs(maxSteps)],
   });
@@ -246,7 +247,7 @@ export const createSubAgentTools = async (
     id: string;
     name: string;
     description?: string | null;
-    systemPrompt?: string | null;
+    instructions?: string | null;
     providerId: string;
     modelId: string;
     toolSetIds?: string[] | null;
@@ -283,7 +284,7 @@ export const createSubAgentTools = async (
         id: subAgent.id,
         name: subAgent.name,
         description: subAgent.description || undefined,
-        systemPrompt: subAgent.systemPrompt || undefined,
+        instructions: subAgent.instructions || undefined,
         model,
         tools: subAgentTools,
         maxSteps: subAgent.maxSteps || 50,

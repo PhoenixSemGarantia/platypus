@@ -115,7 +115,7 @@ export type ChatTurnRequest = {
   providerId?: string;
   modelId?: string;
   search?: boolean;
-  systemPrompt?: string;
+  instructions?: string;
   temperature?: number;
   topP?: number;
   topK?: number;
@@ -142,7 +142,7 @@ export type ChatTurn = {
     agentId?: string;
     providerId: string;
     modelId: string;
-    systemPrompt?: string;
+    instructions?: string;
     temperature?: number;
     topP?: number;
     topK?: number;
@@ -550,7 +550,7 @@ export const prepareChatTurn = async (
     skills,
     subAgents,
     sandboxEnvKeys,
-    fallbackSystemPrompt: request.systemPrompt,
+    fallbackInstructions: request.instructions,
     runMode,
     securityGuardrails: provider.securityGuardrails,
     organizationIdentityContext: organization?.identityContext,
@@ -634,13 +634,14 @@ export const prepareChatTurn = async (
       // Only Direct (no-Agent) turns persist generation params on the row;
       // Agent-driven turns read them back from the Agent record.
       //
-      // The prompt persisted here is the user's OWN text, never the composed
-      // prompt above: this column backs the editable prompt box in Chat
-      // settings, so writing the composite made the workspace context, the
-      // user's identity, memories and the provider's guardrails reappear as
-      // editable text — and compound on every turn (issue #365). What the model
-      // receives is unaffected; `stream.system` still carries the composite.
-      systemPrompt: agent ? undefined : request.systemPrompt,
+      // What is persisted here is the user's OWN instructions, never the
+      // composed system prompt above: this column backs the editable
+      // Instructions box in Chat settings, so writing the composite made the
+      // workspace context, the user's identity, memories and the provider's
+      // guardrails reappear as editable text — and compound on every turn
+      // (issue #365). What the model receives is unaffected; `stream.system`
+      // still carries the composite.
+      instructions: agent ? undefined : request.instructions,
       temperature: agent ? undefined : generation.temperature,
       topP: agent ? undefined : generation.topP,
       topK: agent ? undefined : generation.topK,

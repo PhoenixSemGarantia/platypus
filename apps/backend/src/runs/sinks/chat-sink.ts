@@ -221,7 +221,7 @@ export class ChatSink implements RunSink {
       agentId: resolved.agentId ?? null,
       providerId: resolved.agentId ? null : resolved.providerId,
       modelId: resolved.agentId ? null : resolved.modelId,
-      systemPrompt: resolved.systemPrompt ?? null,
+      instructions: resolved.instructions ?? null,
       temperature: resolved.temperature ?? null,
       topP: resolved.topP ?? null,
       topK: resolved.topK ?? null,

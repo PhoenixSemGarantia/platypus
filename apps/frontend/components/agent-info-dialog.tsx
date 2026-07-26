@@ -73,9 +73,9 @@ export const AgentInfoDialog = ({
           </div>
         </div>
         <div className="grid gap-2">
-          <Label>System Prompt</Label>
+          <Label>Instructions</Label>
           <div className="text-sm bg-muted p-2 rounded whitespace-pre-wrap break-words overflow-hidden cursor-default">
-            {agent.systemPrompt || "No system prompt set"}
+            {agent.instructions || "No instructions set"}
           </div>
         </div>
         <div className="grid gap-2">

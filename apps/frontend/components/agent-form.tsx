@@ -140,7 +140,7 @@ const AgentForm = ({
     name: "",
     description: "",
     inputPlaceholder: "",
-    systemPrompt: "",
+    instructions: "",
     providerId: "",
     modelId: "",
     maxSteps: 15,
@@ -191,7 +191,7 @@ const AgentForm = ({
         name: agent.name,
         description: agent.description,
         inputPlaceholder: agent.inputPlaceholder || "",
-        systemPrompt: agent.systemPrompt || "",
+        instructions: agent.instructions || "",
         providerId: agent.providerId,
         modelId: agent.modelId,
         maxSteps: agent.maxSteps || 15,
@@ -325,7 +325,7 @@ const AgentForm = ({
         name: formData.name,
         description: formData.description,
         inputPlaceholder: formData.inputPlaceholder || undefined,
-        systemPrompt: formData.systemPrompt,
+        instructions: formData.instructions,
         modelId: formData.modelId,
         maxSteps: formData.maxSteps,
         // Send null (not undefined) for cleared sampling params so the key
@@ -598,18 +598,23 @@ const AgentForm = ({
               <FieldError>{validationErrors.inputPlaceholder}</FieldError>
             )}
           </Field>
-          <Field data-invalid={!!validationErrors.systemPrompt}>
+          <Field data-invalid={!!validationErrors.instructions}>
             <ExpandableTextarea
-              id="systemPrompt"
-              label="System prompt"
+              id="instructions"
+              label="Instructions"
               placeholder="You are a helpful agent..."
-              value={formData.systemPrompt}
+              value={formData.instructions}
               onChange={handleChange}
               disabled={isSubmitting || readOnly}
               className="!font-mono"
-              aria-invalid={!!validationErrors.systemPrompt}
-              error={validationErrors.systemPrompt}
+              aria-invalid={!!validationErrors.instructions}
+              error={validationErrors.instructions}
             />
+            <FieldDescription>
+              How this Agent should behave. Platypus builds the full system
+              prompt around it, adding workspace and user context, memories,
+              Skills, sub-Agents, and your Provider&apos;s security guardrails.
+            </FieldDescription>
           </Field>
           {/* Provider and model are chosen from one control, so surface either
               field's server error on the single Model field. */}

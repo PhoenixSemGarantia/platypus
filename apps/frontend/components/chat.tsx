@@ -228,7 +228,7 @@ export const Chat = ({
   // Extract values from hooks for easier access
   const { agentId, modelId, providerId } = selection;
   const {
-    systemPrompt,
+    instructions,
     temperature,
     topP,
     topK,
@@ -261,7 +261,7 @@ export const Chat = ({
       : {
           providerId,
           modelId,
-          systemPrompt: systemPrompt || undefined,
+          instructions: instructions || undefined,
           temperature,
           topP,
           topK,
@@ -276,7 +276,7 @@ export const Chat = ({
     agentId,
     providerId,
     modelId,
-    systemPrompt,
+    instructions,
     temperature,
     topP,
     topK,
@@ -642,8 +642,8 @@ export const Chat = ({
                           <TooltipContent>Settings</TooltipContent>
                         </Tooltip>
                         <ChatSettingsDialog
-                          systemPrompt={systemPrompt}
-                          onSystemPromptChange={setters.setSystemPrompt}
+                          instructions={instructions}
+                          onInstructionsChange={setters.setInstructions}
                           temperature={temperature}
                           onTemperatureChange={setters.setTemperature}
                           seed={seed}
