@@ -26,16 +26,16 @@ provider type by overriding the base URL.
 
 ### What a Provider holds
 
-| Field                | Meaning                                                                                                   |
-| -------------------- | --------------------------------------------------------------------------------------------------------- |
-| `name`               | A human label for the connection.                                                                         |
-| `providerType`       | The vendor (`OpenAI`, `OpenRouter`, `Bedrock`, `Google`, `Anthropic`).                                    |
-| `apiKey`             | The vendor credential.                                                                                    |
-| `baseUrl`            | Optional override for OpenAI-compatible / self-hosted endpoints.                                          |
-| `region`             | Required for Bedrock (AWS region).                                                                        |
-| `modelIds`           | The set of models this Provider exposes for selection (at least one).                                     |
-| `taskModelId`        | The model used for one-shot internal tasks (e.g. generating a chat title), not chat turns.                |
-| `securityGuardrails` | Optional free-text security directives appended last in the system prompt for every run on this Provider. |
+| Field                | Meaning                                                                                                                                                         |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`               | A human label for the connection.                                                                                                                               |
+| `providerType`       | The vendor (`OpenAI`, `OpenRouter`, `Bedrock`, `Google`, `Anthropic`).                                                                                          |
+| `apiKey`             | The vendor credential.                                                                                                                                          |
+| `baseUrl`            | Optional override for OpenAI-compatible / self-hosted endpoints.                                                                                                |
+| `region`             | Required for Bedrock (AWS region).                                                                                                                              |
+| `modelIds`           | The models this Provider exposes for selection (at least one). Each entry carries its own config — see [File handling](#file-handling-what-each-model-accepts). |
+| `taskModelId`        | The model used for one-shot internal tasks (e.g. generating a chat title), not chat turns.                                                                      |
+| `securityGuardrails` | Optional free-text security directives appended last in the system prompt for every run on this Provider.                                                       |
 
 A Provider also carries the models used for **Memory** (extraction and
 embeddings), so background memory features have a model to call.
@@ -46,6 +46,58 @@ embeddings), so background memory features have a model to call.
   which uses `taskModelId`) is part of the domain vocabulary — see
   [Concepts](/concepts).
 </Callout>
+
+### File handling: what each model accepts
+
+Whether a model can read an attached file is a property of the
+`(Provider, model)` pair, and behind a proxy Platypus has no way to infer it —
+model names there are whatever the operator chose. So capability is **declared,
+not guessed**: each entry in `modelIds` is a per-model object.
+
+| Per-model field         | Meaning                                                                                                                                                       |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                    | The model id sent to the vendor.                                                                                                                              |
+| `passthroughFileTypes`  | The media types this model ingests **natively**. Comma-separated in the UI; wildcards like `image/*` allowed. Empty inherits the provider-type default below. |
+| `maxExtractedTextChars` | Cap on the text a single extracted document may add to a turn. Empty uses the default (50,000 characters).                                                    |
+
+On every chat turn, each attached file takes exactly one of these routes:
+
+| Route                  | When                                                      | What the model receives                                                           |
+| ---------------------- | --------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| **Native passthrough** | The file's type matches `passthroughFileTypes`            | The real file, byte-for-byte unchanged                                            |
+| **Inlined as text**    | The file is genuinely textual (code, Markdown, CSV, JSON) | Its contents in a fenced block, labelled with the filename                        |
+| **Extracted**          | A PDF or DOCX the model can't take natively               | Annotated text pulled out of the document, capped and truncated with a notice     |
+| **Refused**            | Anything else — or a document with no readable text       | Nothing: the turn is rejected up front, naming the file, and nothing is persisted |
+
+Text-vs-binary is decided from the file's real nature (extension plus a content
+sniff), never from the browser-supplied media type — that value is an
+OS-specific lottery in which `.py` arrives as `text/x-python` while `.md` arrives
+as `application/octet-stream`.
+
+An empty `passthroughFileTypes` inherits a default from the provider type:
+
+| Provider                                   | Inherited default                    |
+| ------------------------------------------ | ------------------------------------ |
+| Anthropic, Google, Bedrock                 | Images and PDF                       |
+| OpenAI on the Responses API                | Images and PDF                       |
+| OpenAI with `apiMode: "chat"` (incl. vLLM) | Images only                          |
+| OpenRouter                                 | Nothing natively — declare per model |
+
+OpenRouter fronts models whose capabilities vary per model, so no single floor
+can be right; opt each vision-capable model in with an explicit `image/*`.
+
+<Callout type="warning">
+  `passthroughFileTypes` is a **capability router, not a security allow-list**.
+  A type that isn't listed is converted to text where possible — it is never
+  blocked for safety, and this field is not an upload filter. Equally, values
+  aren't validated as real capabilities: declaring `application/pdf` (or the
+  `*/*` escape hatch) on an endpoint that can't actually ingest it forwards the
+  raw file and the vendor rejects the turn.
+</Callout>
+
+Extraction covers text-based PDF and DOCX only. There is no OCR, so a scanned or
+image-only PDF has no text to pull out and is refused like any other unreadable
+binary — attach a text-based version instead.
 
 ### Scope: Organization vs Workspace
 

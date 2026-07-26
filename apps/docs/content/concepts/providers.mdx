@@ -45,6 +45,38 @@ from the Providers available in your Workspace. If a model you expect isn't
 there, it's because no available Provider has it enabled — an Org Admin controls
 that list.
 
+## Attaching files
+
+Not every model can read every file. Which types a model takes **natively** is
+declared per model on the Provider, and what happens to an attachment follows
+from that:
+
+- **It's a type the model reads natively** (usually images, and PDFs on the
+  frontier vendors) — the file goes through untouched.
+- **It's a text or code file** — `.md`, `.csv`, `.json`, `.py`, and friends — its
+  contents are inlined into the message, labelled with the filename. This works
+  regardless of what the model natively accepts.
+- **It's a PDF or DOCX the model can't take natively** — the text is extracted
+  and sent in the file's place, marked as extracted text. This is what makes
+  attachments usable with local and proxied models.
+- **It's anything else** — the turn is refused before it runs, naming the file,
+  and nothing is saved to the Chat. You can remove the file or switch to a model
+  that accepts it.
+
+<Callout type="info">
+  Extracted text is **lossy**: tables, layout, and embedded images don't survive,
+  and a long document is truncated with a note saying so. If fidelity matters,
+  use a model that reads the format natively. There's no OCR, so a scanned
+  (image-only) PDF has no text to extract and is refused.
+</Callout>
+
+**Why this matters to you:** attaching a PDF to a small self-hosted model still
+works, but the model is reading a text rendering of it, not the document. The
+Chat warns you when the model you've selected can't read an attachment natively,
+and refuses up front rather than failing mid-turn. Org Admins configure the
+per-model types — see [Self-Hosting → Providers &
+authentication](/self-hosting/providers-and-auth).
+
 ## Security guardrails
 
 A Provider carries an optional free-text **security guardrails** field. Whatever
