@@ -29,10 +29,18 @@ The plain text pulled out of a binary document (PDF, DOCX) that the target model
 _Avoid_: parsed text, converted file, OCR (Platypus does not OCR).
 
 **Agent**:
-A configurable preset that pins a Provider, model, system prompt, generation parameters, Tools, Skills, and sub-Agents. Selecting an Agent on a Chat turn replaces direct Provider/model selection.
+A configurable preset that pins a Provider, model, Instructions, generation parameters, Tools, Skills, and sub-Agents. Selecting an Agent on a Chat turn replaces direct Provider/model selection.
 
 **Sub-Agent**:
 An Agent referenced by a parent Agent and exposed to it as a delegate Tool.
+
+**Instructions**:
+The free-text behaviour brief a User writes on an Agent — or on a Chat with no Agent. One input to the System prompt rather than the whole of it: it renders as the first fragment and cannot suppress the Platypus-owned fragments that follow.
+_Avoid_: system prompt (that names the composed artefact), prompt, persona.
+
+**System prompt**:
+The single string Platypus composes per Chat turn and sends to the model, assembled from an ordered set of fragments that Platypus owns. Instructions render first and the Provider's security guardrails last; the fragments in between carry Organization, Workspace, User and Agent state. A User authors only the Instructions fragment and cannot suppress the others (ADR-0016). `FRAGMENTS` in `apps/backend/src/system-prompt.ts` is the authority on the order; `apps/docs/content/concepts/system-prompt.mdx` documents it for Users. A Sub-Agent invocation is the exception — it receives only Instructions plus guardrails.
+_Avoid_: prompt, preamble, prompt template.
 
 **Provider**:
 A configured connection to an AI vendor (OpenAI, OpenRouter, Bedrock, Anthropic, Google, …). Carries credentials, base URL, the enabled `modelIds`, and a `taskModelId` for one-shot tasks. Lives at either Organization or Workspace scope.
@@ -132,6 +140,7 @@ The record binding a Conversation locus to a Chat (which carries the Workspace +
 - A **Workspace** has many **Chats**, **Agents**, **MCPs**, and **Skills**, and zero-or-one **Sandbox**.
 - A **Chat** is produced by a sequence of **Chat turns**.
 - A **Chat turn** uses either an **Agent** or a direct **Provider** + model selection.
+- A **Chat turn** renders one **System prompt**, whose first fragment is the **Instructions** of the selected **Agent** — or of the **Chat** itself, where no Agent is selected.
 - An **Agent** references one **Provider**, zero-or-more **Tool sets** (static or **MCP**-backed), zero-or-more **Skills**, and zero-or-more **Sub-Agents**.
 - A **Provider** belongs to either an **Organization** (shared) or a **Workspace** (private).
 - An **Agent**, **Skill**, **MCP**, or **Provider** is a **Scoped resource**: its row carries either an `organizationId` or a `workspaceId`, never both. Resolved relative to a **Workspace**, an Organization-scoped one is a **Shared resource**, visible only through an **Attachment**; a Sandbox-backed **Tool set** instead rebinds to the invoking **Workspace**'s **Sandbox** at Chat-turn time.

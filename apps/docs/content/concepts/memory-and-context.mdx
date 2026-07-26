@@ -12,7 +12,8 @@ activity, beyond the messages in the current Chat: **Memory** and **Context**.
 
 **Memory** is a running summary of your prior activity that an Agent can recall.
 It's kept per person, per **Workspace**, and when an Agent is configured to use
-it, that summary is folded into the Agent's instructions automatically.
+it, that summary is folded into the [system prompt](/concepts/system-prompt)
+automatically — you don't put it in the Agent's Instructions yourself.
 
 **Why you'd use it:** so the assistant doesn't start from scratch every time.
 With Memory, an Agent can carry forward what it learned about your preferences,
@@ -29,9 +30,11 @@ You can set Context at two levels:
 - **global** — notes that apply everywhere you work, or
 - **per-Workspace** — notes specific to one Workspace.
 
-Whatever you put there is rendered into the Agent's instructions, so it's a
-direct way to tell the assistant standing facts: who you are, how you like
-answers formatted, what a project is about.
+Whatever you put there is rendered into the [system
+prompt](/concepts/system-prompt), so it's a direct way to tell the assistant
+standing facts: who you are, how you like answers formatted, what a project is
+about. It reaches every Agent you use, so there's no need to repeat it in any
+Agent's Instructions.
 
 **Memory vs. Context:** Memory is built up automatically from your activity;
 Context is written deliberately by you. They work together — Memory remembers,
@@ -40,9 +43,9 @@ Context instructs.
 ## Organization identity
 
 An **Organization** carries an optional free-text **identity / context** field,
-set by an Org Admin. Whatever you write there is folded into the Agent's
-instructions **early** — as framing, alongside the Workspace context — for every
-chat across the Organization.
+set by an Org Admin. Whatever you write there is folded into the system prompt
+**early** — as framing, alongside the Workspace context — for every chat across
+the Organization.
 
 Use it for standing facts about the organization itself: who you are, what you
 do, house tone, standard terminology. It's the org-wide counterpart to the

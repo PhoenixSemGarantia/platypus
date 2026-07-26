@@ -60,10 +60,10 @@ reply — is a **Chat turn**. A turn runs against either an **Agent** or a direc
 ### Agent
 
 An **Agent** is a reusable preset for how the assistant should behave. Instead of
-picking a model and writing a system prompt every time, you configure an Agent
-once — its **Provider** and model, its system prompt, its tools, its **Skills**,
-and any **Sub-Agents** — and then select it on a Chat. Selecting an Agent
-replaces choosing a Provider and model by hand.
+picking a model and writing instructions every time, you configure an Agent
+once — its **Provider** and model, its **Instructions**, its tools, its
+**Skills**, and any **Sub-Agents** — and then select it on a Chat. Selecting an
+Agent replaces choosing a Provider and model by hand.
 
 Agents are the heart of building with Platypus. The
 [Agents & sub-agents](/concepts/agents) page goes deeper.
@@ -85,5 +85,7 @@ page in this section:
   demand.
 - **[Memory & context](/concepts/memory-and-context)** — how an Agent remembers
   past activity and the notes you give it.
+- **[The system prompt](/concepts/system-prompt)** — every fragment Platypus
+  composes into the prompt a model actually receives, in order.
 - **[Sharing across workspaces](/concepts/sharing)** — how an Organization
   reuses one resource across many Workspaces.

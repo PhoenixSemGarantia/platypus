@@ -191,8 +191,8 @@ from, and layers above, the per-Workspace Sandbox `config` / `credentials`
 
 A **Sandbox** is a persistent, Workspace-keyed execution environment that
 exposes a fixed set of shell and filesystem tools to Agents. The contract every
-backend implements is small and fixed on purpose: an Agent's prompt should not
-care _which_ backend it's running on, so you can swap the reference Docker
+backend implements is small and fixed on purpose: an Agent's Instructions should
+not care _which_ backend it's running on, so you can swap the reference Docker
 adapter for Modal or Daytona without re-prompting.
 
 > See [ADR-0001](https://github.com/willdady/platypus/blob/main/docs/adr/0001-sandbox-as-workspace-keyed-execution-environment.md)
