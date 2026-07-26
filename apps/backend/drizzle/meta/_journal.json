@@ -337,6 +337,13 @@
       "when": 1784345318833,
       "tag": "0047_backfill_model_configs",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1785041934190,
+      "tag": "0048_backfill_chat_system_prompt",
+      "breakpoints": true
     }
   ]
 }

@@ -1,0 +1,18 @@
+-- Clear every chat's persisted system prompt (issue #365).
+--
+-- Chat turns without an Agent used to write the fully-composed system prompt —
+-- workspace id and context, the user's name and id, their contexts, retrieved
+-- memories, the Skills and sub-Agent catalogues, sandbox orientation and the
+-- provider's security guardrails — back into this column, which backs the
+-- editable prompt box in Chat settings. Reopening that box surfaced the whole
+-- composite as editable text, and re-submitting it wrapped it in a fresh
+-- composite, so it compounded on every turn.
+--
+-- Every value now in the column was written by that defective path, and there
+-- is no reliable way to tell a genuinely-typed prompt from a composite, so all
+-- rows are cleared rather than heuristically recovered. Agent-driven turns
+-- never wrote here (they read their configuration back from the Agent record),
+-- so no Agent configuration is touched.
+--
+-- Idempotent: re-running it clears nothing further.
+UPDATE "chat" SET "system_prompt" = NULL WHERE "system_prompt" IS NOT NULL;
