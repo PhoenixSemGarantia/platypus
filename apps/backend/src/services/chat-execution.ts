@@ -633,7 +633,14 @@ export const prepareChatTurn = async (
       modelId: context.resolvedModelId,
       // Only Direct (no-Agent) turns persist generation params on the row;
       // Agent-driven turns read them back from the Agent record.
-      systemPrompt: agent ? undefined : systemPrompt,
+      //
+      // The prompt persisted here is the user's OWN text, never the composed
+      // prompt above: this column backs the editable prompt box in Chat
+      // settings, so writing the composite made the workspace context, the
+      // user's identity, memories and the provider's guardrails reappear as
+      // editable text — and compound on every turn (issue #365). What the model
+      // receives is unaffected; `stream.system` still carries the composite.
+      systemPrompt: agent ? undefined : request.systemPrompt,
       temperature: agent ? undefined : generation.temperature,
       topP: agent ? undefined : generation.topP,
       topK: agent ? undefined : generation.topK,

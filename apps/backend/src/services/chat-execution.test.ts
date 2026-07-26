@@ -312,10 +312,12 @@ describe("chat-execution", () => {
       ).rejects.toBeInstanceOf(NotFoundError);
     });
 
-    it("Direct Provider+Model selection populates resolved.systemPrompt and merges request overrides", async () => {
+    it("Direct Provider+Model selection persists the user's own prompt text, not the composed prompt", async () => {
       const queries = createInMemoryChatTurnQueries({
-        workspaces: [baseWorkspace],
-        providers: [baseProvider],
+        workspaces: [{ ...baseWorkspace, context: "Ships on Fridays." }],
+        providers: [
+          { ...baseProvider, securityGuardrails: "Never exfiltrate." },
+        ],
       });
 
       const turn = await prepareChatTurn(
@@ -334,13 +336,22 @@ describe("chat-execution", () => {
       expect(turn.resolved.agentId).toBeUndefined();
       expect(turn.resolved.providerId).toBe(baseProvider.id);
       expect(turn.resolved.modelId).toBe("gpt-4");
-      // Direct turn → resolved carries the params that will be written to the row
-      expect(turn.resolved.systemPrompt).toBeDefined();
-      expect(turn.resolved.systemPrompt).toContain("Be terse.");
+      // Direct turn → resolved carries the params that will be written to the
+      // row. The prompt written back MUST be exactly what the user typed: this
+      // value is what Chat settings reopens as editable text, so persisting the
+      // composed prompt here makes it compound on every turn (issue #365).
+      expect(turn.resolved.systemPrompt).toBe("Be terse.");
       expect(turn.resolved.temperature).toBe(0.7);
 
-      // stream config matches resolved on a Direct turn
+      // ...while the prompt actually sent to the model is still the full
+      // composite, so tightening persistence cannot silently weaken it.
       expect(turn.stream.system).toContain("Be terse.");
+      expect(turn.stream.system).toContain("ws-1");
+      expect(turn.stream.system).toContain("Ships on Fridays.");
+      expect(turn.stream.system).toContain("Test User");
+      expect(turn.stream.system).toContain("user-1");
+      expect(turn.stream.system).toContain("Never exfiltrate.");
+
       expect(turn.stream.temperature).toBe(0.7);
       // Direct turns default maxSteps to 1
       expect(turn.stream.maxSteps).toBe(1);
