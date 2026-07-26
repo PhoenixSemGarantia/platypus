@@ -68,7 +68,7 @@ const STEPS = [
   },
   {
     title: "Create an agent",
-    body: "Pin a provider, model, and system prompt, then grant it skills and MCP tool sets.",
+    body: "Pin a provider, model, and instructions, then grant it skills and MCP tool sets.",
   },
   {
     title: "Start a chat & send a message",
@@ -229,9 +229,9 @@ export default function HomePage() {
           icon={Bot}
           eyebrow="Agents"
           title="Agents that reason, act, and delegate"
-          body="Give an agent a provider, model, and system prompt, then arm it with tool sets, skills, and sub-agents. It plans, calls tools in a loop to get the job done, and hands off to specialist agents when a task calls for them."
+          body="Give an agent a provider, model, and instructions, then arm it with tool sets, skills, and sub-agents. It plans, calls tools in a loop to get the job done, and hands off to specialist agents when a task calls for them."
           points={[
-            "Pair any provider and model with a system prompt that shapes how it behaves",
+            "Pair any provider and model with instructions that shape how it behaves",
             "Grant tool sets and skills, and cap the tool-calling loop with max steps",
             "Compose agents from sub-agents, each exposed to the parent as a delegate tool",
           ]}
@@ -279,7 +279,7 @@ export default function HomePage() {
               },
               {
                 name: "Agent",
-                body: "A configured worker: provider, model, prompt, tools, skills, and sub-agents.",
+                body: "A configured worker: provider, model, instructions, tools, skills, and sub-agents.",
               },
             ].map((node, i, arr) => (
               <Fragment key={node.name}>
