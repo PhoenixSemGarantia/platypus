@@ -17,6 +17,8 @@ export { defaultPassthroughFileTypes };
 export type ModelConfigView = {
   id: string;
   passthroughFileTypes: string[];
+  /** Cap on injected extracted-document text; undefined uses the shared default. */
+  maxExtractedTextChars?: number;
 };
 
 /** Normalize a provider's models to objects, tolerating the legacy `string[]`. */
@@ -25,12 +27,16 @@ export const getModelConfigs = (
 ): ModelConfigView[] =>
   (
     provider.modelIds as unknown as Array<
-      string | { id: string; passthroughFileTypes?: string[] }
+      string | (Partial<ModelConfigView> & { id: string })
     >
   ).map((m) =>
     typeof m === "string"
       ? { id: m, passthroughFileTypes: [] }
-      : { id: m.id, passthroughFileTypes: m.passthroughFileTypes ?? [] },
+      : {
+          id: m.id,
+          passthroughFileTypes: m.passthroughFileTypes ?? [],
+          maxExtractedTextChars: m.maxExtractedTextChars,
+        },
   );
 
 /** The plain model-id list, order preserved. */
@@ -54,9 +60,10 @@ export const getPassthroughFileTypes = (
 
 /**
  * Classify an attachment against a model's passthrough set — the metadata-only
- * mirror of the backend gate. `reject` is the case worth warning about: the
- * turn would be blocked (Phase 1) because the file is neither native nor
- * text-like.
+ * mirror of the backend gate. `reject` means the turn would be blocked: the file
+ * is neither native, text-like, nor an extractable document. `extract` (PDF /
+ * DOCX, issue #342) goes through, but lossily — worth telling the user about
+ * without blocking them.
  */
 export const classifyAttachment = (
   file: { mediaType?: string; filename?: string },

@@ -4,11 +4,12 @@
  * share this logic so the reject decision and the transform decision never
  * drift.
  *
- * Three outcomes:
+ * Four outcomes:
  * - `passthrough` — the model ingests this media type natively; send unchanged.
  * - `text`        — not native, but the file is textual; inline it as text.
- * - `reject`      — not native and not textual (a binary document); the turn is
- *                   rejected (Phase 1) or extracted to text (Phase 2).
+ * - `extract`     — not native and not textual, but a document format we can
+ *                   convert to text (PDF/DOCX — issue #342).
+ * - `reject`      — none of the above; the turn is rejected before it persists.
  *
  * Text-vs-binary is decided from the file's *real nature* — its extension plus,
  * when bytes are available, a NUL-byte content sniff — never from the

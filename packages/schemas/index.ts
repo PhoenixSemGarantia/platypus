@@ -571,10 +571,15 @@ export type ProviderApiMode = z.infer<typeof providerApiModeSchema>;
 // `passthroughFileTypes` lists the media types (wildcards like `image/*`
 // allowed) the model ingests NATIVELY. It is a capability ROUTER, not a
 // security allow-list: an attached file whose type is absent is converted to
-// text where possible (Phase 2) — it is never blocked for safety. Absent /
-// legacy rows fall back to a provider-type default at resolve time on the
-// backend. This object is also the intended home for future per-model metadata
-// (e.g. max input/output tokens) — out of scope here.
+// text where possible (extracted for PDF/DOCX, see issue #342) — it is never
+// blocked for safety. Absent / legacy rows fall back to a provider-type default
+// at resolve time on the backend. This object is also the intended home for
+// future per-model metadata (e.g. max input/output tokens) — out of scope here.
+//
+// `maxExtractedTextChars` caps how much text a converted document may inject,
+// protecting small local contexts; omitted means the shared
+// `DEFAULT_MAX_EXTRACTED_TEXT_CHARS` default. A char budget rather than tokens
+// for v1 — it becomes derivable once per-model `maxInputTokens` lands.
 //
 // The universal wildcard (`*/*` or `*`) is an advanced escape hatch: it sends
 // EVERY attached file to the model raw. Values are deliberately NOT validated
@@ -585,6 +590,7 @@ export type ProviderApiMode = z.infer<typeof providerApiModeSchema>;
 export const modelConfigSchema = z.object({
   id: z.string().min(1),
   passthroughFileTypes: z.array(z.string()).default([]),
+  maxExtractedTextChars: z.number().int().positive().optional(),
 });
 
 export type ModelConfig = z.infer<typeof modelConfigSchema>;
@@ -650,8 +656,8 @@ export const defaultPassthroughFileTypes = (provider: {
  * Extensions whose bytes are plain text (source, config, data, markup). Used
  * to decide the text-vs-binary split by the file's real nature rather than the
  * unreliable browser-supplied media type. Binary document formats
- * (pdf/docx/xlsx/pptx) are deliberately absent — those need extraction (Phase
- * 2), not inlining.
+ * (pdf/docx/xlsx/pptx) are deliberately absent — those are extracted rather
+ * than inlined (see `EXTRACTABLE_DOCUMENT_EXTENSIONS`).
  */
 export const TEXT_LIKE_EXTENSIONS: ReadonlySet<string> = new Set([
   "txt",
@@ -731,14 +737,23 @@ export const TEXT_LIKE_EXTENSIONS: ReadonlySet<string> = new Set([
   "hcl",
 ]);
 
-/** Whether a filename's extension is a known plain-text/code/config format. */
-export const isTextLikeExtension = (filename: string | undefined): boolean => {
-  if (!filename) return false;
-  const base = filename.split(/[\\/]/).pop() ?? "";
+/**
+ * The metadata every file-classification decision is made from. Deliberately
+ * just the browser-supplied pair — the same shape a `file` message part, an
+ * upload, and a stored attachment all reduce to.
+ */
+export type FileMetadata = { mediaType?: string; filename?: string };
+
+/** A filename's lower-cased extension, or `""` when it has none. */
+export const fileExtension = (filename: string | undefined): string => {
+  const base = (filename ?? "").split(/[\\/]/).pop() ?? "";
   const dot = base.lastIndexOf(".");
-  if (dot <= 0) return false;
-  return TEXT_LIKE_EXTENSIONS.has(base.slice(dot + 1).toLowerCase());
+  return dot > 0 ? base.slice(dot + 1).toLowerCase() : "";
 };
+
+/** Whether a filename's extension is a known plain-text/code/config format. */
+export const isTextLikeExtension = (filename: string | undefined): boolean =>
+  TEXT_LIKE_EXTENSIONS.has(fileExtension(filename));
 
 /**
  * Whether `mediaType` matches any pattern. A pattern may be exact
@@ -759,15 +774,83 @@ export const mediaTypeMatches = (
   });
 };
 
-export type FileClassification = "passthrough" | "text" | "reject";
+/**
+ * Binary document formats the backend can convert to text (issue #342). Kept
+ * deliberately narrow — one extractor per format, no OCR. PPTX/XLSX may follow.
+ * The backend picks its extractor from this same table, so the classification
+ * and the extraction can never disagree about what is extractable.
+ */
+export type ExtractableDocumentFormat = "pdf" | "docx";
+
+const EXTRACTABLE_DOCUMENTS: ReadonlyArray<{
+  format: ExtractableDocumentFormat;
+  extensions: readonly string[];
+  mediaTypes: readonly string[];
+}> = [
+  { format: "pdf", extensions: ["pdf"], mediaTypes: ["application/pdf"] },
+  {
+    format: "docx",
+    extensions: ["docx"],
+    mediaTypes: [
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ],
+  },
+];
+
+/**
+ * Which extractable format a file is, or `null` for none. Matches on extension
+ * OR declared media type, because either can be the reliable half: the OS may
+ * tag a `.pdf` as `application/octet-stream`, and a file arriving from a paste
+ * buffer may carry a media type but no name. Extension wins when both are known
+ * — it survives the media-type lottery that motivated #328.
+ */
+export const extractableDocumentFormat = (
+  file: FileMetadata,
+): ExtractableDocumentFormat | null => {
+  const ext = fileExtension(file.filename);
+  for (const entry of EXTRACTABLE_DOCUMENTS) {
+    if (ext && entry.extensions.includes(ext)) return entry.format;
+  }
+  for (const entry of EXTRACTABLE_DOCUMENTS) {
+    if (mediaTypeMatches(file.mediaType, [...entry.mediaTypes])) {
+      return entry.format;
+    }
+  }
+  return null;
+};
+
+/**
+ * Default cap on the characters a single extracted document may inject. Sized
+ * to stay well inside a modest local context (~12k tokens) while still carrying
+ * a normal report; operators raise or lower it per model with
+ * `maxExtractedTextChars`.
+ */
+export const DEFAULT_MAX_EXTRACTED_TEXT_CHARS = 50_000;
+
+/**
+ * The effective character cap for a declared (or absent) per-model value. One
+ * place decides what a missing, zero, or otherwise nonsense value means, so the
+ * schema's `.int().positive()` and the runtime can't drift: a cap is a guard
+ * rail, and must never resolve to something that drops the whole document.
+ */
+export const resolveExtractedTextCap = (declared?: number): number =>
+  typeof declared === "number" && Number.isFinite(declared) && declared > 0
+    ? declared
+    : DEFAULT_MAX_EXTRACTED_TEXT_CHARS;
+
+export type FileClassification = "passthrough" | "text" | "extract" | "reject";
 
 /**
  * Classify a file from metadata shared by the frontend and backend. The
  * backend can additionally provide its byte-sniff result when content is
  * available.
+ *
+ * `extract` is checked after `text` — the two sets never overlap, but the
+ * ordering makes the precedence explicit: native ingestion beats extraction,
+ * and extraction is only ever the branch a `reject` would otherwise have taken.
  */
 export const classifyFile = (
-  file: { mediaType?: string; filename?: string },
+  file: FileMetadata,
   passthroughFileTypes: string[],
   contentLooksBinary = false,
 ): FileClassification => {
@@ -776,6 +859,9 @@ export const classifyFile = (
   }
   if (isTextLikeExtension(file.filename) && !contentLooksBinary) {
     return "text";
+  }
+  if (extractableDocumentFormat(file)) {
+    return "extract";
   }
   return "reject";
 };

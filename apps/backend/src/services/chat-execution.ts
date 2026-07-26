@@ -33,6 +33,7 @@ import { logger } from "../logger.ts";
 import { buildMcpTransportConfig } from "./mcp-oauth-provider.ts";
 import { inlineFileUrls } from "../storage/utils.ts";
 import {
+  maxExtractedTextCharsForModel,
   passthroughFileTypesForModel,
   providerHasModel,
 } from "./model-capability.ts";
@@ -573,20 +574,27 @@ export const prepareChatTurn = async (
     : tools;
 
   // Inline file URLs to `data:` bytes when we have an origin, then ALWAYS
-  // normalize (issue #328): text-like files become annotated text, native
-  // files pass through untouched, and any part that couldn't be inlined — a
-  // storage miss, or a headless turn with no origin — is announced as
-  // unavailable rather than forwarded raw. Normalizing even without an origin
-  // keeps a stray file part on a headless turn from hard-failing conversion.
-  // The pre-persist gate (`validateTurnAttachments`) has already rejected
-  // unsupported binaries, so the normalizer here never throws.
+  // normalize (issues #328, #342): text-like files become annotated text,
+  // PDF/DOCX are extracted to capped annotated text, native files pass through
+  // untouched, and any part that couldn't be inlined — a storage miss, or a
+  // headless turn with no origin — is announced as unavailable rather than
+  // forwarded raw. Normalizing even without an origin keeps a stray file part on
+  // a headless turn from hard-failing conversion. The pre-persist gate
+  // (`validateTurnAttachments`) has already rejected files nothing can convert,
+  // so the normalizer here never throws.
   const passthroughFileTypes = passthroughFileTypesForModel(
     provider,
     resolvedModelId,
   );
-  const inlinedMessages = normalizeFileParts(
+  const inlinedMessages = await normalizeFileParts(
     origin ? await inlineFileUrls(messages, origin) : messages,
     passthroughFileTypes,
+    {
+      maxExtractedTextChars: maxExtractedTextCharsForModel(
+        provider,
+        resolvedModelId,
+      ),
+    },
   );
 
   let disposed = false;
@@ -640,9 +648,11 @@ export const prepareChatTurn = async (
 /**
  * Pre-persist file gate (issue #328). Resolves the target model's declared
  * `passthroughFileTypes` and rejects the turn — before anything is persisted —
- * if any attached file (fresh upload or history) is neither natively accepted
- * nor text-like. Throws `FileValidationError`, which the chat route maps to a
- * 400 naming the offending file(s).
+ * if any attached file (fresh upload or history) is neither natively accepted,
+ * text-like, nor a document extraction can convert to text (#342 — a freshly
+ * uploaded document is extracted here to prove it, so a scanned PDF is refused
+ * before it can enter history). Throws `FileValidationError`, which the chat
+ * route maps to a 400 naming the offending file(s).
  *
  * A no-op when the turn carries no file parts (the common case, including all
  * headless runs), so it adds no lookups there. If model resolution itself fails
@@ -677,7 +687,7 @@ export const validateTurnAttachments = async (
     return;
   }
 
-  assertFilePartsSupported(args.messages, passthroughFileTypes);
+  await assertFilePartsSupported(args.messages, passthroughFileTypes);
 };
 
 // --- Private helpers ---

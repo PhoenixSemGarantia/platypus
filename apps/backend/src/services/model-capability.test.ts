@@ -6,8 +6,10 @@ import {
   providerModelIds,
   providerHasModel,
   passthroughFileTypesForModel,
+  maxExtractedTextCharsForModel,
   dedupeModelConfigs,
 } from "./model-capability.ts";
+import { DEFAULT_MAX_EXTRACTED_TEXT_CHARS } from "@platypus/schemas";
 
 const provider = (over: Partial<Provider>): Provider => ({
   id: "p1",
@@ -131,6 +133,38 @@ describe("passthroughFileTypesForModel", () => {
       "image/*",
       "application/pdf",
     ]);
+  });
+});
+
+describe("maxExtractedTextCharsForModel", () => {
+  it("returns the model's declared cap", () => {
+    const p = provider({
+      modelIds: [
+        { id: "qwen", passthroughFileTypes: [], maxExtractedTextChars: 8000 },
+      ],
+    });
+    expect(maxExtractedTextCharsForModel(p, "qwen")).toBe(8000);
+  });
+
+  it("falls back to the shared default when undeclared or unknown", () => {
+    const p = provider({
+      modelIds: [{ id: "qwen", passthroughFileTypes: [] }],
+    });
+    expect(maxExtractedTextCharsForModel(p, "qwen")).toBe(
+      DEFAULT_MAX_EXTRACTED_TEXT_CHARS,
+    );
+    expect(maxExtractedTextCharsForModel(p, "ghost")).toBe(
+      DEFAULT_MAX_EXTRACTED_TEXT_CHARS,
+    );
+  });
+
+  it("survives a legacy string[] model list", () => {
+    const p = provider({
+      modelIds: ["legacy"] as unknown as Provider["modelIds"],
+    });
+    expect(maxExtractedTextCharsForModel(p, "legacy")).toBe(
+      DEFAULT_MAX_EXTRACTED_TEXT_CHARS,
+    );
   });
 });
 

@@ -1,15 +1,22 @@
 import type { PlatypusUIMessage } from "../types.ts";
 import { classifyFilePart } from "./file-classification.ts";
+import {
+  extractDocumentText,
+  type ExtractedText,
+  type ExtractionResult,
+} from "./file-extraction.ts";
 
 /**
- * The pre-persist validation gate and the send-time normalizer (issue #328).
+ * The pre-persist validation gate and the send-time normalizer (issues #328,
+ * #342).
  *
  * The gate (`assertFilePartsSupported`) runs over the whole outgoing message
  * list — fresh upload and history — BEFORE the chat row is persisted, so a turn
  * carrying a file the model can't handle is rejected upfront and writes nothing
  * (it can never brick the chat). The normalizer (`normalizeFileParts`) runs at
- * send time, after file URLs are inlined, and rewrites non-native text-like
- * files into text the model can read.
+ * send time, after file URLs are inlined, and rewrites non-native files into
+ * text the model can read: text-like files inline directly, binary documents
+ * (PDF/DOCX) are extracted.
  *
  * Kept free of any dependency on chat-execution so it can be imported there
  * without a cycle.
@@ -29,24 +36,65 @@ const isFilePart = (part: unknown): part is FilePart =>
   (part as { type?: unknown }).type === "file";
 
 /**
- * Thrown when an outgoing turn carries a file the target model can neither
- * ingest natively nor have inlined as text. The route maps it to a 400 with a
- * message naming the offending file(s). A standalone error (not a subclass of
- * chat-execution's `ValidationError`) to avoid an import cycle — callers match
- * on it explicitly.
+ * Why a file can't be sent to this model. `unsupported` is a capability verdict
+ * (switching model may help); the other two are properties of the file itself
+ * (switching model won't), so each gets its own message.
+ */
+export type FileRejectionReason =
+  "unsupported" | Exclude<ExtractionResult["status"], "ok">;
+
+export type FileRejection = { file: string; reason: FileRejectionReason };
+
+/** One sentence naming the files rejected for a single reason. */
+const rejectionSentence = (
+  reason: FileRejectionReason,
+  files: string[],
+): string => {
+  const list = files.join(", ");
+  const one = files.length === 1;
+  switch (reason) {
+    case "unsupported":
+      return one
+        ? `This model can't read the attached file "${list}". Remove it, or switch to a model that accepts it.`
+        : `This model can't read these attached files: ${list}. Remove them, or switch to a model that accepts them.`;
+    case "unextractable":
+      return `No readable text could be extracted from ${list} — ${
+        one
+          ? "it may be a scanned or image-only document"
+          : "they may be scanned or image-only documents"
+      }. Remove ${one ? "it" : "them"} or attach a text-based version.`;
+    case "too-large":
+      return `${list} ${one ? "is" : "are"} too large to extract text from. Remove ${
+        one ? "it" : "them"
+      } or attach a smaller version.`;
+  }
+};
+
+/**
+ * Thrown when an outgoing turn carries a file the target model can't be sent:
+ * not ingestible natively, not inlinable as text, and not convertible by
+ * extraction. The route maps it to a 400 with a message naming the offending
+ * file(s). A standalone error (not a subclass of chat-execution's
+ * `ValidationError`) to avoid an import cycle — callers match on it explicitly.
  */
 export class FileValidationError extends Error {
+  /** Offending filenames, in the order they appear in the message list. */
   readonly files: string[];
+  readonly rejections: FileRejection[];
 
-  constructor(files: string[]) {
-    const list = files.join(", ");
+  constructor(rejections: FileRejection[]) {
+    const byReason = new Map<FileRejectionReason, string[]>();
+    for (const { file, reason } of rejections) {
+      byReason.set(reason, [...(byReason.get(reason) ?? []), file]);
+    }
     super(
-      files.length === 1
-        ? `This model can't read the attached file "${list}". Remove it, or switch to a model that accepts it.`
-        : `This model can't read these attached files: ${list}. Remove them, or switch to a model that accepts them.`,
+      [...byReason]
+        .map(([reason, files]) => rejectionSentence(reason, files))
+        .join(" "),
     );
     this.name = "FileValidationError";
-    this.files = files;
+    this.files = rejections.map((r) => r.file);
+    this.rejections = rejections;
   }
 }
 
@@ -57,27 +105,53 @@ export const messagesHaveFileParts = (messages: PlatypusUIMessage[]): boolean =>
   );
 
 /**
- * Reject the turn if any file part is neither natively accepted nor text-like.
- * Classifies on metadata alone (extension + declared media type) — no bytes
- * required — so it can run before persistence. Throws `FileValidationError`
- * listing every offending file.
+ * Reject the turn if any file part can't be turned into something the model can
+ * read. Classification itself needs only metadata (extension + declared media
+ * type), so it works on history parts that are still just storage references.
+ *
+ * A document classed `extract` is verified by actually extracting it, but ONLY
+ * when the part carries its bytes inline — which is exactly the fresh upload, the
+ * one file this turn could newly poison the chat with. A scanned, image-only PDF
+ * is therefore rejected here with a 400 and never persisted (issue #342). History
+ * parts point at storage, carry no bytes, and were verified the turn they were
+ * attached, so they're taken as read rather than re-fetched. Extraction results
+ * are content-hash cached, so this parse is the one the send-time normalizer
+ * would have done anyway, not an extra one.
+ *
+ * Throws `FileValidationError` describing every offending file.
  */
-export const assertFilePartsSupported = (
+export const assertFilePartsSupported = async (
   messages: PlatypusUIMessage[],
   passthroughFileTypes: string[],
-): void => {
-  const offending: string[] = [];
+): Promise<void> => {
+  const rejections: FileRejection[] = [];
   for (const message of messages) {
     if (!Array.isArray(message.parts)) continue;
     for (const part of message.parts) {
       if (!isFilePart(part)) continue;
-      if (classifyFilePart(part, passthroughFileTypes) === "reject") {
-        offending.push(part.filename || "attachment");
+      const label = part.filename || "attachment";
+      const outcome = classifyFilePart(part, passthroughFileTypes);
+
+      if (outcome === "reject") {
+        rejections.push({ file: label, reason: "unsupported" });
+        continue;
+      }
+      if (outcome !== "extract") continue;
+
+      const url = typeof part.url === "string" ? part.url : "";
+      const bytes = url.startsWith("data:")
+        ? decodeDataUrl(url)?.bytes
+        : undefined;
+      if (!bytes) continue;
+
+      const extracted = await extractDocumentText(bytes, part);
+      if (extracted.status !== "ok") {
+        rejections.push({ file: label, reason: extracted.status });
       }
     }
   }
-  if (offending.length > 0) {
-    throw new FileValidationError(offending);
+  if (rejections.length > 0) {
+    throw new FileValidationError(rejections);
   }
 };
 
@@ -95,33 +169,72 @@ const decodeDataUrl = (
   return { mediaType, bytes };
 };
 
+/**
+ * Fence `content` so it can't break out of its own block. A file — a Markdown
+ * doc especially — may itself contain a run of backticks, so the fence is always
+ * one backtick longer than the longest run inside (CommonMark's rule).
+ */
+const fence = (content: string): string => {
+  const longestRun = Math.max(
+    0,
+    ...[...content.matchAll(/`+/g)].map((m) => m[0].length),
+  );
+  const ticks = "`".repeat(Math.max(3, longestRun + 1));
+  return `${ticks}\n${content}\n${ticks}`;
+};
+
 /** Wrap decoded file text in a labelled fenced block so the model sees its origin. */
 const annotateInlinedText = (
   filename: string | undefined,
   content: string,
+): string => `[file: ${filename || "attachment"}]\n\n${fence(content)}`;
+
+/**
+ * Wrap text pulled out of a binary document. Annotated distinctly from an
+ * inlined text file (issue #342) because the content is lossy — tables, layout
+ * and embedded images don't survive — and both the model and the user should be
+ * able to tell extracted text from native ingestion. A truncated extraction says
+ * so, and how much was dropped, so the model doesn't treat it as the whole
+ * document.
+ */
+const annotateExtractedText = (
+  filename: string | undefined,
+  extracted: ExtractedText,
 ): string => {
-  const label = filename || "attachment";
-  return `[file: ${label}]\n\n\`\`\`\n${content}\n\`\`\``;
+  const notice = extracted.truncated
+    ? `\n\n[extracted text truncated: first ${extracted.text.length} of ${extracted.totalChars} characters]`
+    : "";
+  return `[extracted text from ${filename || "attachment"}]\n\n${fence(
+    extracted.text,
+  )}${notice}`;
 };
 
 /**
- * A short text stand-in for a file that can't be sent. `unavailable` means we
- * couldn't load its bytes (a storage miss, or a headless turn that skipped
- * inlining); `unsupported` means a binary the model can't ingest slipped past
- * the gate. Either way the part is announced, never forwarded raw.
+ * A short text stand-in for a file that can't be sent:
+ *
+ * - `unavailable` — we couldn't load its bytes (a storage miss, or a headless
+ *   turn that skipped inlining);
+ * - `unextractable` — a document we can normally extract yielded no text (an
+ *   image-only scan, or bytes that aren't really that format);
+ * - `too-large` — the document exceeded the extractor's input ceiling;
+ * - `unsupported` — a binary the model can't ingest slipped past the gate.
+ *
+ * Either way the part is announced, never forwarded raw.
  */
 const omittedFilePlaceholder = (
   filename: string | undefined,
-  reason: "unavailable" | "unsupported",
+  // The extraction half of this union is derived, so a new `ExtractionResult`
+  // status is a type error here instead of a silently missing placeholder.
+  reason: "unavailable" | FileRejectionReason,
 ) => {
   const label = filename || "attachment";
-  return {
-    type: "text" as const,
-    text:
-      reason === "unavailable"
-        ? `[file unavailable: ${label}]`
-        : `[unsupported file omitted: ${label}]`,
-  };
+  const text = {
+    unavailable: `[file unavailable: ${label}]`,
+    unextractable: `[no readable text could be extracted from ${label} — it may be a scanned or image-only document]`,
+    "too-large": `[document too large to extract text from: ${label}]`,
+    unsupported: `[unsupported file omitted: ${label}]`,
+  }[reason];
+  return { type: "text" as const, text };
 };
 
 /**
@@ -130,9 +243,14 @@ const omittedFilePlaceholder = (
  *
  * - native passthrough → left byte-for-byte unchanged;
  * - text-like → replaced with an annotated text part;
+ * - extractable document (PDF/DOCX) → replaced with an annotated, size-capped
+ *   extraction (issue #342), or a placeholder when there is no text to pull out;
  * - reject-class → replaced with a short placeholder (defensive: the
  *   pre-persist gate should already have blocked it; never throws here, so a
  *   slipped-through part can't hard-fail conversion and re-brick the chat).
+ *
+ * Extraction only fires on the non-native branch — a model that lists PDF in its
+ * `passthroughFileTypes` still receives the real PDF, never a downgrade.
  *
  * A `storage://` URL (or a missing one) that reaches here never got inlined —
  * a storage miss, or a headless turn with no origin to inline against. The
@@ -141,40 +259,60 @@ const omittedFilePlaceholder = (
  * unavailable instead. External `http(s)` URLs are left alone — a model may
  * still fetch those.
  */
-export const normalizeFileParts = (
+export const normalizeFileParts = async (
   messages: PlatypusUIMessage[],
   passthroughFileTypes: string[],
-): PlatypusUIMessage[] =>
-  messages.map((message) => {
-    if (!Array.isArray(message.parts)) return message;
-    const parts = message.parts.map((part) => {
-      if (!isFilePart(part)) return part;
+  options: { maxExtractedTextChars?: number } = {},
+): Promise<PlatypusUIMessage[]> =>
+  Promise.all(
+    messages.map(async (message) => {
+      if (!Array.isArray(message.parts)) return message;
+      const parts = await Promise.all(
+        message.parts.map(async (part) => {
+          if (!isFilePart(part)) return part;
 
-      const url = typeof part.url === "string" ? part.url : "";
-      const decoded = url.startsWith("data:") ? decodeDataUrl(url) : null;
-      const bytes = decoded?.bytes;
-      // An internal storage URL that survived inlining is unreachable by the
-      // model; a missing URL likewise has nothing to send.
-      const unfetchable = url === "" || url.startsWith("storage://");
+          const url = typeof part.url === "string" ? part.url : "";
+          const decoded = url.startsWith("data:") ? decodeDataUrl(url) : null;
+          const bytes = decoded?.bytes;
+          // An internal storage URL that survived inlining is unreachable by
+          // the model; a missing URL likewise has nothing to send.
+          const unfetchable = url === "" || url.startsWith("storage://");
 
-      const outcome = classifyFilePart(part, passthroughFileTypes, bytes);
+          const outcome = classifyFilePart(part, passthroughFileTypes, bytes);
 
-      if (outcome === "passthrough") {
-        return unfetchable
-          ? omittedFilePlaceholder(part.filename, "unavailable")
-          : part;
-      }
+          if (outcome === "passthrough") {
+            return unfetchable
+              ? omittedFilePlaceholder(part.filename, "unavailable")
+              : part;
+          }
 
-      if (outcome === "text") {
-        if (!bytes) return omittedFilePlaceholder(part.filename, "unavailable");
-        const content = new TextDecoder().decode(bytes);
-        return {
-          type: "text" as const,
-          text: annotateInlinedText(part.filename, content),
-        };
-      }
+          if (outcome === "text") {
+            if (!bytes)
+              return omittedFilePlaceholder(part.filename, "unavailable");
+            const content = new TextDecoder().decode(bytes);
+            return {
+              type: "text" as const,
+              text: annotateInlinedText(part.filename, content),
+            };
+          }
 
-      return omittedFilePlaceholder(part.filename, "unsupported");
-    });
-    return { ...message, parts };
-  });
+          if (outcome === "extract") {
+            if (!bytes)
+              return omittedFilePlaceholder(part.filename, "unavailable");
+            const extracted = await extractDocumentText(bytes, part, {
+              maxChars: options.maxExtractedTextChars,
+            });
+            if (extracted.status !== "ok")
+              return omittedFilePlaceholder(part.filename, extracted.status);
+            return {
+              type: "text" as const,
+              text: annotateExtractedText(part.filename, extracted),
+            };
+          }
+
+          return omittedFilePlaceholder(part.filename, "unsupported");
+        }),
+      );
+      return { ...message, parts };
+    }),
+  );

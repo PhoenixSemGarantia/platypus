@@ -1,5 +1,6 @@
 import {
   defaultPassthroughFileTypes,
+  resolveExtractedTextCap,
   type ModelConfig,
   type Provider,
 } from "@platypus/schemas";
@@ -43,7 +44,10 @@ export const resolveProviderModels = (provider: Provider): ModelConfig[] => {
       return { id: entry, passthroughFileTypes: fallback };
     }
     const declared = entry.passthroughFileTypes;
+    // Spread the stored entry so per-model metadata added later (e.g.
+    // `maxExtractedTextChars`) survives resolution without touching this.
     return {
+      ...entry,
       id: entry.id ?? "",
       passthroughFileTypes:
         declared && declared.length > 0 ? declared : fallback,
@@ -89,3 +93,17 @@ export const passthroughFileTypesForModel = (
     ? model.passthroughFileTypes
     : defaultPassthroughFileTypes(provider);
 };
+
+/**
+ * How much extracted document text this model may be sent (issue #342).
+ * `resolveExtractedTextCap` decides what an absent or nonsense declaration
+ * means, so this and the schema can't drift.
+ */
+export const maxExtractedTextCharsForModel = (
+  provider: Provider,
+  modelId: string,
+): number =>
+  resolveExtractedTextCap(
+    resolveProviderModels(provider).find((m) => m.id === modelId)
+      ?.maxExtractedTextChars,
+  );

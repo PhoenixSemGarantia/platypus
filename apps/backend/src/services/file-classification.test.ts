@@ -97,10 +97,19 @@ describe("classifyFilePart", () => {
     ).toBe("text");
   });
 
-  it("rejects a binary document the model can't take natively", () => {
+  it("marks an extractable document the model can't take natively", () => {
     expect(
       classifyFilePart(
         { mediaType: "application/pdf", filename: "report.pdf" },
+        chatPassthrough,
+      ),
+    ).toBe("extract");
+  });
+
+  it("rejects a binary the model can't take natively and nothing can extract", () => {
+    expect(
+      classifyFilePart(
+        { mediaType: "application/zip", filename: "bundle.zip" },
         chatPassthrough,
       ),
     ).toBe("reject");

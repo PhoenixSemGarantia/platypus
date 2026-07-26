@@ -76,6 +76,8 @@ import {
   normalizeToolResult,
 } from "./chat-execution.ts";
 import { FileValidationError } from "./file-gate.ts";
+import { resetExtractedTextCache } from "./file-extraction.ts";
+import { buildTestPdf } from "./file-extraction.test-fixtures.ts";
 import { createInMemoryChatTurnQueries } from "./chat-execution.test-fixtures.ts";
 import type { PlatypusUIMessage } from "../types.ts";
 
@@ -446,6 +448,107 @@ describe("chat-execution", () => {
         ),
       ).rejects.toBeInstanceOf(NotFoundError);
     });
+
+    // Issue #342: the model must actually receive extracted text on the
+    // non-native branch, and the untouched real file on the native one. Built
+    // with `origin: undefined` so inlining is skipped — the attachment already
+    // carries its bytes as a data: URL, which is what inlining would produce.
+    describe("document attachments", () => {
+      const pdfMessages = (
+        filename = "report.pdf",
+        lines = ["Revenue is up"],
+      ) =>
+        [
+          {
+            id: "m1",
+            role: "user",
+            parts: [
+              {
+                type: "file",
+                mediaType: "application/pdf",
+                filename,
+                url: `data:application/pdf;base64,${buildTestPdf(lines).toString("base64")}`,
+              },
+            ],
+          },
+        ] as unknown as PlatypusUIMessage[];
+
+      const turnWithProvider = async (
+        provider: Omit<typeof baseProvider, "modelIds"> & {
+          modelIds: Array<{
+            id: string;
+            passthroughFileTypes: string[];
+            maxExtractedTextChars?: number;
+          }>;
+        },
+        messages: PlatypusUIMessage[],
+      ) =>
+        prepareChatTurn(
+          {
+            ...baseInput,
+            origin: undefined,
+            messages,
+            request: { providerId: provider.id, modelId: "gpt-4" },
+          },
+          createInMemoryChatTurnQueries({
+            workspaces: [baseWorkspace],
+            providers: [provider],
+          }),
+        );
+
+      beforeEach(() => {
+        resetExtractedTextCache();
+      });
+
+      it("sends a non-native PDF to the model as annotated extracted text", async () => {
+        const turn = await turnWithProvider(baseProvider, pdfMessages());
+        const parts = (turn.stream.messages[0] as { parts: unknown[] }).parts;
+        const part = parts[0] as { type: string; text: string };
+        expect(part.type).toBe("text");
+        expect(part.text).toContain("[extracted text from report.pdf]");
+        expect(part.text).toContain("Revenue is up");
+      });
+
+      it("leaves a PDF the model accepts natively byte-for-byte unchanged", async () => {
+        const messages = pdfMessages();
+        const nativeProvider = {
+          ...baseProvider,
+          modelIds: [
+            { id: "gpt-4", passthroughFileTypes: ["application/pdf"] },
+          ],
+        };
+        const turn = await turnWithProvider(nativeProvider, messages);
+        const parts = (turn.stream.messages[0] as { parts: unknown[] }).parts;
+        expect(parts[0]).toEqual(
+          (messages[0] as unknown as { parts: unknown[] }).parts[0],
+        );
+      });
+
+      it("honours the model's maxExtractedTextChars cap", async () => {
+        const cappedProvider = {
+          ...baseProvider,
+          modelIds: [
+            {
+              id: "gpt-4",
+              passthroughFileTypes: [],
+              maxExtractedTextChars: 20,
+            },
+          ],
+        };
+        const turn = await turnWithProvider(
+          cappedProvider,
+          pdfMessages(
+            "long.pdf",
+            Array.from({ length: 10 }, () => "many words here"),
+          ),
+        );
+        const parts = (turn.stream.messages[0] as { parts: unknown[] }).parts;
+        const part = parts[0] as { type: string; text: string };
+        expect(part.text).toMatch(
+          /\[extracted text truncated: first 20 of \d+ characters\]/,
+        );
+      });
+    });
   });
 
   describe("MCP tool-set resolution", () => {
@@ -782,21 +885,76 @@ describe("validateTurnAttachments", () => {
       providers: [baseProvider],
     });
 
-  const fileMessage = (mediaType: string, filename: string) =>
+  // `url` defaults to a bytes-free data URL: enough for the metadata-only
+  // classification, and the gate then skips extraction verification. Cases that
+  // exercise extraction pass real document bytes.
+  const fileMessage = (
+    mediaType: string,
+    filename: string,
+    url = "storage://placeholder",
+  ) =>
     ({
       id: "m1",
       role: "user",
-      parts: [{ type: "file", mediaType, filename, url: "data:," }],
+      parts: [{ type: "file", mediaType, filename, url }],
     }) as unknown as PlatypusUIMessage;
+
+  const dataUrl = (mediaType: string, content: Buffer) =>
+    `data:${mediaType};base64,${content.toString("base64")}`;
 
   const request = { providerId: "p1", modelId: "gpt-4" };
 
-  it("rejects a PDF the chat-completions model can't ingest natively", async () => {
+  it("rejects a binary nothing can convert to text", async () => {
     await expect(
       validateTurnAttachments(
         {
           request,
-          messages: [fileMessage("application/pdf", "report.pdf")],
+          messages: [fileMessage("application/zip", "bundle.zip")],
+          orgId: "org-1",
+          workspaceId: "ws-1",
+        },
+        queries(),
+      ),
+    ).rejects.toBeInstanceOf(FileValidationError);
+  });
+
+  it("allows a text-based PDF the chat-completions model can't ingest natively (extracted later)", async () => {
+    await expect(
+      validateTurnAttachments(
+        {
+          request,
+          messages: [
+            fileMessage(
+              "application/pdf",
+              "report.pdf",
+              dataUrl("application/pdf", buildTestPdf(["Readable"])),
+            ),
+            // A history part: a storage reference with no bytes to verify.
+            fileMessage(
+              "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+              "spec.docx",
+            ),
+          ],
+          orgId: "org-1",
+          workspaceId: "ws-1",
+        },
+        queries(),
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it("rejects a freshly uploaded PDF with no extractable text", async () => {
+    await expect(
+      validateTurnAttachments(
+        {
+          request,
+          messages: [
+            fileMessage(
+              "application/pdf",
+              "scan.pdf",
+              dataUrl("application/pdf", buildTestPdf([])),
+            ),
+          ],
           orgId: "org-1",
           workspaceId: "ws-1",
         },

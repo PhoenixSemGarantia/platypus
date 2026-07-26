@@ -17,6 +17,17 @@ A persisted conversation in a Workspace. Composed of a sequence of messages and 
 A single round of running the model: given the prior messages and a Workspace + Agent (or Provider + model) selection, produce the assistant's next streamed response. Distinct from one-shot Provider executions like metadata generation.
 _Avoid_: chat request, chat invocation, chat run.
 
+**File part**:
+A file a User attached to a message in a Chat, carried alongside the message's text and persisted as a storage reference. On every Chat turn each File part is resolved to bytes and routed by the target model's declared capability.
+_Avoid_: attachment (an **Attachment** is the Shared-resource reference), upload.
+
+**Passthrough file type**:
+A media type the target `(Provider, model)` pair ingests **natively**, declared per model. A capability router, not a security allow-list: a File part outside the set is converted to text where possible, never blocked for safety.
+
+**Extracted text**:
+The plain text pulled out of a binary document (PDF, DOCX) that the target model can't ingest natively, injected in place of the File part and annotated as extracted so the loss is visible. Lossy — layout, tables and images don't survive. Distinct from an inlined text file, whose bytes are already text and are sent verbatim.
+_Avoid_: parsed text, converted file, OCR (Platypus does not OCR).
+
 **Agent**:
 A configurable preset that pins a Provider, model, system prompt, generation parameters, Tools, Skills, and sub-Agents. Selecting an Agent on a Chat turn replaces direct Provider/model selection.
 
