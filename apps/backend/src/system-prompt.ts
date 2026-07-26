@@ -31,8 +31,8 @@ export type SystemPromptContext = {
    * (see docs/adr/0004-sandbox-workspace-default-env-vars.md).
    */
   sandboxEnvKeys?: string[];
-  /** Used as the system prompt when `agent` is null. */
-  fallbackSystemPrompt?: string;
+  /** Used as the instructions fragment when `agent` is null. */
+  fallbackInstructions?: string;
   /**
    * Free-text security directives from the run's provider
    * (`provider.securityGuardrails`). Rendered LAST (recency). Empty/nullish →
@@ -57,9 +57,9 @@ export type SystemPromptContext = {
 
 type Fragment = (ctx: SystemPromptContext) => string | null;
 
-const agentPromptFragment: Fragment = (ctx) => {
-  const prompt = ctx.agent?.systemPrompt ?? ctx.fallbackSystemPrompt;
-  return prompt?.trim() || "You are a helpful AI assistant.";
+const instructionsFragment: Fragment = (ctx) => {
+  const instructions = ctx.agent?.instructions ?? ctx.fallbackInstructions;
+  return instructions?.trim() || "You are a helpful AI assistant.";
 };
 
 const agentIdentityFragment: Fragment = (ctx) => {
@@ -175,7 +175,7 @@ const securityFragment: Fragment = (ctx) =>
   renderSecurityGuardrails(ctx.securityGuardrails);
 
 const FRAGMENTS: Fragment[] = [
-  agentPromptFragment,
+  instructionsFragment,
   agentIdentityFragment,
   organizationFragment,
   workspaceFragment,

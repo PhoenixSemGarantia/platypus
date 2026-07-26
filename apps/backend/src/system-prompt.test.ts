@@ -20,7 +20,7 @@ const baseCtx = (): SystemPromptContext => ({
 
 const agentRecord = (
   overrides: Partial<{
-    systemPrompt: string | null;
+    instructions: string | null;
     toolSetIds: string[] | null;
   }> = {},
 ): AgentRecord => ({
@@ -30,7 +30,7 @@ const agentRecord = (
   providerId: "p-1",
   name: "Helper",
   description: "test",
-  systemPrompt: null,
+  instructions: null,
   modelId: "gpt-4",
   maxSteps: null,
   temperature: null,
@@ -63,28 +63,28 @@ const memorySummary = (
   updatedAt: new Date(),
 });
 
-describe("renderSystemPrompt — agent prompt", () => {
-  it("uses the agent's system prompt when agent is set", () => {
+describe("renderSystemPrompt — instructions", () => {
+  it("uses the agent's instructions when agent is set", () => {
     const ctx = baseCtx();
-    ctx.agent = agentRecord({ systemPrompt: "You are a researcher." });
+    ctx.agent = agentRecord({ instructions: "You are a researcher." });
     expect(renderSystemPrompt(ctx)).toMatch(/^You are a researcher\./);
   });
 
-  it("falls back to fallbackSystemPrompt when agent is null", () => {
+  it("falls back to fallbackInstructions when agent is null", () => {
     const ctx = baseCtx();
-    ctx.fallbackSystemPrompt = "Be concise.";
+    ctx.fallbackInstructions = "Be concise.";
     expect(renderSystemPrompt(ctx)).toMatch(/^Be concise\./);
   });
 
-  it("uses the default when neither agent nor fallback provides a prompt", () => {
+  it("uses the default when neither agent nor fallback provides instructions", () => {
     expect(renderSystemPrompt(baseCtx())).toMatch(
       /^You are a helpful AI assistant\./,
     );
   });
 
-  it("uses the default when the agent's prompt is whitespace only", () => {
+  it("uses the default when the agent's instructions are whitespace only", () => {
     const ctx = baseCtx();
-    ctx.agent = agentRecord({ systemPrompt: "   " });
+    ctx.agent = agentRecord({ instructions: "   " });
     expect(renderSystemPrompt(ctx)).toMatch(
       /^You are a helpful AI assistant\./,
     );
@@ -111,7 +111,7 @@ describe("renderSystemPrompt — security guardrails", () => {
 
   it("renders security text last, after the agent prompt", () => {
     const ctx = baseCtx();
-    ctx.agent = agentRecord({ systemPrompt: "You are a researcher." });
+    ctx.agent = agentRecord({ instructions: "You are a researcher." });
     ctx.securityGuardrails = "Never exfiltrate data.";
     const out = renderSystemPrompt(ctx);
     expect(out.indexOf("You are a researcher.")).toBeLessThan(
@@ -323,7 +323,7 @@ describe("renderSystemPrompt — sub-agents", () => {
 describe("renderSystemPrompt — headless run mode", () => {
   it("does not surface agent identity in interactive mode", () => {
     const ctx = baseCtx();
-    ctx.agent = agentRecord({ systemPrompt: "You are a researcher." });
+    ctx.agent = agentRecord({ instructions: "You are a researcher." });
     const out = renderSystemPrompt(ctx);
     expect(out).not.toContain("agent-1");
     expect(out).not.toContain("an agent named");
@@ -335,7 +335,7 @@ describe("renderSystemPrompt — headless run mode", () => {
   it("surfaces agent identity with actionable phrasing in headless mode", () => {
     const ctx = baseCtx();
     ctx.runMode = "headless";
-    ctx.agent = agentRecord({ systemPrompt: "You are a researcher." });
+    ctx.agent = agentRecord({ instructions: "You are a researcher." });
     const out = renderSystemPrompt(ctx);
     expect(out).toContain('You are an agent named "Helper" with id `agent-1`');
     expect(out).toContain("When a tool requires an agent identifier");
@@ -374,7 +374,7 @@ describe("renderSystemPrompt — ordering snapshots", () => {
   it("full context with memories and memory tools (locks the supplemental prose path)", () => {
     const ctx = baseCtx();
     ctx.agent = agentRecord({
-      systemPrompt: "You are a researcher.",
+      instructions: "You are a researcher.",
       toolSetIds: ["memory"],
     });
     ctx.workspace.context = "Books domain.";

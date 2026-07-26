@@ -8,6 +8,12 @@ import { validateSubAgentAssignment } from "../services/sub-agent-validation.ts"
 import { getStorage } from "../storage/index.ts";
 import { buildResourceUrl } from "../utils/resource-url.ts";
 
+// Shared by the create and update tools so the two cannot drift. Tells the
+// model that Instructions are only the first fragment of the composed system
+// prompt, so it does not generate boilerplate Platypus already supplies.
+const INSTRUCTIONS_DESCRIPTION =
+  "The agent's own instructions — how it should behave. Platypus composes the full system prompt around this, adding workspace and user context, memories, Skills, sub-agents and the provider's security guardrails, so do not restate those here.";
+
 export function createAgentManagementTools(
   workspaceId: string,
   orgId: string,
@@ -21,7 +27,7 @@ export function createAgentManagementTools(
       description: z.string().min(1).max(128).describe("Short description"),
       providerId: z.string().describe("Provider ID to use"),
       modelId: z.string().describe("Model ID to use"),
-      systemPrompt: z.string().optional().describe("System prompt"),
+      instructions: z.string().optional().describe(INSTRUCTIONS_DESCRIPTION),
       maxSteps: z.number().optional().describe("Max agentic steps"),
       temperature: z.number().optional().describe("Sampling temperature"),
       topP: z.number().optional().describe("Top-p sampling"),
@@ -122,7 +128,7 @@ export function createAgentManagementTools(
         .describe("Short description"),
       providerId: z.string().optional().describe("Provider ID to use"),
       modelId: z.string().optional().describe("Model ID to use"),
-      systemPrompt: z.string().optional().describe("System prompt"),
+      instructions: z.string().optional().describe(INSTRUCTIONS_DESCRIPTION),
       maxSteps: z.number().optional().describe("Max agentic steps"),
       temperature: z.number().optional().describe("Sampling temperature"),
       topP: z.number().optional().describe("Top-p sampling"),

@@ -167,7 +167,10 @@ export const chat = pgTable(
     agentId: t.text("agent_id"),
     providerId: t.text("provider_id"),
     modelId: t.text("model_id"),
-    systemPrompt: t.text("system_prompt"),
+    // The user's own instructions for an agentless chat — the first fragment of
+    // the system prompt Platypus composes, never the composed prompt itself
+    // (issue #365).
+    instructions: t.text("instructions"),
     temperature: t.real("temperature"),
     topP: t.real("top_p"),
     topK: t.real("top_k"),
@@ -219,7 +222,9 @@ export const agent = pgTable(
       }),
     name: t.text("name").notNull(),
     description: t.text("description").notNull(),
-    systemPrompt: t.text("system_prompt"),
+    // The agent author's own instructions — the first fragment of the composed
+    // system prompt, not the composite (see ./system-prompt.ts).
+    instructions: t.text("instructions"),
     modelId: t.text("model_id").notNull(),
     maxSteps: t.integer("max_steps"),
     temperature: t.real("temperature"),

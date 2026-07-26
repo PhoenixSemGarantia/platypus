@@ -9,6 +9,7 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Textarea } from "./ui/textarea";
 import { Label } from "./ui/label";
+import { FieldDescription } from "./ui/field";
 import {
   Collapsible,
   CollapsibleContent,
@@ -18,8 +19,8 @@ import { ChevronsUpDown } from "lucide-react";
 import { useState } from "react";
 
 interface ChatSettingsDialogProps {
-  systemPrompt: string;
-  onSystemPromptChange: (value: string) => void;
+  instructions: string;
+  onInstructionsChange: (value: string) => void;
   temperature: number | undefined;
   onTemperatureChange: (value: number | undefined) => void;
   seed: number | undefined;
@@ -36,8 +37,8 @@ interface ChatSettingsDialogProps {
 }
 
 export const ChatSettingsDialog = ({
-  systemPrompt,
-  onSystemPromptChange,
+  instructions,
+  onInstructionsChange,
   temperature,
   onTemperatureChange,
   seed,
@@ -64,14 +65,20 @@ export const ChatSettingsDialog = ({
       </DialogHeader>
       <div className="grid gap-4 py-4">
         <div className="grid gap-2">
-          <Label htmlFor="systemPrompt">System Prompt</Label>
+          <Label htmlFor="instructions">Instructions</Label>
           <Textarea
-            id="systemPrompt"
+            id="instructions"
             placeholder="You are a helpful assistant..."
-            value={systemPrompt}
-            onChange={(e) => onSystemPromptChange(e.target.value)}
+            value={instructions}
+            onChange={(e) => onInstructionsChange(e.target.value)}
             rows={3}
           />
+          <FieldDescription>
+            How the assistant should behave in this chat. Platypus builds the
+            full system prompt around it, adding workspace and user context,
+            memories, Skills, sub-Agents, and your Provider&apos;s security
+            guardrails.
+          </FieldDescription>
         </div>
         <Collapsible open={isAdvancedOpen} onOpenChange={setIsAdvancedOpen}>
           <CollapsibleTrigger asChild>

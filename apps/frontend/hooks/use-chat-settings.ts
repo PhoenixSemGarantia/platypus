@@ -3,7 +3,7 @@ import { Chat } from "@platypus/schemas";
 import { useResetOnChange } from "@/hooks/use-reset-on-change";
 
 export interface ChatSettings {
-  systemPrompt: string;
+  instructions: string;
   temperature: number | undefined;
   topP: number | undefined;
   topK: number | undefined;
@@ -16,7 +16,7 @@ export const useChatSettings = (
   chatData: Chat | undefined,
   agentId: string,
 ) => {
-  const [systemPrompt, setSystemPrompt] = useState("");
+  const [instructions, setInstructions] = useState("");
   const [temperature, setTemperature] = useState<number | undefined>();
   const [topP, setTopP] = useState<number | undefined>();
   const [topK, setTopK] = useState<number | undefined>();
@@ -31,7 +31,7 @@ export const useChatSettings = (
   // chat data or the selected agent changes.
   const initializeFromChat = () => {
     if (chatData && !agentId) {
-      setSystemPrompt(chatData.systemPrompt || "");
+      setInstructions(chatData.instructions || "");
       setTemperature(chatData.temperature ?? undefined);
       setTopP(chatData.topP ?? undefined);
       setTopK(chatData.topK ?? undefined);
@@ -44,7 +44,7 @@ export const useChatSettings = (
   useResetOnChange(agentId, initializeFromChat);
 
   const settings: ChatSettings = {
-    systemPrompt,
+    instructions,
     temperature,
     topP,
     topK,
@@ -54,7 +54,7 @@ export const useChatSettings = (
   };
 
   const setters = {
-    setSystemPrompt,
+    setInstructions,
     setTemperature,
     setTopP,
     setTopK,

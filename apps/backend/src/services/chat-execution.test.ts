@@ -105,7 +105,7 @@ const baseAgent = {
   providerId: "p1",
   modelId: "gpt-4",
   maxSteps: 3,
-  systemPrompt: null,
+  instructions: null,
   temperature: null,
   topP: null,
   topK: null,
@@ -178,7 +178,7 @@ describe("chat-execution", () => {
       expect(turn.resolved.providerId).toBe(baseProvider.id);
       expect(turn.resolved.modelId).toBe("gpt-4");
       // Agent-driven turn → row stores no copy of generation params
-      expect(turn.resolved.systemPrompt).toBeUndefined();
+      expect(turn.resolved.instructions).toBeUndefined();
       expect(turn.resolved.temperature).toBeUndefined();
 
       // stream is what streamText will consume
@@ -326,7 +326,7 @@ describe("chat-execution", () => {
           request: {
             providerId: baseProvider.id,
             modelId: "gpt-4",
-            systemPrompt: "Be terse.",
+            instructions: "Be terse.",
             temperature: 0.7,
           },
         },
@@ -337,10 +337,11 @@ describe("chat-execution", () => {
       expect(turn.resolved.providerId).toBe(baseProvider.id);
       expect(turn.resolved.modelId).toBe("gpt-4");
       // Direct turn → resolved carries the params that will be written to the
-      // row. The prompt written back MUST be exactly what the user typed: this
-      // value is what Chat settings reopens as editable text, so persisting the
-      // composed prompt here makes it compound on every turn (issue #365).
-      expect(turn.resolved.systemPrompt).toBe("Be terse.");
+      // row. The instructions written back MUST be exactly what the user typed:
+      // this value is what Chat settings reopens as editable text, so persisting
+      // the composed system prompt here makes it compound on every turn
+      // (issue #365).
+      expect(turn.resolved.instructions).toBe("Be terse.");
       expect(turn.resolved.temperature).toBe(0.7);
 
       // ...while the prompt actually sent to the model is still the full

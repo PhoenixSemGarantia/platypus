@@ -279,7 +279,7 @@ describe("Agent Schema", () => {
       providerId: "provider-123",
       name: "Test Agent",
       description: "A test agent",
-      systemPrompt: "You are a helpful assistant",
+      instructions: "You are a helpful assistant",
       modelId: "gpt-4",
       temperature: 0.7,
       maxSteps: 10,

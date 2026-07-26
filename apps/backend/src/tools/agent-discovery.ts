@@ -116,7 +116,7 @@ export function createAgentDiscoveryTools(
           description: agentTable.description,
           providerId: agentTable.providerId,
           modelId: agentTable.modelId,
-          systemPrompt: agentTable.systemPrompt,
+          instructions: agentTable.instructions,
           maxSteps: agentTable.maxSteps,
           temperature: agentTable.temperature,
           topP: agentTable.topP,

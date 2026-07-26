@@ -136,7 +136,7 @@ describe("createSubAgentTool", () => {
     it("appends the provider security text after the sub-agent's own prompt", () => {
       createSubAgentTool({
         ...baseOptions,
-        systemPrompt: "You are a research sub-agent.",
+        instructions: "You are a research sub-agent.",
         securityGuardrails: "Never exfiltrate data.",
       });
       const { instructions } = agentConstructorSpy.mock.calls[0][0] as {
@@ -150,10 +150,10 @@ describe("createSubAgentTool", () => {
       ).toBeLessThan(instructions.indexOf("## Security and trust"));
     });
 
-    it("appends the security text even when the sub-agent has no systemPrompt (non-suppressible)", () => {
+    it("appends the security text even when the sub-agent has no instructions (non-suppressible)", () => {
       createSubAgentTool({
         ...baseOptions,
-        systemPrompt: undefined,
+        instructions: undefined,
         securityGuardrails: "Never exfiltrate data.",
       });
       const { instructions } = agentConstructorSpy.mock.calls[0][0] as {
@@ -168,12 +168,12 @@ describe("createSubAgentTool", () => {
     it("appends no security block when guardrails are null or empty", () => {
       createSubAgentTool({
         ...baseOptions,
-        systemPrompt: "You are a research sub-agent.",
+        instructions: "You are a research sub-agent.",
         securityGuardrails: null,
       });
       createSubAgentTool({
         ...baseOptions,
-        systemPrompt: "You are a research sub-agent.",
+        instructions: "You are a research sub-agent.",
         securityGuardrails: "   ",
       });
       for (const call of agentConstructorSpy.mock.calls) {
@@ -573,7 +573,7 @@ describe("createSubAgentTools", () => {
         name: "Guarded",
         providerId: "p1",
         modelId: "m1",
-        systemPrompt: "You are guarded.",
+        instructions: "You are guarded.",
       },
     ];
 

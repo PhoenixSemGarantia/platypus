@@ -27,7 +27,7 @@ const planWithAgent: ResolvedRunPlan = {
     providerId: "p1",
     modelId: "m1",
     // prepareChatTurn already nulls these for agent runs
-    systemPrompt: undefined,
+    instructions: undefined,
     temperature: undefined,
     topP: undefined,
     topK: undefined,
@@ -42,7 +42,7 @@ const planAdhoc: ResolvedRunPlan = {
     agentId: undefined,
     providerId: "p1",
     modelId: "m1",
-    systemPrompt: "raw prompt",
+    instructions: "raw instructions",
     temperature: 0.7,
     topP: 0.9,
     topK: 5,
@@ -182,7 +182,7 @@ describe("ChatSink", () => {
       expect(finishSet.agentId).toBe("a1");
       expect(finishSet.providerId).toBeNull();
       expect(finishSet.modelId).toBeNull();
-      expect(finishSet.systemPrompt).toBeNull();
+      expect(finishSet.instructions).toBeNull();
       expect(finishSet.temperature).toBeNull();
       expect(finishSet.topP).toBeNull();
       expect(finishSet.seed).toBeNull();
@@ -254,7 +254,7 @@ describe("ChatSink", () => {
       expect(finishSet.agentId).toBeNull();
       expect(finishSet.providerId).toBe("p1");
       expect(finishSet.modelId).toBe("m1");
-      expect(finishSet.systemPrompt).toBe("raw prompt");
+      expect(finishSet.instructions).toBe("raw instructions");
       expect(finishSet.temperature).toBe(0.7);
       expect(finishSet.topP).toBe(0.9);
       expect(finishSet.topK).toBe(5);
