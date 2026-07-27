@@ -11,11 +11,8 @@ This section is for **contributors** working in the Platypus codebase and for
 extension points — the core-owned seams a plugin's manifest fills — and states
 the rules each one imposes.
 
-Every rule that matters is stated on this page. If you want the alternatives a
-rule was chosen over, the repository's [Architecture Decision
-Records](https://github.com/willdady/platypus/tree/main/docs/adr) are the
-maintainers' working record; they are not part of these docs and can lag the
-code.
+Every rule that matters is stated on this page, in its own words, as it holds
+today.
 
 Platypus extends itself through **plugins** (see
 [the plugin model](#the-plugin-model) below). A plugin exports a typed
@@ -209,8 +206,10 @@ not a Provider variant, an MCP server, or a general-purpose plugin surface.
 Adapters cannot add, rename or re-sign Tools, and an Agent's prompt must not
 depend on which backend it runs on. That is what lets you swap the reference
 Docker adapter for Modal or Daytona without re-prompting.
-([ADR-0002](https://github.com/willdady/platypus/blob/main/docs/adr/0002-sandbox-fixed-five-tool-core.md)
-records the rejected open-contract alternative.)
+
+The contract is closed, not a floor to build on: a backend that can do more
+than the five tools exposes the extra through a Tool set, not through the
+`SandboxBackend` interface.
 
 ### The interface
 
@@ -595,5 +594,6 @@ Two rules constrain anything you add to this model:
   this way — capturing a Workspace's row into an Organization-scoped resource
   would leak one tenant's environment into another's.
 
-([ADR-0007](https://github.com/willdady/platypus/blob/main/docs/adr/0007-organization-scoped-shared-resources.md)
-records the rejected copy-on-share and implicit-cascade alternatives.)
+Promotion is never resolved for you: it fails on an unmet prerequisite rather
+than pulling the referenced resource up alongside it, so nothing becomes
+Organization-readable that an Org Admin didn't name.
