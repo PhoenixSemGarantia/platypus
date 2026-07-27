@@ -52,9 +52,10 @@ that list.
 
 ## Attaching files
 
-Not every model can read every file. Which types a model takes **natively** is
-declared per model on the Provider, and what happens to an attachment follows
-from that:
+Not every model can read every file. A file you attach to a message is a **File
+part**, carried alongside the message's text. Which types a model takes
+**natively** is declared per model on the Provider, and what happens to each
+File part follows from that:
 
 - **It's a type the model reads natively** (usually images, and PDFs on the
   frontier vendors) — the file goes through untouched.
@@ -63,7 +64,7 @@ from that:
   regardless of what the model natively accepts.
 - **It's a PDF or DOCX the model can't take natively** — the text is extracted
   and sent in the file's place, marked as extracted text. This is what makes
-  attachments usable with local and proxied models.
+  File parts usable with local and proxied models.
 - **It's anything else** — the turn is refused before it runs, naming the file,
   and nothing is saved to the Chat. You can remove the file or switch to a model
   that accepts it.
@@ -77,7 +78,7 @@ from that:
 
 **Why this matters to you:** attaching a PDF to a small self-hosted model still
 works, but the model is reading a text rendering of it, not the document. The
-Chat warns you when the model you've selected can't read an attachment natively,
+Chat warns you when the model you've selected can't read a File part natively,
 and refuses up front rather than failing mid-turn. Org Admins configure the
 per-model types — see [Self-Hosting → Providers &
 authentication](/self-hosting/providers-and-auth).

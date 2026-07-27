@@ -66,3 +66,10 @@ for serving from a CDN, leaving the host deliberately deferred. We now deploy th
 
 This supersedes "built to a static export … served from a CDN" and the deferred-host note;
 the rest of the ADR (Nextra choice, latest-only, IA, independence from `CONTEXT.md`) stands.
+
+## Update (2026-07-27)
+
+Two points above need reconciling with what the docs site now does (#370). Flagged, not decided — the reconciliation is a follow-up, and this ADR's history stands as written.
+
+- **Three ADR links survive on the public site.** The context paragraph says `docs/adr/` is "**not published**" and that public pages "are written independently for end users." #370 cut 19 of 22 ADR links from `apps/docs/content` and inlined the facts that only lived behind them, but kept three in `/extending`: ADR-0002, ADR-0007, and a pointer to the `docs/adr` directory. Each is reframed so the page states the rule and the ADR is a trailing parenthetical for a reader who wants the rejected alternatives. That is a deliberate exception for the contributor-facing section, not a drift — but this ADR does not currently sanction it. Either amend it with an explicit rule (something like: ADR links are permitted only in `/extending`, only for `accepted` and shipped ADRs, and only where the page already carries the rule) or cut the last three.
+- **"Read the docs by checking out the tag" does not survive contact with the images.** The consequence bullet assumes a self-hoster on an old release has the matching docs in their checkout. True — but `compose.yaml` pins `:latest`, so checking out an old tag and running `docker compose up -d` pulls the newest images and rolls nothing back. The docs now say so and tell operators to pin version tags in a `compose.override.yaml` instead. The docs-versioning decision is unaffected; the rollback story the bullet implies is not the one to give operators.

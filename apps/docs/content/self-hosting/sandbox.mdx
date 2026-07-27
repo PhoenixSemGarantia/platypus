@@ -59,14 +59,10 @@ docker compose -f compose.yaml -f compose.sandbox.yaml up
 ```
 
 <Callout type="warning">
-  **The overlay replaces `PLATYPUS_PLUGINS`; it does not merge.** It sets the
-  variable under `services.backend.environment`, which outranks the base
-  `env_file: .env` — so whatever list you put in `.env` is discarded. The
-  shipped overlay reads `@platypus/web-fetch,@platypus/docker`; add
-  `@platypus/ssh` (or a third-party plugin) to `.env` and compose the overlay,
-  and it is silently dropped with no error. Edit the list **inside
-  `compose.sandbox.yaml`** to your deployment's complete gate-able set, then
-  confirm what loaded in **Organization settings → Plugins**.
+  **The overlay replaces `PLATYPUS_PLUGINS`; it does not merge.** Whatever list
+  you put in `.env` is discarded, silently. Edit the list **inside
+  `compose.sandbox.yaml`** to your deployment's complete gate-able set — see
+  [Configuration → Plugins](/self-hosting/configuration#plugins).
 </Callout>
 
 Each container is spawned with fixed resource and security limits — a process
@@ -106,8 +102,8 @@ Reachability is fixed at container creation. The adapter reuses whatever
 container already exists for the Workspace — starting it if it is stopped — and
 only reads `networks` and `extraHosts` when it creates a new one. So saving a
 changed allowlist has **no effect on a running sandbox**, and there is no
-"Recreate now" button or "pending" badge in the app to tell you so. The Sandbox
-screen offers **Save** and **Delete**, nothing else.
+"Recreate now" button or "pending" badge in the app to tell you so. On an
+existing Sandbox the screen offers **Update** and **Delete**, nothing else.
 
 Two ways to make a change take:
 

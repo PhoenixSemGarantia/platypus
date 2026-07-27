@@ -34,9 +34,29 @@ the server-side renderer.
   `basePath` into the compiled output during `next build`, so setting
   `BASE_PATH` in the Docker `.env` does nothing — the published
   `willdady/platypus-frontend` image was built without it and keeps serving at
-  the root. To deploy under a subpath you have to build your own frontend image
-  with `BASE_PATH` set in the build environment. Every other variable on this
-  page is read at run time and works from `.env` as expected.
+  the root. Every other variable on this page is read at run time and works
+  from `.env` as expected.
+</Callout>
+
+Deploying under a subpath therefore means **building your own frontend image**.
+`apps/frontend/Dockerfile` declares no `ARG` for it, so passing `--build-arg`
+alone won't reach `next build` either — add the argument and export it in the
+builder stage:
+
+```dockerfile
+FROM base AS builder
+ARG BASE_PATH
+ENV BASE_PATH=$BASE_PATH
+```
+
+```bash
+docker build -f apps/frontend/Dockerfile --build-arg BASE_PATH=/platypus-app .
+```
+
+<Callout type="info">
+  A path-stripping reverse proxy is the alternative, and needs no rebuild: have
+  the proxy serve the app at the subpath and forward requests with the prefix
+  removed, so the app still believes it is at the root.
 </Callout>
 
 ## Other

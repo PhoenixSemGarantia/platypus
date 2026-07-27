@@ -73,7 +73,7 @@ _Avoid_: registration, extension.
 Deployment-wide configuration and credentials for a Plugin, set by the Operator at deploy time and shared across all of that Plugin's Contributions and all tenants. Distinct from per-Workspace resource settings (e.g. a Sandbox's per-Workspace config and credentials), which remain Org-Admin- and Workspace-Owner-governed.
 
 **Memory**:
-A persisted summary of prior activity, retrieved per-User per-Workspace and rendered into the system prompt when the Agent's Tool sets include the memory tool set.
+A persisted summary of prior activity, retrieved per-User per-Workspace and rendered into the system prompt on **every** Chat turn once the Workspace has a memory-extraction Provider set — not gated on the Agent's Tool sets. The `memory` Tool set is a separate, additive thing: it grants `memorySearch` / `memoryGet` for reaching beyond the summaries already in the prompt.
 
 **Context** (User Context):
 Free-text notes a User attaches at global or per-Workspace scope, rendered into the system prompt.

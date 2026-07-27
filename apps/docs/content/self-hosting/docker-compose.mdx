@@ -237,16 +237,8 @@ and running `docker compose up -d` from there pulls `:latest` — the newest
 release — and rolls nothing back, because the shipped compose file doesn't pin a
 version.
 
-Edit the pinned tags in your `compose.override.yaml` back to the previous
-version and bring the stack up again:
-
-```yaml
-services:
-  backend:
-    image: willdady/platypus-backend:2.2.0
-  frontend:
-    image: willdady/platypus-frontend:2.2.0
-```
+Edit the pinned tags in your `compose.override.yaml` back to the version you
+were on, and bring the stack up again:
 
 ```bash
 docker compose up -d

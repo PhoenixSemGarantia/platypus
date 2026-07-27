@@ -90,7 +90,7 @@ extend Platypus's _own_ capabilities; they don't duplicate MCP.
 
 > **Contributions welcome.** New extension points, and third-party plugins in the wild,
 > are both open. The messaging gateway (below) will _not_ become an extension point —
-> its channel adapters live in the separate gateway app behind their own seam.
+> its Gateway adapters live in the separate gateway app behind their own seam.
 
 ### SSH Sandbox backend — 2.0.0
 
