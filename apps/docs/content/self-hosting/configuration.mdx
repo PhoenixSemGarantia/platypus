@@ -41,6 +41,16 @@ frontend reaches the backend by two different paths:
 These have to agree. If the browser loads the app from one origin but
 `BETTER_AUTH_URL` points somewhere else, sign-in cookies won't stick.
 
+<Callout type="warning">
+  **Treat `ALLOWED_ORIGINS`, `FRONTEND_URL` and `BACKEND_URL` as one set that
+  changes together** (plus `BETTER_AUTH_URL`, which compose derives from
+  `BACKEND_URL`). Moving a deployment off `localhost` and updating only some of
+  them gives you a sign-in that appears to succeed and then immediately signs
+  you out — the cookie was issued against an origin the browser isn't on, so
+  the next request arrives unauthenticated. There is no error message for this;
+  change all of them in one edit.
+</Callout>
+
 ### CORS / trusted origins
 
 `ALLOWED_ORIGINS` is a comma-separated list of origins permitted to call the
@@ -48,13 +58,17 @@ backend. It feeds both the API's CORS policy and better-auth's trusted-origins
 list. Include every origin the browser loads the frontend from; a missing entry
 shows up as blocked cross-origin requests or failed sign-in.
 
+It is **not optional**. The backend reads and splits it at module load, so an
+unset value throws before the HTTP server starts — the container exits rather
+than serving with permissive CORS. Set it even on a single-origin deployment.
+
 ## Database
 
 `DATABASE_URL` is the PostgreSQL connection string. In compose it points at the
 bundled `database` service. The database must be PostgreSQL 17 with the
 `pgvector` extension available (the backend enables the extension on startup);
-embeddings for [Memory](/concepts) are stored as vectors, so `pgvector` is not
-optional. PostgreSQL 18 is not supported.
+embeddings for [Memory](/concepts/memory-and-context) are stored as vectors, so
+`pgvector` is not optional. PostgreSQL 18 is not supported.
 
 ## Authentication
 
@@ -63,8 +77,11 @@ at `/auth/*` on the backend. The essentials:
 
 - **`BETTER_AUTH_SECRET`** — the signing secret for sessions and tokens. Set a
   strong, unique value; rotating it invalidates existing sessions.
-- **`ADMIN_EMAIL` / `ADMIN_PASSWORD`** — used only to seed the first admin user
-  on an empty database (see [Deploy with Docker Compose](/self-hosting/docker-compose)).
+- **`ADMIN_EMAIL` / `ADMIN_PASSWORD`** — used only to seed the first admin user,
+  and **required on first boot** with no default in code: the backend exits
+  without starting the HTTP server if either is unset against an empty database.
+  See [what first boot creates](/self-hosting/docker-compose#what-first-boot-creates)
+  for the seeding rule and the recovery path.
 
 The deeper model — Providers, the role ladder, and the default admin — lives in
 [Providers & authentication](/self-hosting/providers-and-auth).
@@ -86,21 +103,36 @@ Plugins come in two tiers:
   is the single, auditable statement of what _optional_ plugins run — a
   comma-separated list of plugin names.
 
-**The default `PLATYPUS_PLUGINS` shipped in `.env.example`:**
+**The core plugins.** This page owns the list; other pages link here rather than
+repeat it.
+
+| Plugin                     | Tier      | Contributes                                                                                          |
+| -------------------------- | --------- | ---------------------------------------------------------------------------------------------------- |
+| `@platypus/tools-basic`    | Always-on | Pure-utility Tool sets — math conversions, time.                                                     |
+| `@platypus/tools-platform` | Always-on | The Platypus-domain Tool sets — kanban, dashboards, triggers, memory, notifications, agent discovery/management, skill management. |
+| `@platypus/web-fetch`      | Gate-able | The web-fetch Tool set. Its own plugin so **network egress** can be denied in isolation.             |
+| `@platypus/docker`         | Gate-able | The Docker Sandbox backend. Opt-in infra; also needs the `compose.sandbox.yaml` overlay.             |
+| `@platypus/ssh`            | Gate-able | The SSH Sandbox backend — attach to a host you already run. The one backend viable in horizontally-scaled deployments. |
+
+The two always-on plugins load unconditionally and must not be listed. The three
+gate-able ones load only when named in `PLATYPUS_PLUGINS`. All five are internal
+backend modules — their `@platypus/*` names are logical ids, not npm packages, so
+there is nothing to install.
+
+**The default:** `PLATYPUS_PLUGINS` has **no default in code**. Unset or empty
+means _no gate-able plugins_ — you get the always-on core Tool sets and nothing
+else, including no web-fetch. The `@platypus/web-fetch` you may have seen quoted
+as "the default" is a value the shipped `.env.example` writes, not a fallback the
+backend applies:
 
 ```
 PLATYPUS_PLUGINS=@platypus/web-fetch
 ```
 
-- `@platypus/web-fetch` — the web-fetch Tool set. It ships as its own gate-able
-  plugin so its **network egress** can be denied in isolation: drop it from the
-  list and the always-on core tools stay.
-- `@platypus/docker` — the Docker Sandbox backend — is **intentionally not** in
-  the default. It's opt-in infra; add it only when you want a Sandbox (see
-  [Sandbox](#sandbox)).
-
 Since `compose.yaml` reads the backend's `env_file: .env`, a deployment seeded
-from `.env.example` gets this list; pin your own by editing the value.
+from `.env.example` gets that list. A deployment that builds its environment
+some other way — Kubernetes, a secret manager, a hand-written `.env` — gets an
+empty list unless it says otherwise, and silently runs without web-fetch.
 
 - **For a gate-able plugin, list membership both loads and enables it.** There is
   no separate enable switch — adding a name turns a plugin on, removing it turns
@@ -117,6 +149,19 @@ from `.env.example` gets this list; pin your own by editing the value.
   with a plugin-named error — a misconfigured plugin never silently drops tools.
 - **New gate-able core plugins in a later release are not auto-enabled** — add
   them to your pinned list to opt in.
+
+<Callout type="warning">
+  **`compose.sandbox.yaml` replaces `PLATYPUS_PLUGINS` — it does not merge.**
+  The overlay sets the variable under `services.backend.environment`, which
+  Compose resolves at higher precedence than the base `env_file: .env`. Whatever
+  you wrote in `.env` is discarded, not appended to. The overlay ships
+  `@platypus/web-fetch,@platypus/docker`, so an operator who adds
+  `@platypus/ssh` to `.env` and then composes the overlay silently loses it —
+  no error, the SSH backend simply isn't registered. When you run the overlay,
+  the list **inside `compose.sandbox.yaml`** must be your deployment's complete
+  gate-able set. Confirm what actually loaded in **Organization settings →
+  Plugins**.
+</Callout>
 
 See [Extending → the plugin model](/extending#the-plugin-model) for how a
 manifest's `contributes` block fills extension points.
@@ -183,10 +228,10 @@ your secret manager, never commit it.
 
 ## Sandbox
 
-The [Sandbox](/concepts) (agent shell/filesystem access) is **off by default**.
-Platypus ships two reference backends, each enabled by listing its plugin in
-`PLATYPUS_PLUGINS`. Without the plugin listed, that backend type isn't registered
-and its sandbox configuration is inert:
+The [Sandbox](/concepts/sandboxes) (agent shell/filesystem access) is **off by
+default**. Platypus ships two reference backends, each enabled by listing its
+plugin in `PLATYPUS_PLUGINS`. Without the plugin listed, that backend type isn't
+registered and its sandbox configuration is inert:
 
 - **Docker** — `@platypus/docker`. One container per Workspace on the local
   daemon; development / single-node only. Its Operator allowlist —
@@ -211,7 +256,10 @@ These rarely need changing but exist when you need them — see the
 - **Storage** — uploaded files go to local disk by default; an S3-compatible
   backend can be selected instead.
 - **Logging** — log verbosity is configurable.
-- **Time** — a deployment-wide IANA timezone for time-aware tools and schedules.
+- **Time** — `TIMEZONE` sets the zone the **time Tools** report and convert in
+  (`getCurrentTime`, `convertTimezone`). That is its entire reach: it does not
+  affect Trigger schedules, which carry their own per-Trigger timezone chosen in
+  the Trigger form, and it does not affect log timestamps.
 - **Schedulers & runs** — concurrency caps and per-run / per-step timeouts for
   scheduled and triggered agent executions.
 

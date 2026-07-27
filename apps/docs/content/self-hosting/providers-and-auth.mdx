@@ -16,13 +16,27 @@ authentication model and roles that govern who may do so.
 
 A **Provider** is a configured connection to an AI vendor. It carries the
 credentials and settings Platypus needs to call that vendor's models, and it is
-referenced by an [Agent](/concepts) (or selected directly on a chat turn).
+referenced by an [Agent](/concepts/agents) (or selected directly on a chat turn).
 
 ### Supported vendors
 
-Platypus speaks to OpenAI, OpenRouter, Amazon Bedrock, Google, and Anthropic.
-OpenAI-compatible endpoints (e.g. vLLM) are reachable through the OpenAI
-provider type by overriding the base URL.
+There are exactly five Provider types: **OpenAI**, **OpenRouter**, **Bedrock**,
+**Google**, **Anthropic**. The form offers no others, and the list is fixed in
+code — there is no "custom vendor" type.
+
+That is not the same as five supported endpoints. Anything speaking the OpenAI
+API is reached through the **OpenAI** type with `baseUrl` pointed at it:
+
+| You want to run… | Provider type | What you set                                                                    |
+| ---------------- | ------------- | --------------------------------------------------------------------------------- |
+| Ollama           | OpenAI        | `baseUrl` → your Ollama host's `/v1`; any non-empty API key                      |
+| vLLM             | OpenAI        | `baseUrl` → your vLLM server; usually `apiMode: "chat"`                          |
+| Azure OpenAI     | OpenAI        | `baseUrl` → your Azure deployment endpoint                                       |
+| LiteLLM / a proxy| OpenAI        | `baseUrl` → the gateway (see [Fronting a Provider with a proxy](#fronting-a-provider-with-a-proxy)) |
+
+So "is my stack supported?" comes down to: does it speak the OpenAI API? If yes,
+it works through the OpenAI type. If it speaks only a bespoke protocol, put a
+translating gateway in front of it.
 
 ### What a Provider holds
 
@@ -112,7 +126,15 @@ Because Providers are credential-bearing, **creating and editing them is an Org
 Admin task by default**. An Org Admin may delegate self-management of
 _workspace-scoped_ Providers to a Workspace Owner per-Workspace (for legitimate
 personal-credential cases), but the default is admin-managed. See
-[Concepts](/concepts) for the Scoped/Shared resource model.
+[Sharing across workspaces](/concepts/sharing) for the Scoped/Shared resource
+model.
+
+<Callout type="info">
+  A Provider has no **Promote** action — only Agents and Skills do. To make one
+  available across the Organization, create it at Organization scope in the
+  first place: **Organization settings → Providers → Add provider**. Same for
+  MCPs.
+</Callout>
 
 ## Guardrails: the three-layer model
 
@@ -193,12 +215,12 @@ already-sanctioned capabilities stay owner-managed.
 
 ## The default admin
 
-On first boot against an empty database, the backend seeds a Default
-Organization, a Default Workspace, and an admin user from `ADMIN_EMAIL` /
-`ADMIN_PASSWORD`. That user is the platform `admin` — your **Operator** and first
-**Org Admin**. The seed runs exactly once, so set those values before the first
-start and change the password from account settings after you sign in. Full
-mechanics are in [Deploy with Docker Compose](/self-hosting/docker-compose).
+The user seeded on first boot from `ADMIN_EMAIL` / `ADMIN_PASSWORD` is the
+platform `admin` — your **Operator** and first **Org Admin**. Both variables are
+required on first boot and have no default in code. The seeding rule, what
+exactly gets created, and how to recover from a failed first boot are stated
+once, in
+[what first boot creates](/self-hosting/docker-compose#what-first-boot-creates).
 
 ## Next steps
 

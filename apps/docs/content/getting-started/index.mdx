@@ -32,13 +32,13 @@ Open `.env` and set, at minimum:
 
 - **`BETTER_AUTH_SECRET`** — a secure random string (32+ characters). The app
   signs session tokens with this; treat it like a password.
-- **`ADMIN_EMAIL`** / **`ADMIN_PASSWORD`** — the first admin account, created on
-  first startup (see [First run](#first-run--the-default-admin) below).
-- **`TIMEZONE`** — an IANA timezone name (e.g. `America/New_York`,
-  `Europe/London`) used for scheduling and timestamps. Defaults to `UTC`.
+- **`ADMIN_EMAIL`** / **`ADMIN_PASSWORD`** — the first admin account. **Required
+  on first boot**: the backend exits rather than starting without them (see
+  [First run](#first-run--the-default-admin) below).
 
-The remaining options have sensible defaults — see the comments in
-`.env.example`, and the [Reference](/reference) section for the full list.
+The shipped `.env.example` fills in everything else for `localhost`, so a
+laptop run needs no other edits. See the [Reference](/reference) for the full
+list.
 
 ### Start the application
 
@@ -56,9 +56,9 @@ Open [http://localhost:3000](http://localhost:3000) and sign in with the
 </Steps>
 
 <Callout type="warning">
-  If you didn't change them, the defaults are `admin@example.com` / `admin123`.
-  **Change the password immediately after your first login**, especially on any
-  network-reachable deployment.
+  If you left `.env.example`'s values in place, they are `admin@example.com` /
+  `admin123`. **Change the password immediately after your first login**,
+  especially on any network-reachable deployment.
 </Callout>
 
 For a production-grade deployment — TLS, persistent storage, S3-backed file
@@ -66,21 +66,21 @@ storage, and configuration hardening — see [Self-Hosting](/self-hosting).
 
 ## First run & the default admin
 
-On first startup Platypus seeds a single platform admin from the environment:
+First boot against an empty database creates four things: a **Default
+Organization**, an **admin user** from `ADMIN_EMAIL` / `ADMIN_PASSWORD`, that
+user's membership of the Organization, and a **Default Workspace** named
+_Default Workspace_ that the admin owns.
 
-| Variable         | Default               | Purpose                         |
-| ---------------- | --------------------- | ------------------------------- |
-| `ADMIN_EMAIL`    | `admin@example.com`   | Login for the first admin user  |
-| `ADMIN_PASSWORD` | `admin123`            | Password for that user          |
-
-This account is the **Operator** — the platform super-admin who bypasses
-in-app authorization. Use it to create your first Organization and Workspace,
-then create regular users for day-to-day work.
+That admin account is the **Operator** — the platform super-admin who bypasses
+in-app authorization. Sign in with it, and you are already inside a usable
+Workspace; you don't have to create one. Add regular users for day-to-day work.
 
 <Callout type="info">
-  The seed runs only when no matching admin exists. Changing `ADMIN_PASSWORD`
-  in `.env` later does **not** reset an already-created account — change the
-  password from within the app instead.
+  The seed runs when the database has **no Organizations**, and only then.
+  Editing `ADMIN_EMAIL` / `ADMIN_PASSWORD` afterwards changes nothing — change
+  the password from within the app. The full rule and the recovery path for a
+  first boot that failed are in
+  [what first boot creates](/self-hosting/docker-compose#what-first-boot-creates).
 </Callout>
 
 ## Your first agent
@@ -89,13 +89,14 @@ Once you're signed in, here's the end-to-end loop to a working agent reply.
 
 <Steps>
 
-### Create a Workspace
+### Open your Workspace
 
-After signing in you land on your Organization. A fresh install has an empty
-Organization and no Workspaces.
+After signing in you land on the **Default Organization**, which already
+contains a **Default Workspace** you own — first boot created it. Click into it
+to reach the Workspace dashboard, and skip straight to the next step.
 
-Click **Add workspace**, give it a **Name**, leave yourself as the **Owner**,
-and click **Save**. You'll land on the Workspace dashboard.
+Want a separate one anyway? Click **Add workspace**, give it a **Name**, leave
+yourself as the **Owner**, and click **Save**.
 
 > A **Workspace** is your scoped environment — it holds your Chats, Agents,
 > Skills, MCP servers, and Providers. See [Concepts](/concepts) for how
@@ -109,12 +110,16 @@ a **No providers configured** prompt — click **Add provider** (or go to
 
 Fill in the form:
 
-- **Provider Type** — your AI vendor: OpenAI, OpenRouter, Anthropic, Google, or
-  Bedrock.
+- **Provider Type** — your AI vendor. Exactly five: OpenAI, OpenRouter,
+  Anthropic, Google, Bedrock. Running Ollama, vLLM or Azure OpenAI? Pick
+  **OpenAI** and set **Base URL** — see
+  [Supported vendors](/self-hosting/providers-and-auth#supported-vendors).
 - **Name** — a label for this connection.
 - **API Key** — your credential from that vendor.
-- **Model IDs** — the models you want to allow, one per line (e.g.
-  `gpt-4o`, `claude-sonnet-4-6`).
+- **Models** — a repeatable list, not a text box. Click **Add model** for each
+  one, type its id into the **Model ID** field (e.g. `gpt-4o`,
+  `claude-sonnet-4-6`), and leave the per-model file-type checkboxes alone for
+  now.
 
 Click **Save**.
 

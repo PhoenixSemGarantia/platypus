@@ -32,6 +32,22 @@ at once. No drift, no copy-paste.
   explicit and per-resource — it never cascades implicitly.
 </Callout>
 
+### The Sandbox is the exception, and deliberately so
+
+A **Sandbox** is not a Shared resource — it belongs to exactly one Workspace and
+can't be promoted or attached. Yet a Shared Agent can be granted the **Sandbox**
+Tool set, and it works in every Workspace it's attached to.
+
+That's because the Sandbox Tool set doesn't resolve to a fixed Sandbox. It
+rebinds at **Chat-turn time** to the Sandbox of the Workspace the turn is running
+in. One Shared "build and test" Agent therefore runs against each Workspace's own
+sandbox — the Agent is shared, the execution environment is not, and no
+Workspace's files are reachable from another's.
+
+The corollary: the same Shared Agent behaves differently per Workspace. Attached
+to a Workspace with no Sandbox configured, its shell and filesystem tools simply
+aren't there for that turn.
+
 ## Attachment
 
 A Shared resource doesn't automatically appear in every Workspace. An
@@ -53,6 +69,15 @@ Admins.
 **Why you'd use it:** you built a great Agent in your own Workspace, and now the
 whole Organization should have it. Promoting it makes it shared without rebuilding
 it from scratch.
+
+<Callout type="info">
+  **Promote exists for Agents and Skills only.** There is no Promote action on an
+  MCP or a Provider — don't go looking for one. Those two reach Organization
+  scope a different way: create them there directly, under **Organization
+  settings → MCP → Add MCP** or **Organization settings → Providers → Add
+  provider**. A Workspace-scoped MCP or Provider stays Workspace-scoped for
+  life; to share one, recreate it at Organization scope.
+</Callout>
 
 ## Blueprint
 

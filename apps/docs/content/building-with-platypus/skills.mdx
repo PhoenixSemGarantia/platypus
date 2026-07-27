@@ -29,9 +29,11 @@ From your Workspace, go to the **Skills** section and click **Create skill**.
 - **Description** — a brief summary of what the Skill does and when to reach for
   it (24–1024 characters). The model reads this to decide _whether_ a request is
   relevant, so make it specific.
-- **Body** — the full instructions, up to 50,000 characters. This is what the
+- **Body** — the full instructions, **48–50,000 characters**. This is what the
   model receives only after it loads the Skill, so be as detailed as you like:
-  step-by-step procedures, examples, formatting rules, edge cases.
+  step-by-step procedures, examples, formatting rules, edge cases. The 48-character
+  floor is enforced on save, so a one-line placeholder body is rejected — write
+  the real instructions or don't create the Skill yet.
 
 </Steps>
 

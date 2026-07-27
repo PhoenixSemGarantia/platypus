@@ -58,6 +58,13 @@ Enable it by composing the overlay alongside the default stack:
 docker compose -f compose.yaml -f compose.sandbox.yaml up
 ```
 
+<Callout type="warning">
+  **The overlay replaces `PLATYPUS_PLUGINS`; it does not merge.** Whatever list
+  you put in `.env` is discarded, silently. Edit the list **inside
+  `compose.sandbox.yaml`** to your deployment's complete gate-able set — see
+  [Configuration → Plugins](/self-hosting/configuration#plugins).
+</Callout>
+
 Each container is spawned with fixed resource and security limits — a process
 cap (`PidsLimit`), a memory ceiling, and `no-new-privileges` — to contain
 runaway or hostile workloads. These are hardcoded in the adapter, not
@@ -89,9 +96,33 @@ The authority chain is honest and runs top-down:
 - A **Workspace Owner** cannot change reachability at all (a non-admin Owner gets
   a 403).
 
-Reach changes are pending until the container is recreated — consistent with the
-frozen-container rule — surfaced in-app as a "Pending — applies on recreate"
-badge with a "Recreate now" action.
+### Applying changed reachability
+
+Reachability is fixed at container creation. The adapter reuses whatever
+container already exists for the Workspace — starting it if it is stopped — and
+only reads `networks` and `extraHosts` when it creates a new one. So saving a
+changed allowlist has **no effect on a running sandbox**, and there is no
+"Recreate now" button or "pending" badge in the app to tell you so. On an
+existing Sandbox the screen offers **Update** and **Delete**, nothing else.
+
+Two ways to make a change take:
+
+1. **Delete the Sandbox and create it again.** Deleting the row fires the
+   adapter's `destroy()`, which removes the container and its volume; the next
+   tool call provisions a fresh container with the new reachability. Changing
+   the **backend** on an existing row does the same thing — it is a
+   destroy-then-update.
+2. **Remove the container out of band**, leaving the row alone:
+   `docker rm -f platypus-sandbox-<workspaceId>`. The named volume
+   `platypus-sandbox-vol-<workspaceId>` survives, so the sandbox filesystem
+   comes back with the container.
+
+<Callout type="error">
+  **Deleting a Sandbox destroys its data.** The Docker adapter's `destroy()`
+  removes the container *and* the named volume backing `/workspace`. Everything
+  an Agent built in that sandbox is gone, and there is no undo. If you only need
+  new reachability, prefer option 2 above, which preserves the volume.
+</Callout>
 
 <Callout type="warning">
   The "Platypus database stays unreachable from sandboxes" property holds only as
@@ -193,18 +224,23 @@ is **not** a hostile-tenant isolation boundary. But its guarantees differ from
 Docker's in ways you must plan around:
 
 - **No Platypus-layer resource limits.** Docker's process, memory, and CPU caps
-  (`PidsLimit` / memory ceiling / `no-new-privileges`, per
-  [ADR-0003](https://github.com/willdady/platypus/blob/main/docs/adr/0003-docker-reference-sandbox-adapter-socket-mount.md))
-  have **no** SSH equivalent. A runaway or hostile workload — a fork bomb, a
-  memory hog — is bounded only by the host itself. Protecting the host (via
-  `ulimit`, `systemd-run`, cgroups, a dedicated user, or a throwaway VM) is the
+  (`PidsLimit` / memory ceiling / `no-new-privileges`) have **no** SSH
+  equivalent. A runaway or hostile workload — a fork bomb, a memory hog — is
+  bounded only by the host itself. Protecting the host (via `ulimit`,
+  `systemd-run`, cgroups, a dedicated user, or a throwaway VM) is the
   **operator's** responsibility.
 - **No `networks` / `extraHosts` model, and the "database is unreachable"
-  property does _not_ hold.** There is no default-deny reachability allowlist
-  ([ADR-0005](https://github.com/willdady/platypus/blob/main/docs/adr/0005-sandbox-host-reachability-is-admin-curated-default-deny.md)
-  is Docker-only). The sandbox reaches **whatever the host can route to** —
+  property does _not_ hold.** The default-deny reachability allowlist above is
+  Docker-only. The sandbox reaches **whatever the host can route to** —
   including the Platypus database if the network permits it. Reachability is
   entirely your host and network posture; isolate the host accordingly.
+- **Deleting a Sandbox leaves the host untouched.** `destroy()` is a deliberate
+  no-op on this backend: it closes the connection and stops there. Nothing under
+  **Workspace root** is removed, and no remote process is killed. The asymmetry
+  with Docker — which removes its container and volume — is intentional, because
+  the host is yours, not Platypus's, and a mis-typed root (`/`, a shared home)
+  would delete your data. Cleaning up the remote directory is the operator's
+  job; don't assume deleting the Sandbox row did it.
 - **Not a tenant isolation boundary.** Trust rests on the host and the network
   path, not on the adapter.
 

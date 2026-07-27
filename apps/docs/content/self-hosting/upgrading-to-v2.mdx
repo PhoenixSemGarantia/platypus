@@ -10,8 +10,7 @@ import { Callout } from "nextra/components";
 Platypus 2.0 introduces the [plugin system](/extending#the-plugin-model): the
 web-fetch tool set and the Docker Sandbox backend are no longer configured by
 their own dedicated environment variables — they are **plugins**, enabled via
-`PLATYPUS_PLUGINS` and configured via `PLATYPUS_PLUGIN_CONFIG`
-([ADR-0013](https://github.com/willdady/platypus/blob/main/docs/adr/0013-plugin-system-manifest-driven-in-process-extension-points.md)).
+`PLATYPUS_PLUGINS` and configured via `PLATYPUS_PLUGIN_CONFIG`.
 
 The changes are **deployment configuration only** — three environment variables
 are removed and their behaviour moves onto the plugin surface. There is **no

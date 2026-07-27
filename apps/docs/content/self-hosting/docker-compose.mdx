@@ -35,10 +35,26 @@ report status.
 
 ### Image tags
 
-The compose file pins `:latest` for both application images. The docs track the
-latest release only — if you are running an older release, check out the
-matching git tag and use the `compose.yaml` from that checkout, which references
-the images for that version.
+The compose file ships pointing at `:latest` for both application images. Every
+release also publishes a version tag — `willdady/platypus-backend:2.2.1`,
+`willdady/platypus-frontend:2.2.1` — matching the release's version number.
+
+**Pin those tags.** `:latest` moves under you: the next `docker compose pull`
+fetches whatever the newest release happens to be, and you have no way to state
+which version a deployment is running. Override the images in a
+`compose.override.yaml` alongside `compose.yaml`:
+
+```yaml
+services:
+  backend:
+    image: willdady/platypus-backend:2.2.1
+  frontend:
+    image: willdady/platypus-frontend:2.2.1
+```
+
+Compose merges `compose.override.yaml` automatically, so `docker compose up -d`
+picks it up with no extra flags. Bump both together — the two images are
+released as a pair and are only tested against each other.
 
 ### Ports
 
@@ -74,8 +90,27 @@ Edit `.env`. At minimum set:
 
 - `BETTER_AUTH_SECRET` — a secure random string (32+ characters).
 - `ADMIN_EMAIL` / `ADMIN_PASSWORD` — credentials for the initial admin user.
+  **Required on first boot**; the backend refuses to start without them.
+- `ALLOWED_ORIGINS` — the origins the browser loads the frontend from. The
+  backend reads this at module load and **throws before the HTTP server
+  starts** if it is unset, so it is required whatever the value.
 - `BACKEND_URL` — the URL the browser uses to reach the backend (e.g.
   `http://localhost:4000`).
+- `FRONTEND_URL` — the URL the backend uses to build links back into the web
+  app (resource links in tool output, MCP OAuth redirects).
+
+The shipped `.env.example` sets all four URL-shaped values for `localhost`, so
+a laptop deployment works unedited.
+
+<Callout type="warning">
+  **The three URL variables change together.** `ALLOWED_ORIGINS`,
+  `FRONTEND_URL` and `BACKEND_URL` are one set — plus `BETTER_AUTH_URL`, which
+  `compose.yaml` derives from `BACKEND_URL`. Moving off `localhost` and
+  updating only some of them produces the hardest failure to diagnose in this
+  stack: you sign in successfully and are immediately signed out again, because
+  the cookie was issued against an origin the browser isn't on. Change all
+  three in one edit.
+</Callout>
 
 Both services read the same root `.env` via `env_file`. The full set of
 variables is documented in [Configuration & environment](/self-hosting/configuration)
@@ -93,36 +128,81 @@ database on first boot), then starts the frontend.
 ### Sign in
 
 Open `http://localhost:3000` and sign in with the `ADMIN_EMAIL` /
-`ADMIN_PASSWORD` you configured.
+`ADMIN_PASSWORD` you configured. You land in the **Default Organization**, which
+already holds a **Default Workspace** you own.
 
 </Steps>
 
 ### What first boot creates
 
-When the backend starts against an empty database it bootstraps:
+This is the canonical account of first-boot seeding; other pages link here.
+
+When the backend starts against a database with **no Organizations**, it seeds:
 
 - a **Default Organization**,
 - an **admin user** from `ADMIN_EMAIL` / `ADMIN_PASSWORD` (granted the platform
-  `admin` role — the **Operator**), and
-- a **Default Workspace** owned by that user.
+  `admin` role — the **Operator**),
+- that user's membership of the Default Organization, and
+- a **Default Workspace** named _Default Workspace_, owned by that user.
+
+You do not create your first Workspace — it is already there when you sign in.
+
+**The seeding rule, stated once:** the seed runs when the `organization` table
+is empty, and only then. It is not "when no matching admin exists". Once one
+Organization exists — however it got there — every subsequent boot skips the
+seed silently, and editing `ADMIN_EMAIL` / `ADMIN_PASSWORD` afterwards changes
+nothing. Manage users from the app after first boot.
 
 <Callout type="warning">
-  The backend **refuses to seed** if `ADMIN_EMAIL` and `ADMIN_PASSWORD` are
-  unset — it logs an error and exits rather than creating a credential-less
-  admin. Set both before the first `docker compose up`.
+  `ADMIN_EMAIL` and `ADMIN_PASSWORD` are **required on first boot and have no
+  default in code**. With either unset the backend logs
+  `... environment variable is required to seed the initial admin user` and
+  exits non-zero without starting the HTTP server — it does not retry, because
+  a missing variable fails the same way every time. The shipped `.env.example`
+  supplies `admin@example.com` / `admin123`, but a deployment that doesn't
+  start from that file (Kubernetes, a hand-rolled env) gets nothing.
+</Callout>
+
+Nothing partial survives a failed seed. Configuration is checked before
+anything is written; the Organization, membership and Workspace go in one
+transaction; and the admin user — which better-auth writes outside that
+transaction — is deleted again if the transaction fails. So a failed first boot
+leaves an empty database, and fixing the cause and restarting is the whole
+recovery.
+
+### Recovering from a failed first boot
+
+If the backend exits at startup, read `docker compose logs backend` — the fatal
+line names the cause. Two of them need more than a restart:
+
+- **"A user already exists for … in a database with no organizations"** — an
+  earlier attempt left the admin user behind and compensation couldn't remove
+  it. The seed refuses to promote an existing account to admin. Delete that one
+  user, or point `ADMIN_EMAIL` at a different address, then restart.
+- **"This database has an organization but no organization members"** — a
+  deployment seeded by a release from before seeding was atomic. Nobody can
+  sign in and the seed will never run again, because an Organization exists.
+
+The escape hatch for both is to throw the database away and seed again:
+
+```bash
+docker compose down -v
+docker compose up -d
+```
+
+<Callout type="error">
+  `docker compose down -v` **destroys the `postgres_data` volume and every byte
+  of data in it** — Chats, Agents, Providers, uploaded files. On a first boot
+  that never completed there is nothing to lose, which is the only situation
+  this page recommends it in. On any other deployment, back up first.
 </Callout>
 
 ### The default admin
 
-The shipped `.env.example` defaults to `admin@example.com` / `admin123`.
-**Override these** by editing `.env` before first boot — seeding happens exactly
-once against an empty database, so the values you set then are the ones that
-stick. Change the password from the in-app account settings after you first sign
-in.
-
-To change the admin _after_ the database is already seeded, use the in-app user
-management — editing `ADMIN_EMAIL` / `ADMIN_PASSWORD` later has no effect because
-the seed only runs when no organization exists.
+The shipped `.env.example` supplies `admin@example.com` / `admin123`.
+**Override these** by editing `.env` before first boot — the values in place at
+seed time are the ones that stick. Change the password from the in-app account
+settings after you first sign in.
 
 ## Health checks
 
@@ -135,18 +215,41 @@ docker compose logs -f backend
 ```
 
 A backend stuck in `starting`/`unhealthy` is almost always a database connection
-or a missing required env var — check `docker compose logs backend`.
+or a missing required env var — check `docker compose logs backend`. A backend
+that **exited** rather than gone unhealthy is a startup failure: a seed that
+couldn't complete, a `PLATYPUS_PLUGINS` entry that couldn't resolve, or an unset
+`ALLOWED_ORIGINS`. All three name themselves in the log's last line.
 
 ## Upgrading
 
 ```bash
-docker compose pull      # fetch the latest images
+docker compose pull      # fetch the images your tags point at
 docker compose up -d     # recreate containers with the new images
 ```
 
 The backend applies any pending schema changes on startup. Your data persists in
-the `postgres_data` volume across upgrades. To roll back, check out the previous
-git tag and `docker compose up -d` from there.
+the `postgres_data` volume across upgrades.
+
+### Rolling back
+
+Rollback is a **tag change**, not a git operation. Checking out an older git tag
+and running `docker compose up -d` from there pulls `:latest` — the newest
+release — and rolls nothing back, because the shipped compose file doesn't pin a
+version.
+
+Edit the pinned tags in your `compose.override.yaml` back to the version you
+were on, and bring the stack up again:
+
+```bash
+docker compose up -d
+```
+
+<Callout type="warning">
+  Image rollback does not roll the database back. Schema changes the newer
+  release applied on startup are still in place, and an older backend is not
+  tested against them. Take a database backup before upgrading if you need a
+  rollback path you can rely on.
+</Callout>
 
 ## Next steps
 

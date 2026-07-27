@@ -66,3 +66,10 @@ for serving from a CDN, leaving the host deliberately deferred. We now deploy th
 
 This supersedes "built to a static export … served from a CDN" and the deferred-host note;
 the rest of the ADR (Nextra choice, latest-only, IA, independence from `CONTEXT.md`) stands.
+
+## Update (2026-07-27)
+
+Two notes from #370, which audited the docs site against the code.
+
+- **The "not published" rule now holds literally: there are zero ADR links in `apps/docs/content`.** The docs had drifted to 22 of them, five pointing at an ADR that contradicted the current code. #370 cut all 22 and inlined the facts that only lived behind them — that Tool calls are not serialised, that the SSH adapter's `destroy()` is a deliberate no-op, and that the Sandbox Tool set rebinds to the invoking Workspace at Chat-turn time. Public pages state each rule in their own words as it holds today; they deliberately do **not** relitigate the alternatives a rule was chosen over, which is what an ADR is for and what a public page has no anchor to keep current. This ADR's context paragraph needed no amendment — the docs were brought to it. The remaining `ADR-0011` mentions under `content/` are `_meta.ts` source comments recording why the IA is ordered as it is, not published prose.
+- **"Read the docs by checking out the tag" does not survive contact with the images.** The consequence bullet assumes a self-hoster on an old release has the matching docs in their checkout. True — but `compose.yaml` pins `:latest`, so checking out an old tag and running `docker compose up -d` pulls the newest images and rolls nothing back. The docs now say so and tell operators to pin version tags in a `compose.override.yaml` instead. The docs-versioning decision is unaffected; the rollback story the bullet implies is not the one to give operators. **Flagged, not decided** — the bullet is about docs versioning, which stands.

@@ -3,6 +3,8 @@ title: Memory & context
 description: Memory lets an agent recall past activity; Context is the free-text notes you give it. Both shape the assistant's replies.
 ---
 
+import { Callout } from "nextra/components";
+
 # Memory & context
 
 Two related ideas control what an **Agent** knows about _you_ and your past
@@ -11,16 +13,41 @@ activity, beyond the messages in the current Chat: **Memory** and **Context**.
 ## Memory
 
 **Memory** is a running summary of your prior activity that an Agent can recall.
-It's kept per person, per **Workspace**, and when an Agent is configured to use
-it, that summary is folded into the [system prompt](/concepts/system-prompt)
-automatically — you don't put it in the Agent's Instructions yourself.
+It's kept per person, per **Workspace**, and it is folded into the
+[system prompt](/concepts/system-prompt) automatically — you don't put it in the
+Agent's Instructions yourself.
 
 **Why you'd use it:** so the assistant doesn't start from scratch every time.
 With Memory, an Agent can carry forward what it learned about your preferences,
 your projects, and earlier conversations — without you repeating yourself.
 
-Memory only comes into play when the Agent's tools include the memory tool set,
-so it's something you opt an Agent into rather than something that's always on.
+### Turning Memory on
+
+Memory is a **Workspace-level** setting, not a per-Agent one. It is switched on
+by choosing a **Memory Extraction Provider** in the Workspace form (an Org Admin
+task); leaving it unset is what "Memory is off" means. Only Providers with a
+memory-extraction model configured appear in that dropdown, so if it looks empty,
+set one on the Provider first. A **Memory Embedding Provider** is a separate
+choice, needed for semantic memory search.
+
+<Callout type="warning">
+  Granting an Agent the **memory** Tool set does not enable Memory. Without a
+  Memory Extraction Provider on the Workspace, nothing is ever extracted, so
+  there is nothing for the tools to find and nothing to inject — the Agent looks
+  broken when the setting is simply off. The Tool set and the Workspace setting
+  are two different switches, and Memory needs the Workspace one.
+</Callout>
+
+### What the model sees
+
+Once Memory is on, the retrieved summaries are injected into **every** Chat turn
+in that Workspace, for every Agent, whether or not the Agent has the memory Tool
+set. It is not opt-in per Agent and there is no way to exclude one Agent from it.
+
+The memory Tool set adds something different: the `memorySearch` and `memoryGet`
+tools, which let the model look up older or more specific memories beyond the
+summaries already in the prompt. Granting it widens what the model can reach;
+withholding it does not hide the summaries.
 
 ## Context
 
