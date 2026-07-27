@@ -123,9 +123,15 @@ chore(tests): add missing test coverage
 
 1. Ensure your code passes all tests (`pnpm test`) and is formatted (`pnpm format`).
 2. Write clear, descriptive commit messages following the conventions above.
-3. Open a pull request against the `main` branch.
-4. Provide a clear description of the changes and the motivation behind them.
-5. Link any related issues in your PR description.
+3. Update the docs in `apps/docs/content` in the same PR, not a follow-up one.
+   If you changed an `.env.example`, a user-facing limit or enum in
+   `packages/schemas`, anything under `apps/backend/src/plugins`, or a visible
+   label or field in the frontend, a page needs editing. `pnpm test` fails when
+   the reference tables, webhook events, core plugin names, field limits, or
+   internal links no longer match the code.
+4. Open a pull request against the `main` branch.
+5. Provide a clear description of the changes and the motivation behind them.
+6. Link any related issues in your PR description.
 
 ## Project Structure
 

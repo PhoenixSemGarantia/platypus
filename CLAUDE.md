@@ -45,6 +45,35 @@ migrate`) but are skipped by the dev push flow. In dev, apply any needed data ch
 - **No TypeScript parameter properties.** Node's strip-only TS mode rejects `constructor(private x: T)` shorthand. Declare fields explicitly and assign in the constructor body.
 - Format with Prettier conventions.
 
+## Documentation
+
+Docs live in `apps/docs/content` and ship **in the same PR as the code**, never
+as a follow-up ticket. The follow-up ticket does not get filed; that is how
+`627cb1e` shipped a breaking Operator-facing change with no docs update.
+
+Check the table below against the paths in your own diff. If they intersect,
+the docs edit is part of this change:
+
+| You changed                                              | Update                                                               |
+| -------------------------------------------------------- | -------------------------------------------------------------------- |
+| any `.env.example`                                       | `reference/backend-configuration.mdx` / `frontend-configuration.mdx` |
+| a user-facing `min`/`max`/`z.enum` in `packages/schemas` | the matching `building-with-platypus/*.mdx` page                     |
+| `apps/backend/src/plugins/**`                            | `extending/index.mdx`, `self-hosting/configuration.mdx`              |
+| a visible label, field, or nav item in `apps/frontend`   | the `building-with-platypus/*.mdx` page for that feature             |
+
+When writing:
+
+- The audience is self-hosters and Workspace Owners, not maintainers.
+- Write the task, not the implementation — no `apps/**` paths, no ADR links, no
+  inlined interfaces, no status sections.
+- House style is `.agents/skills/docs-audit/VOICE.md`.
+
+`apps/docs/content/docs-contract.test.ts` mechanically pins the claims with a
+single authoritative source (env tables, webhook events, core Plugin names,
+field limits, internal links, heading anchors) and runs in the CI gate. It is a
+floor, not a gate — it cannot see the ~150 UI labels. Use `/docs-audit` for what
+needs judgement.
+
 ## Git Branch Standards
 
 Branch names MUST be prefixed `feature/`, `fix/`, or `chore/` only.
