@@ -88,11 +88,11 @@ Two levels of control over how the model generates:
 An Agent that can only talk is limited. Give it the ability to _act_:
 
 - **Tools** — a card listing the **tool sets** available in your Workspace,
-  grouped by category. Flip a switch to grant a tool set. Both built-in tool sets
-  (Web Fetch, Time, Kanban, Dashboards, and more) and any
-  [MCP servers](/building-with-platypus/mcp) you've registered appear here — an
-  MCP shows up under the **MCP** category. See
-  [Tools, tool sets & MCP](/concepts/tools) for the model behind this.
+  grouped by category. Flip a switch to grant a tool set. Both plugin-contributed
+  tool sets and any [MCP servers](/building-with-platypus/mcp) you've registered
+  appear here — an MCP shows up under the **MCP** category. What's in the card
+  depends on which plugins your Operator enabled, so treat the card itself as the
+  list. See [Tools, tool sets & MCP](/concepts/tools) for the model behind this.
 - **Skills** — a card listing the [Skills](/building-with-platypus/skills) in
   your Workspace. Flip a switch to attach one; the Agent loads its full
   instructions on demand at run time.
@@ -113,6 +113,30 @@ At run time each selected sub-agent is exposed to the parent as a **delegate
 tool** named `delegateTo<AgentName>` — calling it runs the sub-agent (with its
 own model, Instructions, and tools) and returns the result. This lets a coordinator
 Agent stay focused while specialists do the detailed work.
+
+### What a sub-agent run does and doesn't get
+
+A sub-agent run is not a Chat turn, and it gets far less than the same Agent
+would get if you selected it on a Chat. It receives exactly four things: its own
+**model**, its own **Instructions** verbatim, its granted **Tool sets**, and its
+Provider's **security guardrails**. Plus the `task` string the parent wrote.
+
+Everything else is absent:
+
+| Not passed to a sub-agent | Consequence                                                                                       |
+| ------------------------- | --------------------------------------------------------------------------------------------------- |
+| **Skills**                | Attaching a Skill to an Agent used as a sub-agent does nothing in that run — no catalogue is injected and `loadSkill` isn't offered. Fold the know-how into its Instructions instead. |
+| **Memories and Context**  | No user Context, no Workspace Context, no Memory summaries.                                       |
+| **Workspace / user identity** | No Workspace id or user name in the prompt. Tools needing one still work; the prompt won't mention it. |
+| **Chat history**          | The sub-agent sees only the `task` string, never the conversation it came from.                   |
+| **Its own sub-agents**    | Delegation is one level deep — see below.                                                         |
+
+<Callout type="warning">
+  Because the parent's `task` string is the sub-agent's entire view of the
+  world, write sub-agent **Instructions so they stand alone**, and expect the
+  parent to restate context it wants carried across. A sub-agent that "forgets
+  what we were talking about" is working as designed.
+</Callout>
 
 <Callout type="warning">
   Delegation is **one level deep**. An Agent running _as_ a sub-agent cannot

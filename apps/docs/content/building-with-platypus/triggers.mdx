@@ -24,7 +24,7 @@ _"Automated agent runs configured for this workspace."_
 
 ### Open the Trigger form
 
-In your Workspace, go to the **Triggers** section and click **Create**.
+In your Workspace, go to the **Triggers** section and click **Create trigger**.
 
 ### Pick the type and Agent
 
@@ -95,11 +95,13 @@ A few details worth knowing:
 
 ## Review run history
 
-Open a Trigger and go to its **Runs** view to see the history: each run's status
-(Success / Failed / Running / Pending), when it ran and how long it took, the
-event type for Event triggers, per-run stats, and any error message. It's the
-place to confirm a schedule is actually firing and to debug a Trigger that's
-failing.
+Run history is **not** a tab inside the Trigger editor. From the **Triggers**
+list, open the three-dot menu on the Trigger's row and choose **View runs**.
+
+The runs view shows each run's status (Success / Failed / Running / Pending),
+when it ran and how long it took, the event type for Event triggers, per-run
+stats, and any error message. It's the place to confirm a schedule is actually
+firing and to debug a Trigger that's failing.
 
 <Callout type="info">
   Anything an Agent does in a run uses that Agent's own tools — so a Trigger

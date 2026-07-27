@@ -41,7 +41,7 @@ them.
 
 ### Open the Webhook form
 
-In your Workspace, go to **Settings → Webhooks** and click **Create**.
+In your Workspace, go to **Settings → Webhooks** and click **Add webhook**.
 
 ### Configure the endpoint
 
@@ -52,12 +52,16 @@ In your Workspace, go to **Settings → Webhooks** and click **Create**.
   `Authorization` header your endpoint expects).
 - **Enabled** — leave on to start delivering immediately.
 
-### Save and note the signing secret
+### Save, then reopen to get the signing secret
 
 On save, Platypus generates a **signing secret** for the Webhook. Every delivery
 is signed with it so you can verify the request really came from Platypus — see
-[Verifying the signature](#verifying-the-signature). You can rotate it later with
-**Regenerate secret**.
+[Verifying the signature](#verifying-the-signature).
+
+The create form does **not** show it. Saving returns you to the Webhooks list;
+open the Webhook again and the **Signing Secret** field appears, with buttons to
+reveal, copy, and **Regenerate** it. The secret was generated at save time — a
+create form that showed you nothing hasn't failed.
 
 </Steps>
 
@@ -141,8 +145,24 @@ while lighter-weight events carry only the affected IDs. For example,
 }
 ```
 
-and `notification.read` / `notification.dismissed` carry the notification ID and
-the user who acted:
+The two notification lifecycle events are the ones most likely to catch a handler
+out, because their `data` is neither the full record nor a single fixed shape.
+
+**`notification.dismissed`** carries the notification ID **and nothing else** —
+there is no `userId`. The same shape is sent whether a person deleted the
+notification or an Agent did through the `deleteNotification` tool, so there is
+nothing to attribute it to:
+
+```json
+{
+  "data": {
+    "notificationId": "Hs8dK2pQ9mRnL7wT4vYx1"
+  }
+}
+```
+
+**`notification.read`** has **two** shapes. Marking one notification read sends
+the singular form:
 
 ```json
 {
@@ -152,6 +172,27 @@ the user who acted:
   }
 }
 ```
+
+"Mark all as read" sends one bulk event instead of one event per notification —
+`notificationIds` (plural, an array), plus `bulk: true`:
+
+```json
+{
+  "data": {
+    "notificationIds": ["Hs8dK2pQ9mRnL7wT4vYx1", "Jf3kP9xR2mLqN7wT4vYsZ"],
+    "userId": "x6Ym2Qp9LrT4nW8sVdB1k",
+    "bulk": true
+  }
+}
+```
+
+<Callout type="warning">
+  Handle both `notification.read` shapes. A handler written against
+  `data.notificationId` alone reads `undefined` on every bulk event and drops
+  the whole batch silently. Branch on `data.bulk`, or normalise with
+  `data.notificationIds ?? [data.notificationId]`. Nothing is emitted at all
+  when "mark all as read" finds nothing unread.
+</Callout>
 
 <Callout type="info">
   Treat `data` defensively — read the fields your integration needs rather than

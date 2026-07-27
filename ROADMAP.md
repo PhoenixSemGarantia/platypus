@@ -37,8 +37,7 @@ Items are grouped by **horizon**, which signals sequencing and how involved the
 maintainers are:
 
 - **Now** — actively being worked on by the maintainers. Coordinate before duplicating.
-- **Next** — directionally agreed and well-shaped, but not started. These are the prime
-  contribution targets. Talk to us first so the effort lands well.
+- **Shipped** — done and released. Listed so nothing here reads as unbuilt when it isn't.
 - **Later / Exploring** — wanted, but the design isn't settled. Proposals are welcome and
   will usually start with a discussion or an ADR before any code.
 
@@ -48,14 +47,15 @@ Where an item is a good contribution opportunity, it says so.
 
 ### Additional Sandbox backends
 
-The Sandbox interface is pluggable; today the only reference backend is Docker
-(single-node / self-hosted). We want more: SSH to a remote host, hosted
+The Sandbox interface is pluggable. Two reference backends ship today: **Docker**
+(single-node / self-hosted) and **SSH** (attach to a host you already run — the one
+option viable in horizontally-scaled deployments). We want more: hosted
 sandbox-as-a-service (Daytona, Modal), remote VMs, and so on.
 
 > **Contributions welcome.** A new backend implements the existing `SandboxBackend`
-> interface and self-registers at boot. This is a well-scoped, well-isolated entry point
-> for a first contribution — open a discussion describing the target backend before
-> starting.
+> interface and is contributed through a plugin manifest's `contributes.sandboxBackends`
+> array. This is a well-scoped, well-isolated entry point for a first contribution —
+> open a discussion describing the target backend before starting.
 
 ### Documentation
 
@@ -67,31 +67,36 @@ likely to reach for.
 > **Contributions welcome.** Docs are one of the easiest ways to make a first contribution
 > — fixing a confusing setup step or documenting an undocumented feature is always useful.
 
-## Next
+## Shipped
 
-### Extension / plugin system
+Items that have left the roadmap. Kept here briefly so a returning reader isn't
+told something is "not started" when it is running in production.
 
-A first-class way to extend Platypus **without maintaining a fork**. A _plugin_ is a
+### Extension / plugin system — 2.0.0
+
+A first-class way to extend Platypus without maintaining a fork. A _plugin_ is a
 distributable bundle (one package, one version, one config namespace, one enable/disable
-switch) that contributes to one or more **typed extension points**. Extension points are
-defined by core; plugins fill them. A single plugin may contribute to several — e.g. a
-Daytona plugin could ship both a Sandbox backend and a management Tool set, sharing one
-credential block.
-
-- Initial extension points: **Sandbox backends** and **Tool sets**. The messaging
-  gateway (below) is **not** one of these — its channel adapters live in the separate
-  gateway app behind their own seam, not the backend plugin system (see ADR-0015).
-- Plugins are **installed by the Operator at deploy time** and run **in-process**
-  (no isolation) — so the trust boundary is the deployment, not an in-app install button.
-- Inspired by the VS Code `contributes` manifest model: borrow the manifest and the
-  fixed set of contribution points; _not_ the marketplace, hot-loading, or sandboxed
-  extension host.
+switch) contributing to typed **extension points** that core owns. There are two:
+**Sandbox backends** and **Tool sets**. Plugins are installed by the Operator at deploy
+time, run in-process, and are enabled through `PLATYPUS_PLUGINS` and configured through
+`PLATYPUS_PLUGIN_CONFIG`. The compile-time contract is published as
+[`@platypuschat/plugin-sdk`](https://www.npmjs.com/package/@platypuschat/plugin-sdk);
+third-party plugins load from installed npm packages with their contribution ids
+namespaced by plugin name. See the
+[Extending guide](https://docs.platypus.chat/extending).
 
 **MCP remains the canonical path for connecting to external tool servers.** Plugins
 extend Platypus's _own_ capabilities; they don't duplicate MCP.
 
-> The loading model, manifest format, and config mechanics will be settled in an ADR
-> before implementation.
+> **Contributions welcome.** New extension points, and third-party plugins in the wild,
+> are both open. The messaging gateway (below) will _not_ become an extension point —
+> its channel adapters live in the separate gateway app behind their own seam.
+
+### SSH Sandbox backend — 2.0.0
+
+The second reference Sandbox backend, and the only one viable in horizontally-scaled
+deployments. See [Additional Sandbox backends](#additional-sandbox-backends) for what's
+still wanted here.
 
 ## Later / Exploring
 
@@ -165,6 +170,6 @@ Contributions are very welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for br
 and commit conventions.
 
 For anything beyond a small fix, **open a discussion or comment on the relevant issue
-before investing time in a PR**, especially for items in _Next_ and _Later / Exploring_.
+before investing time in a PR**, especially for items in _Later / Exploring_.
 Aligning early is much cheaper than reworking a large PR that doesn't fit the direction
 above. A rough "we'd like to build X, here's how we'd approach it" goes a long way.

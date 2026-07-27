@@ -9,9 +9,14 @@ import { Callout } from "nextra/components";
 
 ## Provider
 
-A **Provider** is a configured connection to an AI vendor — OpenAI, OpenRouter,
-Bedrock, Anthropic, Google, and others. It's what lets Platypus actually talk to
-a model on your behalf.
+A **Provider** is a configured connection to an AI vendor. It's what lets
+Platypus actually talk to a model on your behalf.
+
+There are five Provider types — OpenAI, OpenRouter, Bedrock, Google,
+Anthropic — and no others. Ollama, vLLM, Azure OpenAI and any other
+OpenAI-compatible endpoint are reached through the **OpenAI** type with its
+**Base URL** overridden; see [Supported
+vendors](/self-hosting/providers-and-auth#supported-vendors).
 
 A Provider carries:
 
@@ -36,8 +41,8 @@ A Provider lives at one of two levels:
 <Callout type="info">
   Providers carry credentials, so they're usually configured by an **Org
   Admin**. A Workspace Owner can manage them only where an Org Admin has
-  delegated that. See [Self-Hosting → Providers & authentication](/self-hosting)
-  for setup.
+  delegated that. See [Providers &
+  authentication](/self-hosting/providers-and-auth) for setup.
 </Callout>
 
 **Why this matters to you:** the models you can pick on a Chat or an Agent come

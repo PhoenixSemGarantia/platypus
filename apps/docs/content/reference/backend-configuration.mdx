@@ -23,17 +23,26 @@ For a guided walkthrough of configuring a deployment, see
 | Variable          | Purpose                                                                               | Default                                                  | Required |
 | ----------------- | ------------------------------------------------------------------------------------- | -------------------------------------------------------- | -------- |
 | `PORT`            | Port the backend HTTP server listens on.                                              | `4001`                                                   | No       |
-| `ALLOWED_ORIGINS` | Comma-separated origins allowed by CORS. Set to your frontend's URL(s).               | `http://localhost:3001`                                  | No       |
+| `ALLOWED_ORIGINS` | Comma-separated origins allowed by CORS and better-auth's trusted origins. **No default in code** — the backend splits it at module load, so an unset value throws before the server starts. `.env.example` ships `http://localhost:3001`. | _(none)_ | **Yes** |
 | `DATABASE_URL`    | Postgres 17 connection string (with pgvector).                                        | `postgres://postgres:mypassword@localhost:5432/postgres` | **Yes**  |
 | `LOG_LEVEL`       | Logging verbosity (`trace`, `debug`, `info`, `warn`, `error`, `fatal`).               | `info`                                                   | No       |
-| `TIMEZONE`        | IANA timezone (e.g. `America/New_York`, `Europe/London`). Falls back to UTC if unset. | `UTC`                                                    | No       |
+| `TIMEZONE`        | IANA timezone (e.g. `America/New_York`, `Europe/London`) used by the **time Tools only** — see the note below. | `UTC`                           | No       |
 | `NODE_OPTIONS`    | Node runtime flags. Ships set to silence the experimental-feature warning.            | `--disable-warning=ExperimentalWarning`                  | No       |
+
+<Callout type="warning">
+  `TIMEZONE` is read in exactly one place: the `getCurrentTime` and
+  `convertTimezone` tools. It does **not** set the zone a Trigger's cron
+  schedule is evaluated in — each Trigger carries its own **Timezone** field,
+  set in the Trigger form and defaulting to the browser's zone — and it does not
+  affect log timestamps. Setting `TIMEZONE` and expecting a 9am Trigger to fire
+  at 9am local is the trap; set the zone on the Trigger.
+</Callout>
 
 ## Plugins
 
 | Variable                 | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Default               | Required |
 | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------- | -------- |
-| `PLATYPUS_PLUGINS`       | Comma-separated list of the **gate-able** plugins to load and enable at boot (deny-worthy core plugins + third-party). The always-on core tool sets (`@platypus/tools-basic`, `@platypus/tools-platform`) load unconditionally and must **not** be listed (listing one is fail-loud). List membership both loads _and_ enables a gate-able plugin. Empty ⇒ always-on core tool sets only (never zero tools). Fail-loud at boot.                                                   | `@platypus/web-fetch` | No       |
+| `PLATYPUS_PLUGINS`       | Comma-separated list of the **gate-able** plugins to load and enable at boot — the deny-worthy core plugins (`@platypus/web-fetch`, `@platypus/docker`, `@platypus/ssh`) plus any third-party ones. The always-on core tool sets (`@platypus/tools-basic`, `@platypus/tools-platform`) load unconditionally and must **not** be listed (listing one is fail-loud). List membership both loads _and_ enables a gate-able plugin. Fail-loud at boot.                                | _(unset ⇒ no gate-able plugins;_ `.env.example` _ships_ `@platypus/web-fetch`_)_ | No |
 | `PLATYPUS_PLUGIN_CONFIG` | Deploy-time, Operator-owned plugin config/credentials as a JSON object keyed by plugin name (the manifest `name`; a third-party name is a slug, not the npm specifier), each `{ "config": {…}, "credentials": {…} }`. Validated at boot against the plugin's manifest schemas (fail-loud); a key matching no loaded plugin is also fail-loud. One block is shared deployment-wide across all of a plugin's contributions and tenants. Distinct from per-Workspace Sandbox config. | _(unset)_             | No       |
 
 See [Extending → the plugin model](/extending#the-plugin-model) and
@@ -50,18 +59,24 @@ See [Extending → the plugin model](/extending#the-plugin-model) and
 
 ## Default admin
 
-Seeded only on first startup, when no matching admin exists. Changing these
-later does **not** reset an already-created account — change the password from
-within the app. See [Getting Started](/getting-started) for the first-run flow.
+Read only when the `organization` table is empty — that is, on first boot. Once
+one Organization exists the seed never runs again and changing these has no
+effect; change the password from within the app. See
+[what first boot creates](/self-hosting/docker-compose#what-first-boot-creates)
+for the seeding rule and the recovery path.
 
-| Variable         | Purpose                                   | Default             | Required |
-| ---------------- | ----------------------------------------- | ------------------- | -------- |
-| `ADMIN_EMAIL`    | Email of the first admin (Operator) user. | `admin@example.com` | No       |
-| `ADMIN_PASSWORD` | Password for that user.                   | `admin123`          | No       |
+| Variable         | Purpose                                   | Default   | Required           |
+| ---------------- | ----------------------------------------- | --------- | ------------------ |
+| `ADMIN_EMAIL`    | Email of the first admin (Operator) user. | _(none)_  | **On first boot**  |
+| `ADMIN_PASSWORD` | Password for that user.                   | _(none)_  | **On first boot**  |
 
 <Callout type="warning">
-  Change `ADMIN_PASSWORD` (or set a non-default one before first startup) on any
-  network-reachable deployment.
+  Neither has a default **in code**. Against an empty database with either
+  unset, the backend logs a fatal error and exits without starting the HTTP
+  server — it does not retry. The `admin@example.com` / `admin123` pair you may
+  have seen is a value the shipped `.env.example` writes; a deployment that
+  builds its environment another way must set both explicitly. Change
+  `ADMIN_PASSWORD` from the default on any network-reachable deployment.
 </Callout>
 
 ## Background workers
@@ -140,8 +155,8 @@ is the production option.
 | `STORAGE_DISK_PATH`            | Filesystem path for stored files (when `STORAGE_BACKEND=disk`).                                               | `./data/files` | No                        |
 | `STORAGE_PUBLIC_URL`           | Optional public URL for direct file access, bypassing the `/files` proxy endpoint (e.g. a CDN or bucket URL). | _(unset)_      | No                        |
 | `STORAGE_S3_BUCKET`            | S3 bucket name.                                                                                               | _(unset)_      | When `STORAGE_BACKEND=s3` |
-| `STORAGE_S3_REGION`            | S3 region.                                                                                                    | _(unset)_      | When `STORAGE_BACKEND=s3` |
-| `STORAGE_S3_ENDPOINT`          | S3 endpoint URL (for S3-compatible services).                                                                 | _(unset)_      | When `STORAGE_BACKEND=s3` |
+| `STORAGE_S3_REGION`            | S3 region.                                                                                                    | `us-east-1`    | No                        |
+| `STORAGE_S3_ENDPOINT`          | S3 endpoint URL. Only needed for S3-compatible services (MinIO, R2, Spaces); leave unset for AWS S3.          | _(unset)_      | No                        |
 | `STORAGE_S3_ACCESS_KEY_ID`     | S3 access key ID.                                                                                             | _(unset)_      | When `STORAGE_BACKEND=s3` |
 | `STORAGE_S3_SECRET_ACCESS_KEY` | S3 secret access key.                                                                                         | _(unset)_      | When `STORAGE_BACKEND=s3` |
 
@@ -156,12 +171,13 @@ backend type; omit it and that backend can't be selected at all. See the
 
 - **Docker** (`@platypus/docker`) — one container per Workspace via the host's
   Docker daemon. Scoped to development / single-node self-hosting; requires a
-  reachable Docker daemon and the `compose.sandbox.yaml` overlay. See
-  [ADR-0003](https://github.com/willdady/platypus/blob/main/docs/adr/0003-docker-reference-sandbox-adapter-socket-mount.md).
+  reachable Docker daemon and the `compose.sandbox.yaml` overlay, which mounts
+  the Docker socket and so grants the backend container effective root on the
+  host. See [Sandbox infrastructure](/self-hosting/sandbox#the-docker-reference-adapter).
 - **SSH** (`@platypus/ssh`) — attaches to a pre-existing, operator-owned host
   over SSH (bring-your-own-host). The one backend viable in horizontally-scaled
   deployments, where Docker cannot run. See
-  [ADR-0012](https://github.com/willdady/platypus/blob/main/docs/adr/0012-ssh-reference-sandbox-byo-host-adapter.md).
+  [Sandbox infrastructure](/self-hosting/sandbox#the-ssh-reference-adapter).
 
 ### Docker
 

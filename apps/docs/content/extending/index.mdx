@@ -8,10 +8,14 @@ import { Callout } from "nextra/components";
 
 This section is for **contributors** working in the Platypus codebase and for
 **plugin authors** extending Platypus without forking it. It maps the
-extension points — the core-owned seams a plugin's manifest fills — and points
-at the [Architecture Decision
-Records](https://github.com/willdady/platypus/tree/main/docs/adr) that explain
-_why_ each one is shaped the way it is.
+extension points — the core-owned seams a plugin's manifest fills — and states
+the rules each one imposes.
+
+Every rule that matters is stated on this page. If you want the alternatives a
+rule was chosen over, the repository's [Architecture Decision
+Records](https://github.com/willdady/platypus/tree/main/docs/adr) are the
+maintainers' working record; they are not part of these docs and can lag the
+code.
 
 Platypus extends itself through **plugins** (see
 [the plugin model](#the-plugin-model) below). A plugin exports a typed
@@ -28,14 +32,9 @@ a fixed set of core-owned **Extension points**:
   codebase. Reach for them first; see the comparison below.
 
 <Callout type="info">
-  Every native Tool set now ships as a core plugin loaded through the manifest
-  loader (see
-  [ADR-0013](https://github.com/willdady/platypus/blob/main/docs/adr/0013-plugin-system-manifest-driven-in-process-extension-points.md)):
-  `@platypus/tools-basic` (math, time), `@platypus/web-fetch` (web fetch, split
-  out so its network egress can be denied in isolation),
-  `@platypus/tools-platform` (the Platypus-domain sets — kanban, dashboards,
-  triggers, memory, notifications, agent discovery/management, skill
-  management), and `@platypus/docker` (the Sandbox backend). **Third-party
+  Every native Tool set and both reference Sandbox backends ship as **core
+  plugins** loaded through the manifest loader — the inventory is in
+  [Configuration → Plugins](/self-hosting/configuration#plugins). **Third-party
   plugins** load the same way from installed npm packages, with their
   contribution ids namespaced by plugin name. The one remaining in-tree
   registration is the `sandbox` Tool set — the consumer side of the
@@ -57,7 +56,9 @@ import type { PlatypusPlugin } from "@platypuschat/plugin-sdk";
 import { PLUGIN_API_VERSION } from "@platypuschat/plugin-sdk";
 
 export const plugin: PlatypusPlugin = {
-  name: "@example/my-plugin",
+  // A third-party manifest name must be a url-safe slug — lowercase letters,
+  // digits and hyphens. NOT the npm package specifier. See below.
+  name: "my-plugin",
   version: "0.1.0",
   apiVersion: PLUGIN_API_VERSION,
   contributes: {
@@ -65,6 +66,17 @@ export const plugin: PlatypusPlugin = {
   },
 };
 ```
+
+<Callout type="warning">
+  The manifest `name` of a third-party plugin is validated at boot against
+  `/^[a-z0-9]+(?:-[a-z0-9]+)*$/`, because it becomes the prefix on every
+  contribution id. A scoped npm-style name (`@example/my-plugin`) is **rejected**
+  and aborts startup. The npm package specifier is what you install and list in
+  `PLATYPUS_PLUGINS`; the manifest `name` is a separate, shorter thing — see
+  [Contribution-id namespacing](#contribution-id-namespacing). Core plugins are
+  exempt: their `@platypus/*` names are logical ids resolved from the built-in
+  map, not published packages.
+</Callout>
 
 The compile-time contract — the manifest type, the Contribution types, and
 `PLUGIN_API_VERSION` — lives in the published
@@ -152,7 +164,7 @@ with the **same** credential — e.g. one Daytona token driving both:
 
 ```ts
 export const plugin: PlatypusPlugin = {
-  name: "@example/cloud-sandbox",
+  name: "cloud-sandbox", // slug, not an npm specifier — this prefixes the ids below
   version: "0.1.0",
   apiVersion: PLUGIN_API_VERSION,
   // Plugin-level, deploy-time schemas — validated at boot.
@@ -190,16 +202,15 @@ from, and layers above, the per-Workspace Sandbox `config` / `credentials`
 ## Sandbox backends
 
 A **Sandbox** is a persistent, Workspace-keyed execution environment that
-exposes a fixed set of shell and filesystem tools to Agents. The contract every
-backend implements is small and fixed on purpose: an Agent's Instructions should
-not care _which_ backend it's running on, so you can swap the reference Docker
-adapter for Modal or Daytona without re-prompting.
+exposes a fixed set of shell and filesystem tools to Agents. A Sandbox is a
+sibling of Provider — one row per Workspace, with a `backend` discriminator —
+not a Provider variant, an MCP server, or a general-purpose plugin surface.
 
-> See [ADR-0001](https://github.com/willdady/platypus/blob/main/docs/adr/0001-sandbox-as-workspace-keyed-execution-environment.md)
-> for why a Sandbox is a Workspace-keyed sibling of Provider (not a Provider
-> variant, an MCP server, or a generic plugin), and
-> [ADR-0002](https://github.com/willdady/platypus/blob/main/docs/adr/0002-sandbox-fixed-five-tool-core.md)
-> for why the interface is a fixed five-tool core.
+Adapters cannot add, rename or re-sign Tools, and an Agent's prompt must not
+depend on which backend it runs on. That is what lets you swap the reference
+Docker adapter for Modal or Daytona without re-prompting.
+([ADR-0002](https://github.com/willdady/platypus/blob/main/docs/adr/0002-sandbox-fixed-five-tool-core.md)
+records the rejected open-contract alternative.)
 
 ### The interface
 
@@ -236,8 +247,7 @@ State (filesystem, environment) is expected to **persist across Chat turns**,
 keyed on `(orgId, workspaceId)`. That persistence is the whole point —
 Hermes / Claude-Code-style workflows depend on it.
 
-Contract rules your adapter must honour (all from
-[ADR-0002](https://github.com/willdady/platypus/blob/main/docs/adr/0002-sandbox-fixed-five-tool-core.md)):
+Contract rules your adapter must honour:
 
 - **Paths are workspace-root-relative.** The root is conventionally
   `/workspace`; reject absolute paths.
@@ -250,7 +260,21 @@ Contract rules your adapter must honour (all from
 - **Every response carries a `truncated` flag** with the Platypus-defined byte /
   entry caps. If your backend can't honour the cap natively, truncate yourself.
 - **`destroy` must be idempotent** — it fires on row delete, on a `backend`
-  change, and best-effort on Workspace cascade.
+  change, and best-effort on Workspace cascade. It need not destroy anything:
+  the SSH reference adapter's `destroy` deliberately only disconnects, because
+  the host is the operator's, not Platypus's.
+
+<Callout type="warning">
+  **Tool calls are not serialised.** Platypus forwards them to your adapter
+  **concurrently** — there is no per-Sandbox lock and no queue. Two `shellExec`
+  calls, or a `shellExec` and an `fsWrite`, can be in flight against the same
+  environment at the same time, and a model that emits parallel tool calls
+  routinely does exactly that. The contract is "a Sandbox is a Linux box":
+  parallel commands may race, and that is the caller's problem, not something
+  the adapter is expected to prevent. Don't build one on the assumption that
+  calls arrive one at a time — any per-connection or per-container state your
+  adapter caches must be safe for concurrent use.
+</Callout>
 
 ### Contributing a backend
 
@@ -317,14 +341,14 @@ membership _is_ the enable switch — there is no separate per-backend env gate
    enable the plugin by listing it in `PLATYPUS_PLUGINS`.
 
 <Callout type="warning">
-  The Docker reference adapter mounts the host Docker socket and is scoped to
-  **development and single-node self-hosting only** — explicitly not for
-  multi-tenant or hostile-tenant environments. Reach / network exposure is
-  default-deny and admin-curated. See
-  [ADR-0003](https://github.com/willdady/platypus/blob/main/docs/adr/0003-docker-reference-sandbox-adapter-socket-mount.md)
-  and
-  [ADR-0005](https://github.com/willdady/platypus/blob/main/docs/adr/0005-sandbox-host-reachability-is-admin-curated-default-deny.md)
-  before shipping a backend with host reach.
+  The Docker reference adapter mounts the host Docker socket, which grants the
+  backend container effective root on the host. It is scoped to **development
+  and single-node self-hosting only** — explicitly not for multi-tenant or
+  hostile-tenant environments. If your backend gives a Sandbox reach into host
+  networks or services, make that reach **default-deny and admin-curated**: an
+  Operator declares the eligible set at deploy time, an Org Admin picks a subset
+  per Sandbox, and a Workspace Owner cannot widen it. See [Sandbox
+  infrastructure](/self-hosting/sandbox) for how the Docker adapter does this.
 </Callout>
 
 ## Tool sets
@@ -443,8 +467,8 @@ when a Workspace has no Sandbox configured).
 
 <Callout type="info">
   The `sandbox` tool set is the one core tool set **not** contributed through a
-  manifest — it is the consumer side of the Sandbox-backend extension point
-  (ADR-0002), core glue that turns whichever backend a Workspace configured into
+  manifest — it is the consumer side of the Sandbox-backend extension point,
+  core glue that turns whichever backend a Workspace configured into
   the fixed five tools, so it stays a core-internal static registration in
   `apps/backend/src/tools/index.ts`. It is not a template for new tool sets;
   contribute those through a plugin manifest as above.
@@ -506,7 +530,7 @@ mechanics.
 Third-party Contribution ids are **auto-prefixed with the plugin's manifest
 `name`** at load — `example.greeting`, and so on. You write **bare** ids in your
 manifest; core prefixes them. Core built-in ids stay flat and un-prefixed
-(`math-conversions`, `time`, `docker`). This split (ADR-0013) means a
+(`math-conversions`, `time`, `docker`). This split means a
 third-party id can never collide with a current — or _future_ — core built-in
 and silently break a deployment on upgrade.
 
@@ -553,52 +577,23 @@ want an MCP server, not a code change.
 
 ## Shared resources
 
-Agents, Skills, and MCPs can be **Promoted** to Organization scope and become
-**Shared resources** that many Workspaces reference (never copy). The defining
-rule is **no implicit sharing** — a Shared resource may reference only other
-Shared resources. If you're touching the resource model (adding a new shareable
-resource type, or a reference between resources), read
-[ADR-0007](https://github.com/willdady/platypus/blob/main/docs/adr/0007-organization-scoped-shared-resources.md)
-first; the promotion-prerequisite rule has wide-reaching consequences.
+**Agents and Skills** can be **Promoted** to Organization scope and become
+**Shared resources** that many Workspaces reference (never copy). MCPs and
+Providers are shareable too, but have no Promote action — they are created at
+Organization scope directly.
 
-## Migration status
+Two rules constrain anything you add to this model:
 
-The plugin loader is landing incrementally
-([ADR-0013](https://github.com/willdady/platypus/blob/main/docs/adr/0013-plugin-system-manifest-driven-in-process-extension-points.md)).
-What's live and what's still in-tree today:
+- **No implicit sharing.** A Shared resource may reference only other Shared
+  resources. Promoting an Agent that references a Workspace-scoped Skill is
+  refused; promote the Skill first. Sharing never cascades.
+- **A Workspace-keyed resource is rebound at Chat-turn time, not captured.** The
+  Sandbox Tool set is the live example: a Shared Agent granted it resolves to the
+  Sandbox of whichever Workspace the turn is running in, so one Shared Agent
+  works everywhere without any Sandbox being shared. If you add a resource type
+  that a Shared resource can reach, it must either be Shared itself or rebind
+  this way — capturing a Workspace's row into an Organization-scoped resource
+  would leak one tenant's environment into another's.
 
-- **Live:** the `@platypuschat/plugin-sdk` surface (Tool sets _and_
-  Sandbox-backend contributions), the boot-time loader with the
-  [`apiVersion` compatibility window](#api-versioning--compatibility) (N and
-  N−1), the built-in map / core allowlist, the first core plugin
-  `@platypus/tools-basic` (math, time), the Docker Sandbox backend as the core
-  plugin `@platypus/docker`,
-  [deploy-time plugin config/credentials](#deploy-time-plugin-config--credentials)
-  (the shared credential block), and
-  [third-party plugin loading with contribution-id namespacing](#third-party-plugins)
-  (dynamic `import()` of an installed package, ids prefixed by the manifest
-  `name`; see the `@platypus-examples/tool-set` reference plugin) — each flowing
-  manifest → loader → registry in a Chat turn. Observability is live too: a boot
-  log enumerating loaded plugins, a read-only `GET /plugins` catalog, and
-  originating-plugin annotations on the `GET /backends` and Tools listings. That
-  catalog backs the read-only
-  [**Installed plugins** Org-Admin view](/self-hosting/configuration#inspecting-installed-plugins)
-  — versions and contributions per plugin, no enable/disable (enablement is the
-  deploy-time `PLATYPUS_PLUGINS` list).
-- **Still in-tree, pending migration:** the remaining built-in Tool sets
-  (`kanban`, `triggers`, `sandbox`, …) still call `registerToolSet` directly at
-  boot. They keep working unchanged; the same registration functions are what the
-  loader drives.
-
-## Reference ADRs
-
-| ADR                                                                                                                               | Topic                                              |
-| --------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
-| [0001](https://github.com/willdady/platypus/blob/main/docs/adr/0001-sandbox-as-workspace-keyed-execution-environment.md)          | Sandbox is a Workspace-keyed execution environment |
-| [0002](https://github.com/willdady/platypus/blob/main/docs/adr/0002-sandbox-fixed-five-tool-core.md)                              | Fixed five-tool Sandbox interface                  |
-| [0003](https://github.com/willdady/platypus/blob/main/docs/adr/0003-docker-reference-sandbox-adapter-socket-mount.md)             | Docker reference adapter (socket mount)            |
-| [0004](https://github.com/willdady/platypus/blob/main/docs/adr/0004-sandbox-workspace-default-env-vars.md)                        | Sandbox default environment variables              |
-| [0005](https://github.com/willdady/platypus/blob/main/docs/adr/0005-sandbox-host-reachability-is-admin-curated-default-deny.md)   | Host reachability is admin-curated, default-deny   |
-| [0006](https://github.com/willdady/platypus/blob/main/docs/adr/0006-credential-and-reach-bearing-config-is-admin-managed.md)      | Credential/reach config is admin-managed           |
-| [0007](https://github.com/willdady/platypus/blob/main/docs/adr/0007-organization-scoped-shared-resources.md)                      | Organization-scoped Shared resources               |
-| [0013](https://github.com/willdady/platypus/blob/main/docs/adr/0013-plugin-system-manifest-driven-in-process-extension-points.md) | Manifest-driven plugin system                      |
+([ADR-0007](https://github.com/willdady/platypus/blob/main/docs/adr/0007-organization-scoped-shared-resources.md)
+records the rejected copy-on-share and implicit-cascade alternatives.)

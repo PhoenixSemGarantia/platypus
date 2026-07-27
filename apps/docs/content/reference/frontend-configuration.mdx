@@ -19,7 +19,7 @@ the server-side renderer.
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------- | ---------------------- |
 | `BACKEND_URL`          | Backend base URL for **client-side** requests (browser → backend).                                                                                                                                           | `http://localhost:4001`   | **Yes**                |
 | `INTERNAL_BACKEND_URL` | Backend base URL for **server-side** requests (SSR → backend) over the internal Docker network. Only needed when running in Docker; leave unset for local development, where `BACKEND_URL` is used for both. | _(unset)_                 | When running in Docker |
-| `BASE_PATH`            | Optional base path for deploying the app under a subpath (e.g. `/platypus-app`).                                                                                                                             | _(unset, served at root)_ | No                     |
+| `BASE_PATH`            | Optional base path for deploying the app under a subpath (e.g. `/platypus-app`). **Build-time only** — see the note below.                                                                                    | _(unset, served at root)_ | No                     |
 
 <Callout type="info">
   In Docker Compose, the browser and the SSR process reach the backend by
@@ -27,6 +27,16 @@ the server-side renderer.
   while the SSR process talks to the backend container directly over the Docker
   network (`INTERNAL_BACKEND_URL`, e.g. `http://backend:4000`). Outside Docker,
   set only `BACKEND_URL`.
+</Callout>
+
+<Callout type="warning">
+  **`BASE_PATH` is consumed at build time, not at run time.** Next.js bakes
+  `basePath` into the compiled output during `next build`, so setting
+  `BASE_PATH` in the Docker `.env` does nothing — the published
+  `willdady/platypus-frontend` image was built without it and keeps serving at
+  the root. To deploy under a subpath you have to build your own frontend image
+  with `BASE_PATH` set in the build environment. Every other variable on this
+  page is read at run time and works from `.env` as expected.
 </Callout>
 
 ## Other
