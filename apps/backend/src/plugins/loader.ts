@@ -471,10 +471,27 @@ export async function loadPlugins(
       // route, teardown, tool resolver) always receive a concrete schema — they
       // never see plugin config. A plain schema passes through untouched
       // (append-only: plugin-config-agnostic backends are unaffected).
-      const resolvedConfigSchema =
-        typeof contribution.configSchema === "function"
-          ? contribution.configSchema(pluginCtx.config)
-          : contribution.configSchema;
+      //
+      // The factory is third-party code reading a config block it narrows
+      // itself, so it can throw — a plugin that assumes an Operator supplied
+      // `config.region` raises a bare `Cannot read properties of undefined`
+      // naming nothing. Attributed here for the same reason the shape checks
+      // above exist: the schema check below only catches a factory that
+      // *returns* a non-schema, not one that throws on the way there.
+      let resolvedConfigSchema: SandboxBackendRegistration["configSchema"];
+      try {
+        resolvedConfigSchema =
+          typeof contribution.configSchema === "function"
+            ? contribution.configSchema(pluginCtx.config)
+            : contribution.configSchema;
+      } catch (cause) {
+        throw new Error(
+          `Plugin "${manifest.name}": sandbox backend "${effectiveBackend}" configSchema factory threw (${
+            cause instanceof Error ? cause.message : String(cause)
+          }).`,
+          { cause },
+        );
+      }
 
       // Checked after the factory form is resolved away, and duck-typed on
       // `safeParse` rather than `instanceof z.ZodType`, because that is exactly
