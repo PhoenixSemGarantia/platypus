@@ -80,6 +80,20 @@ describe("Tool Set Registry", () => {
         "Tool set with id 'nonexistent' has not been registered.",
       );
     });
+
+    it("throws for Object.prototype members rather than resolving them", () => {
+      // `toolSetId` reaches this lookup from `agent.toolSetIds`, which is
+      // request-body data. A plain-object registry answered `"toString" in
+      // TOOL_SETS_REGISTRY` with true and handed back
+      // `Object.prototype.toString` — a function with no `tools`, so the chat
+      // turn resolved no tools *without* throwing, and the caller's MCP fallback
+      // never ran. Unregistered must mean unregistered whatever the id is called.
+      for (const id of ["toString", "constructor", "__proto__", "valueOf"]) {
+        expect(() => getToolSet(id)).toThrow(
+          `Tool set with id '${id}' has not been registered.`,
+        );
+      }
+    });
   });
 
   describe("registerToolSet", () => {

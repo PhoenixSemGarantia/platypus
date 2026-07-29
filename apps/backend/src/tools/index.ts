@@ -23,9 +23,17 @@ type ToolSet = {
       ) => Record<string, Tool> | Promise<Record<string, Tool>>);
 };
 
-const TOOL_SETS_REGISTRY: {
+// `Object.create(null)`, not `{}`, for the same reason as the Sandbox and
+// Web-search backend registries: `toolSetId` reaches `getToolSet` from
+// `agent.toolSetIds`, which is request-body data. With a plain object,
+// `"toString" in TOOL_SETS_REGISTRY` is true, so the lookup handed back
+// `Object.prototype.toString` — a function with no `tools`, which resolved to no
+// tools *without* throwing, so the caller's MCP fallback never ran. A null
+// prototype has nothing to inherit, so an unregistered id throws whatever it is
+// called.
+const TOOL_SETS_REGISTRY = Object.create(null) as {
   [toolSetId: string]: ToolSet;
-} = {};
+};
 
 export const registerToolSet = (
   toolSetId: string,

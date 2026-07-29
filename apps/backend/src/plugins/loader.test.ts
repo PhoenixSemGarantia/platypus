@@ -540,7 +540,7 @@ describe("loadPlugins — sandbox backends", () => {
         credentialsSchema: z.object({}),
         create: () => ({}),
       },
-      /non-empty "backend" id/s,
+      /@platypus\/bad.*non-empty "backend" id/s,
     ],
     [
       "a missing name",
@@ -550,7 +550,7 @@ describe("loadPlugins — sandbox backends", () => {
         credentialsSchema: z.object({}),
         create: () => ({}),
       },
-      /must declare a non-empty "name"/s,
+      /@platypus\/bad.*must declare a non-empty "name"/s,
     ],
     [
       "a missing create",
@@ -560,7 +560,7 @@ describe("loadPlugins — sandbox backends", () => {
         configSchema: z.object({}),
         credentialsSchema: z.object({}),
       },
-      /must provide a "create" function/s,
+      /@platypus\/bad.*must provide a "create" function/s,
     ],
     [
       "a missing configSchema",
@@ -570,7 +570,7 @@ describe("loadPlugins — sandbox backends", () => {
         credentialsSchema: z.object({}),
         create: () => ({}),
       },
-      /must provide a Zod "configSchema"/s,
+      /@platypus\/bad.*must provide a Zod "configSchema"/s,
     ],
     [
       "a missing credentialsSchema",
@@ -580,7 +580,25 @@ describe("loadPlugins — sandbox backends", () => {
         configSchema: z.object({}),
         create: () => ({}),
       },
-      /must provide a Zod "credentialsSchema"/s,
+      /@platypus\/bad.*must provide a Zod "credentialsSchema"/s,
+    ],
+    // A factory-form configSchema is third-party code narrowing a config block
+    // it owns, so it can throw before it ever returns a schema — the shape check
+    // downstream only sees a non-schema *return*. Without attribution here, a
+    // plugin assuming an Operator supplied `config.region` aborts boot with a
+    // bare `Cannot read properties of undefined` naming nothing.
+    [
+      "a throwing configSchema factory",
+      {
+        backend: "b",
+        name: "x",
+        configSchema: () => {
+          throw new Error("region is required");
+        },
+        credentialsSchema: z.object({}),
+        create: () => ({}),
+      },
+      /@platypus\/bad.*configSchema factory threw.*region is required/s,
     ],
   ])(
     "aborts (fail-loud, plugin-named) on %s",

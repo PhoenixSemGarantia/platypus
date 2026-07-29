@@ -136,6 +136,15 @@ startup with a plugin-named error. Runtime Chat-turn resolution stays graceful (
 Workspace pointing at a since-removed Tool set degrades to no tools, as before) —
 strict at boot, forgiving at runtime.
 
+Each Contribution is shape-checked at boot too, so an incomplete one is refused
+up front rather than failing later in a Chat turn or on an Operator's settings
+form. A Sandbox backend must supply `backend`, `name`, both schemas, and
+`create`; a Web-search backend must supply `backend`, `name`, and
+`createExecutors`. TypeScript already requires all of these — the boot check is
+what catches a plugin shipped as plain JavaScript, and what turns a missing field
+into an error naming your plugin. A `configSchema` factory that throws while
+reading its plugin config is reported the same way.
+
 ### Deploy-time plugin config & credentials
 
 A plugin can declare **plugin-level** `configSchema` / `credentialsSchema` on its
