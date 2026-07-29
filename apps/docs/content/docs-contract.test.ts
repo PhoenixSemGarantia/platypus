@@ -21,6 +21,11 @@
  *   thousands separators stripped before comparison, but a rewritten sentence
  *   can still move a claim out from under its anchor. When that happens the
  *   failure says so explicitly rather than reporting a wrong number.
+ *
+ * Anything this file reads from outside `apps/docs` must also be declared in
+ * `apps/docs/turbo.json`, or turbo replays a cached pass over stale input. The
+ * list there is the whole of that coupling: add a `readRepoFile` path here, add
+ * it there.
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, posix, relative, sep } from "node:path";
@@ -138,12 +143,29 @@ const markdownTables = (content: string): MarkdownTable[] => {
   return tables;
 };
 
-/** The table whose first header cell matches `label`, e.g. "Event". */
+/**
+ * The one table whose first header cell matches `label`, e.g. "Event".
+ *
+ * Throws when a page grows a second one rather than silently checking the
+ * first: the rows of the table nobody looked at would read as undocumented,
+ * and the failure would point at the wrong thing.
+ */
 const tableByFirstColumn = (
   content: string,
   label: string,
-): MarkdownTable | undefined =>
-  markdownTables(content).find((table) => table.header[0] === label);
+): MarkdownTable | undefined => {
+  const matches = markdownTables(content).filter(
+    (table) => table.header[0] === label,
+  );
+  if (matches.length > 1) {
+    throw new Error(
+      `Found ${matches.length} tables whose first column is "${label}" (lines ` +
+        `${matches.map((table) => table.line).join(", ")}). This check reads one — ` +
+        `merge them, or teach this test which is authoritative.`,
+    );
+  }
+  return matches[0];
+};
 
 const firstCodeSpan = (cell: string): string | undefined =>
   cell.match(/`([^`]+)`/)?.[1];
@@ -161,16 +183,25 @@ const expectNoViolations = (violations: string[]) => {
 
 // --- environment variables ---------------------------------------------------
 
-const ENV_EXAMPLE_FILES = [
-  ".env.example",
-  "apps/backend/.env.example",
-  "apps/frontend/.env.example",
-];
+const BACKEND_REFERENCE_PAGE = "reference/backend-configuration.mdx";
+const FRONTEND_REFERENCE_PAGE = "reference/frontend-configuration.mdx";
 
-const ENV_REFERENCE_PAGES = [
-  "reference/backend-configuration.mdx",
-  "reference/frontend-configuration.mdx",
-];
+const ENV_REFERENCE_PAGES = [BACKEND_REFERENCE_PAGE, FRONTEND_REFERENCE_PAGE];
+
+/**
+ * Which page owes a row for the variables each file ships. The two app files
+ * pair with their own page — a backend variable listed only under "Frontend
+ * configuration" is as good as undocumented to the Operator reading the page
+ * for the service they are configuring. The root Compose file feeds both
+ * containers, so either page discharges it.
+ */
+const ENV_EXAMPLE_FILES: Record<string, string[]> = {
+  ".env.example": ENV_REFERENCE_PAGES,
+  "apps/backend/.env.example": [BACKEND_REFERENCE_PAGE],
+  "apps/frontend/.env.example": [FRONTEND_REFERENCE_PAGE],
+};
+
+const ENV_EXAMPLE_NAMES = Object.keys(ENV_EXAMPLE_FILES);
 
 /**
  * Variables the docs deliberately still name after they stopped existing,
@@ -206,26 +237,61 @@ const parseEnvExample = (content: string): Map<string, number> => {
   return found;
 };
 
+/**
+ * The first column of every `| Variable |` table on a page. Rows, not prose
+ * mentions: the reference pages call themselves "the exhaustive list", and a
+ * variable named only in a warning is one a reader scanning the table never
+ * finds. Reading the column also means no uppercase-word heuristic — `UTC` sits
+ * in a Default cell and is never mistaken for a claim.
+ */
+const variableRows = (content: string): Map<string, number> => {
+  const rows = new Map<string, number>();
+  for (const table of markdownTables(content)) {
+    if (table.header[0] !== "Variable") continue;
+    table.rows.forEach((row, index) => {
+      const name = firstCodeSpan(row[0]);
+      if (name && !rows.has(name)) rows.set(name, table.line + 2 + index);
+    });
+  }
+  return rows;
+};
+
 describe("environment variables", () => {
-  const declared = new Map<string, string>(); // VAR -> "file:line"
-  for (const file of ENV_EXAMPLE_FILES) {
+  type Declaration = { origin: string; pages: string[] };
+  const declared = new Map<string, Declaration>();
+  for (const [file, pages] of Object.entries(ENV_EXAMPLE_FILES)) {
     for (const [name, line] of parseEnvExample(readRepoFile(file))) {
-      if (!declared.has(name)) declared.set(name, `${file}:${line}`);
+      const existing = declared.get(name);
+      if (existing) {
+        existing.pages = [...new Set([...existing.pages, ...pages])];
+      } else {
+        declared.set(name, { origin: `${file}:${line}`, pages: [...pages] });
+      }
     }
   }
 
-  // A bare uppercase word is only read as a variable claim when it really is
-  // one; without this `UTC` in a Default column would look like a phantom row.
-  const looksLikeVariable = (token: string) =>
-    /^[A-Z][A-Z0-9_]*$/.test(token) &&
-    (token.includes("_") || declared.has(token));
+  const rowsByPage = new Map<string, Map<string, number>>();
+  for (const page of ENV_REFERENCE_PAGES) {
+    rowsByPage.set(page, variableRows(readDoc(page)));
+  }
+  const documentedRows = new Map<string, string>(); // VAR -> "page:line"
+  for (const [page, rows] of rowsByPage) {
+    for (const [name, line] of rows) {
+      if (!documentedRows.has(name)) {
+        documentedRows.set(name, `${page}:${line}`);
+      }
+    }
+  }
 
-  const documented = new Map<string, string>(); // VAR -> "page:line"
+  // Prose counts for the allowlists below — a migration note telling a reader
+  // where a removed setting went is exactly a mention without a row.
+  const mentionedAnywhere = new Map<string, string>(); // VAR -> "page:line"
   for (const page of ENV_REFERENCE_PAGES) {
     for (const span of inlineCodeSpans(readDoc(page))) {
       const token = span.text.split("=")[0].trim();
-      if (!looksLikeVariable(token)) continue;
-      if (!documented.has(token)) documented.set(token, `${page}:${span.line}`);
+      if (!mentionedAnywhere.has(token)) {
+        mentionedAnywhere.set(token, `${page}:${span.line}`);
+      }
     }
   }
 
@@ -234,21 +300,29 @@ describe("environment variables", () => {
     // green, which is worse than no test at all.
     expect(
       declared.size,
-      `parsed no assignments out of ${ENV_EXAMPLE_FILES.join(", ")}`,
+      `parsed no assignments out of ${ENV_EXAMPLE_NAMES.join(", ")}`,
     ).toBeGreaterThan(20);
     expect(
-      documented.size,
-      `parsed no variables out of ${ENV_REFERENCE_PAGES.join(", ")}`,
+      documentedRows.size,
+      `parsed no variable rows out of ${ENV_REFERENCE_PAGES.join(", ")}`,
     ).toBeGreaterThan(20);
   });
 
-  it("documents every variable the .env.example files ship", () => {
+  it("gives every variable the .env.example files ship a row on its own page", () => {
     const violations: string[] = [];
-    for (const [name, origin] of declared) {
-      if (documented.has(name)) continue;
+    for (const [name, { origin, pages }] of declared) {
+      if (pages.some((page) => rowsByPage.get(page)?.has(name))) continue;
+
+      const elsewhere = documentedRows.get(name);
+      const owed = pages
+        .map((page) => `apps/docs/content/${page}`)
+        .join(" or ");
       violations.push(
-        `\`${name}\` is set in ${origin} but neither reference page mentions it.\n` +
-          `Add a row to apps/docs/content/${ENV_REFERENCE_PAGES.join(" or apps/docs/content/")}.`,
+        elsewhere
+          ? `\`${name}\` is set in ${origin}, but its only row is apps/docs/content/${elsewhere}.\n` +
+              `Move it to ${owed} — the page for the service that ships it.`
+          : `\`${name}\` is set in ${origin} but no reference table has a row for it.\n` +
+              `Add a row to ${owed}.`,
       );
     }
     expectNoViolations(violations);
@@ -256,16 +330,18 @@ describe("environment variables", () => {
 
   it("names no variable the .env.example files do not ship", () => {
     const violations: string[] = [];
-    for (const [name, origin] of documented) {
-      if (declared.has(name)) continue;
-      if (REMOVED_VARS.has(name)) continue;
-      if (VARS_WITHOUT_ENV_EXAMPLE_ENTRY.has(name)) continue;
-      violations.push(
-        `apps/docs/content/${origin} names \`${name}\`, which no .env.example assigns.\n` +
-          `Source of truth: ${ENV_EXAMPLE_FILES.join(", ")}.\n` +
-          `If the variable was deliberately removed, add it to REMOVED_VARS in this file; ` +
-          `if it is real but no example file ships it, add it to VARS_WITHOUT_ENV_EXAMPLE_ENTRY.`,
-      );
+    for (const [page, rows] of rowsByPage) {
+      for (const [name, line] of rows) {
+        if (declared.has(name)) continue;
+        if (REMOVED_VARS.has(name)) continue;
+        if (VARS_WITHOUT_ENV_EXAMPLE_ENTRY.has(name)) continue;
+        violations.push(
+          `apps/docs/content/${page}:${line} has a row for \`${name}\`, which no .env.example assigns.\n` +
+            `Source of truth: ${ENV_EXAMPLE_NAMES.join(", ")}.\n` +
+            `If the variable was deliberately removed, add it to REMOVED_VARS in this file; ` +
+            `if it is real but no example file ships it, add it to VARS_WITHOUT_ENV_EXAMPLE_ENTRY.`,
+        );
+      }
     }
     expectNoViolations(violations);
   });
@@ -275,13 +351,13 @@ describe("environment variables", () => {
     for (const name of REMOVED_VARS) {
       if (declared.has(name)) {
         violations.push(
-          `\`${name}\` is listed in REMOVED_VARS but ${declared.get(name)} assigns it again.\n` +
+          `\`${name}\` is listed in REMOVED_VARS but ${declared.get(name)?.origin} assigns it again.\n` +
             `Drop it from REMOVED_VARS so the reference page is checked against the env files.`,
         );
       }
     }
     for (const name of [...REMOVED_VARS, ...VARS_WITHOUT_ENV_EXAMPLE_ENTRY]) {
-      if (!documented.has(name)) {
+      if (!mentionedAnywhere.has(name)) {
         violations.push(
           `\`${name}\` is allowlisted in this file but no reference page mentions it any more.\n` +
             `Remove the allowlist entry.`,
@@ -330,8 +406,9 @@ describe("webhook events", () => {
         );
       }
     }
+    const events: readonly string[] = webhookEventSchema.options;
     for (const [event, line] of documented) {
-      if (!webhookEventSchema.options.includes(event as never)) {
+      if (!events.includes(event)) {
         violations.push(
           `apps/docs/content/${page}:${line} lists \`${event}\`, which is not in ${source}.\n` +
             `That event never fires.`,
@@ -351,22 +428,38 @@ describe("webhook events", () => {
  */
 const BUILTIN_SOURCE = "apps/backend/src/plugins/builtin.ts";
 
-/** The literal between `declaration` and the `};` / `];` that closes it. */
-const literalAfter = (content: string, declaration: string): string => {
-  const body = content.slice(content.indexOf(declaration));
-  const end = body.search(/[}\]];/);
-  return body.slice(0, end);
+/**
+ * The literal between `export const <name>` and the `};` / `];` that closes it.
+ *
+ * Anchored on the declaration, not on the first mention of the name: the
+ * registry's own comments cross-reference both constants, and matching a comment
+ * would silently read the neighbouring literal — producing confident failures
+ * that blame the docs for a table that was right.
+ */
+const exportedLiteral = (content: string, name: string): string => {
+  const start = content.search(new RegExp(`export const ${name}\\b`));
+  if (start === -1) {
+    throw new Error(
+      `No \`export const ${name}\` in ${BUILTIN_SOURCE}. It was renamed or moved; ` +
+        `update this test rather than trusting what it parses.`,
+    );
+  }
+  const body = content.slice(start);
+  return body.slice(0, body.search(/[}\]];/));
 };
 
 const parseBuiltinPluginNames = (): string[] => {
-  const literal = literalAfter(readRepoFile(BUILTIN_SOURCE), "BUILTIN_PLUGINS");
+  const literal = exportedLiteral(
+    readRepoFile(BUILTIN_SOURCE),
+    "BUILTIN_PLUGINS",
+  );
   return [...literal.matchAll(/"(@platypus\/[a-z0-9-]+)":/g)].map(
     (match) => match[1],
   );
 };
 
 const parseAlwaysOnPluginNames = (): string[] => {
-  const literal = literalAfter(
+  const literal = exportedLiteral(
     readRepoFile(BUILTIN_SOURCE),
     "ALWAYS_ON_PLUGINS",
   );
@@ -513,6 +606,12 @@ const stringField = (
   schema: { shape: Record<string, unknown> },
   field: string,
 ): { min?: number; max?: number } => {
+  if (schema.shape[field] === undefined) {
+    throw new Error(
+      `No field \`${field}\` on that Zod shape. It was renamed or removed — ` +
+        `re-point the claim, or drop it if the field is gone.`,
+    );
+  }
   const bounds = unwrap(schema.shape[field]);
   const min = bounds.minLength ?? undefined;
   const max = bounds.maxLength ?? undefined;
