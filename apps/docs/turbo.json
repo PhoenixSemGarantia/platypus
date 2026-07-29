@@ -1,0 +1,15 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "test": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/.env.example",
+        "$TURBO_ROOT$/apps/backend/.env.example",
+        "$TURBO_ROOT$/apps/frontend/.env.example",
+        "$TURBO_ROOT$/apps/backend/src/plugins/builtin.ts"
+      ]
+    }
+  }
+}
