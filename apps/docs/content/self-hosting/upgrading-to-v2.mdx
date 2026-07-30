@@ -7,7 +7,8 @@ import { Callout } from "nextra/components";
 
 # Upgrading to 2.0
 
-Platypus 2.0 introduces the [plugin system](/extending#the-plugin-model): the
+Platypus 2.0 introduces the
+[plugin system](/extending/plugin-api-and-config#the-plugin-model): the
 web-fetch tool set and the Docker Sandbox backend are no longer configured by
 their own dedicated environment variables — they are **plugins**, enabled via
 `PLATYPUS_PLUGINS` and configured via `PLATYPUS_PLUGIN_CONFIG`.
@@ -98,5 +99,6 @@ it.
 - [Sandbox infrastructure](/self-hosting/sandbox) — the Docker and SSH backends
   in depth. The **SSH** backend (`@platypus/ssh`) is new in 2.0 — the one Sandbox
   option viable in horizontally-scaled deployments.
-- [Extending](/extending) — writing your own plugins against
+- [Extending → Your first plugin](/extending/your-first-plugin) — writing your
+  own plugins against
   [`@platypuschat/plugin-sdk`](https://www.npmjs.com/package/@platypuschat/plugin-sdk).

@@ -45,8 +45,8 @@ For a guided walkthrough of configuring a deployment, see
 | `PLATYPUS_PLUGINS`       | Comma-separated list of the **gate-able** plugins to load and enable at boot — the deny-worthy core plugins (`@platypus/web-fetch`, `@platypus/docker`, `@platypus/ssh`) plus any third-party ones. The always-on core tool sets (`@platypus/tools-basic`, `@platypus/tools-platform`) load unconditionally and must **not** be listed (listing one is fail-loud). List membership both loads _and_ enables a gate-able plugin. Fail-loud at boot.                                | _(unset ⇒ no gate-able plugins;_ `.env.example` _ships_ `@platypus/web-fetch`_)_ | No |
 | `PLATYPUS_PLUGIN_CONFIG` | Deploy-time, Operator-owned plugin config/credentials as a JSON object keyed by plugin name (the manifest `name`; a third-party name is a slug, not the npm specifier), each `{ "config": {…}, "credentials": {…} }`. Validated at boot against the plugin's manifest schemas (fail-loud); a key matching no loaded plugin is also fail-loud. One block is shared deployment-wide across all of a plugin's contributions and tenants. Distinct from per-Workspace Sandbox config. | _(unset)_             | No       |
 
-See [Extending → the plugin model](/extending#the-plugin-model) and
-[Configuration → Plugins](/self-hosting/configuration#plugins) (incl.
+See [Extending → the plugin model](/extending/plugin-api-and-config#the-plugin-model)
+and [Configuration → Plugins](/self-hosting/configuration#plugins) (incl.
 [plugin config & credentials](/self-hosting/configuration#plugin-config--credentials)).
 
 ## Authentication
@@ -110,9 +110,9 @@ run sooner.
 
 ### Egress guard
 
-Any tool that fetches a URL the _model_ picked — the `fetchUrl` tool today, a
-[Web-search backend](/extending)'s `read_url` next — runs the target through a
-core guard first. It resolves the hostname and refuses the fetch if **any**
+Any tool that fetches a URL the _model_ picked — the `fetchUrl` tool — runs the
+target through a core guard first. It resolves the hostname and refuses the
+fetch if **any**
 resolved address is blocked, so a name with one public and one internal record is
 refused. Non-`http(s)` schemes are refused, and a hostname that fails to resolve
 fails closed.
@@ -165,8 +165,8 @@ is the production option.
 Platypus ships two reference Sandbox adapters, both **off by default** and each
 enabled by listing its plugin in `PLATYPUS_PLUGINS` (both ship as core plugins —
 see [Plugins](#plugins) above). Adding the name both loads _and_ registers the
-backend type; omit it and that backend can't be selected at all. See the
-[Extending](/extending#sandbox-backends) section and
+backend type; omit it and that backend can't be selected at all. See
+[Extending → Sandbox backends](/extending/sandbox-backends) and
 [Sandbox infrastructure](/self-hosting/sandbox).
 
 - **Docker** (`@platypus/docker`) — one container per Workspace via the host's
