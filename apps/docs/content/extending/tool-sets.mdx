@@ -17,9 +17,11 @@ you to call.
 
 ## The contribution
 
-Each entry is a `ToolSetContribution` from the SDK. It carries an `id`, a display
-`name`, a `category` that groups it on the Agent form, an optional
-`description`, and `tools`.
+Each entry is a `ToolSetContribution` from
+[`@platypuschat/plugin-sdk`](https://www.npmjs.com/package/@platypuschat/plugin-sdk).
+It carries an `id`, a display `name`, a `category` that groups it on the Agent
+form, an optional `description`, and `tools`. The exact signatures live in the
+package; the rules below are what those types don't encode.
 
 An individual tool is a Vercel AI SDK tool — `tool()` from the `ai` package,
 with a Zod `inputSchema` and an `execute` function.
@@ -93,7 +95,7 @@ gains nothing. It is still prefixed as third-party.
 
 ## Degrading gracefully
 
-A tool set whose dependencies aren't there at turn time should resolve to **no
+A Tool set whose dependencies aren't there at turn time should resolve to **no
 tools**, not throw. The core `sandbox` set is the model: in a Workspace with no
 Sandbox configured it returns an empty map and the turn proceeds without shell
 tools. Boot is strict; runtime is forgiving.
@@ -101,7 +103,7 @@ tools. Boot is strict; runtime is forgiving.
 ## Adding one to a core plugin
 
 If you are working in the repository rather than shipping your own package, a
-new core tool set is a `ToolSetContribution` added to an existing core plugin's
+new core Tool set is a `ToolSetContribution` added to an existing core plugin's
 manifest:
 
 - a Platypus-domain set belongs in `@platypus/tools-platform`;

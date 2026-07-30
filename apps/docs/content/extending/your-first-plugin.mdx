@@ -9,7 +9,7 @@ import { Callout, Steps } from "nextra/components";
 
 The repository ships a runnable third-party plugin:
 [`packages/example-plugin`](https://github.com/willdady/platypus/tree/main/packages/example-plugin),
-published as `@platypus-examples/tool-set`. It contributes one tool set with one
+published as `@platypus-examples/tool-set`. It contributes one Tool set with one
 tool, and it exists so you can prove the whole path — install, list, load,
 grant, call — before you write anything of your own.
 
@@ -113,20 +113,20 @@ transcript. That is the loop closed: your code ran inside a Chat turn.
 
 | What you see                                                          | What it means                                                                            | Fix                                                                                                                    |
 | --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Backend exits at boot, log names your plugin and "failed to resolve"   | The package isn't installed where the backend can `import()` it                          | Install it into the deployment, not just the repository, and check the specifier for typos                              |
+| Backend exits at boot, log names your plugin and "failed to resolve"   | The package isn't installed where the backend can `import()` it                          | Install it into the deployment, not only the repository, and check the specifier for typos                              |
 | Backend exits, log complains about the manifest `name`                 | A third-party `name` must be a url-safe slug — lowercase letters, digits, hyphens         | Use `widgets`, not `@acme/platypus-widgets`. The package specifier stays scoped; the manifest name doesn't              |
 | Backend starts, but **Plugins** doesn't list it and nothing is logged   | It isn't in `PLATYPUS_PLUGINS` — most often a `compose.sandbox.yaml` overlay replaced the list | The overlay sets `PLATYPUS_PLUGINS` under `services.backend.environment`, which wins over `.env`. Put your full list in the overlay |
 
 <Callout type="info">
-  A tool set that appears in **Plugins** but not on the Agent form is a
+  A Tool set that appears in **Plugins** but not on the Agent form is a
   different problem: the **Tools** card only renders when the Workspace has at
-  least one tool set to grant, and it lists the tool set **name** under its
+  least one Tool set to grant, and it lists the Tool set **name** under its
   **category**. Look under `Examples`, not under `example.greeting`.
 </Callout>
 
 ## Where to next
 
-- **[Tool sets](/extending/tool-sets)** — the contribution you just loaded, in
+- **[Tool sets](/extending/tool-sets)** — the contribution you loaded, in
   full: static maps versus factories, and what runtime scope a factory gets.
 - **[Sandbox backends](/extending/sandbox-backends)** — the other Extension
   point.

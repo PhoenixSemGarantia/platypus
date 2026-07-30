@@ -14,7 +14,7 @@ end to end, so you can see how the pieces fit before you design your own.
 Board, posts a standup summary as a card in a **Standups** column, and flags
 anything that hasn't moved in three days.
 
-It needs four things: a Board, an Agent with the **Kanban** tool set, a Skill
+It needs four things: a Board, an Agent with the **Kanban** Tool set, a Skill
 that holds the summary format, and a cron Trigger. Roughly twenty minutes.
 
 <Callout type="info">
@@ -104,7 +104,7 @@ Every run:
 Report what you did in one sentence, naming the card you created.
 
 Never move a card between columns, never delete a card, and never edit a card
-description other than the standup card you just created. If the board has no
+description other than the standup card you created in this run. If the board has no
 cards at all, create no card and say so instead.
 ```
 
@@ -117,7 +117,7 @@ Click **Save**.
 
 <Callout type="warning">
   The last paragraph of those Instructions is the load-bearing one. An Agent with
-  the **Kanban** tool set can move, relabel and delete cards, and a model asked
+  the **Kanban** Tool set can move, relabel and delete cards, and a model asked
   for "a standup" will sometimes decide tidying the board is helpful. Bound what
   it may change, in writing, or you will find out which cards it thought were
   done.
@@ -132,7 +132,7 @@ the format, then create a card. Expand the tool calls in the transcript to check
 each step. Then open the Board and read the card it filed.
 
 Getting this right before you schedule it matters — a Trigger run has nobody
-watching it, so a formatting mistake just accumulates one card a day.
+watching it, so a formatting mistake quietly accumulates one card a day.
 
 If the summary is wrong, fix the **Skill body**. If it did the wrong _thing_ —
 moved a card, skipped the label step — fix the Agent's **Instructions**.
@@ -182,7 +182,7 @@ A run that failed shows its error there. The most common ones:
   drags cards around on, which is why the summary is worth reading.
 - **Try it in a Chat, then schedule it.** The Chat is where you can see the tool
   calls.
-- **A granted tool set is real write access.** Bound it in the prompt.
+- **A granted Tool set is real write access.** Bound it in the prompt.
 
 ## Where to next
 

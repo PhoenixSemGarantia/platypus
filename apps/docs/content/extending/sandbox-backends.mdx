@@ -17,8 +17,11 @@ a third is one of the better-scoped things you can build against Platypus.
 
 ## The contract is closed
 
-Your adapter implements `SandboxBackend` from the SDK: five tools plus a teardown.
-You **cannot** add, rename or re-sign a tool.
+Your adapter implements `SandboxBackend` from
+[`@platypuschat/plugin-sdk`](https://www.npmjs.com/package/@platypuschat/plugin-sdk):
+five tools plus a teardown. You **cannot** add, rename or re-sign a tool. Read the
+exact signatures off the package you have installed — this page states the rules
+those types don't encode.
 
 | Method      | Does                                              |
 | ----------- | ------------------------------------------------- |

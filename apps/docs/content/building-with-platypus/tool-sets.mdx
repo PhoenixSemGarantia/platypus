@@ -1,6 +1,6 @@
 ---
 title: Tool sets
-description: What each built-in tool set lets an Agent do, which ones an Operator has to enable, and which ones let an Agent change your Workspace.
+description: What each built-in Tool set lets an Agent do, which ones an Operator has to enable, and which ones let an Agent change your Workspace.
 ---
 
 import { Callout } from "nextra/components";
@@ -11,7 +11,7 @@ A **Tool set** is a bundle of tools you grant to an Agent with one switch, on th
 Agent form's **Tools** card. This page is the catalogue: what each one actually
 lets an Agent do, so you can pick without guessing from its name.
 
-The card groups tool sets by **category**, and only lists what your deployment
+The card groups Tool sets by **category**, and only lists what your deployment
 has loaded. If something below isn't there, your Operator hasn't enabled it — the
 **Availability** column says which ones that applies to.
 
@@ -24,7 +24,7 @@ has loaded. If something below isn't there, your Operator hasn't enabled it — 
 | **Kanban**              | Productivity  | Read a Board's full state, and create, move, copy, bulk-edit and delete cards and their comments.                   | Always                           |
 | **Dashboards**          | Productivity  | List Dashboards and their widgets, and write new data into a widget.                                                | Always                           |
 | **Triggers**            | Automation    | List and read Triggers, and **create, edit and delete** them — including scheduling new unattended runs.             | Always                           |
-| **Agent Discovery**     | Productivity  | Read-only: list the Agents, tool sets and Providers in the Workspace, and read one Agent's configuration.           | Always                           |
+| **Agent Discovery**     | Productivity  | Read-only: list the Agents, Tool sets and Providers in the Workspace, and read one Agent's configuration.           | Always                           |
 | **Agent Management**    | Productivity  | **Create, update and delete Agents** in the Workspace.                                                              | Always                           |
 | **Skill Management**    | Productivity  | List and read Skills, and **create, update and delete** them.                                                       | Always                           |
 | **Notifications**       | Communication | Post a [Notification](/building-with-platypus/notifications) to the Workspace, then list, edit or dismiss its own.   | Always                           |
@@ -56,7 +56,7 @@ own. If the switch isn't on the Agent form, your Operator hasn't listed it — s
 [Configuration → Plugins](/self-hosting/configuration#plugins).
 
 **Sandbox** is different again: the switch is there, but in a Workspace with no
-Sandbox configured it resolves to **no tools** at all. The Agent simply has no
+Sandbox configured it resolves to **no tools** at all. The Agent has no
 shell that turn — it doesn't error, and nothing tells you why. Sandbox setup is
 an Org Admin task; see
 [Sandbox infrastructure](/self-hosting/sandbox).

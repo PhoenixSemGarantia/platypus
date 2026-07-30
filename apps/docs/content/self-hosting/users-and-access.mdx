@@ -21,8 +21,9 @@ Self-serve sign-up is **open**. The sign-in page links to **Sign up**, the form
 takes a name, an email and a password, and the account exists immediately —
 **email verification is off**, so no address is ever confirmed.
 
-There is no setting to turn this off. Not an environment variable, not a toggle in
-the app.
+Nothing Platypus exposes turns this off. There is no environment variable and no
+toggle in the app; the underlying auth library has a switch for it, but Platypus
+doesn't surface it, so closing sign-up means patching and rebuilding the backend.
 
 <Callout type="warning">
   Put Platypus on the public internet and strangers will be able to register
@@ -118,6 +119,10 @@ A Super Admin gets one extra screen: **Settings → Users**, titled **User
 Management**. It lists every account on the deployment with its role
 (**Super Admin** or **User**), its status (**Verified**, **Unverified** or
 **Banned**), and when it was created.
+
+Expect almost everyone to read **Unverified**. Only the admin seeded on first boot
+is marked verified; because email verification is off there is no flow that ever
+verifies anybody else. It is not a problem to fix — nothing is gated on it.
 
 Two actions per row: **Change password** and **Delete**.
 

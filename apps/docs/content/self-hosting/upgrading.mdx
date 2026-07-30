@@ -74,7 +74,7 @@ releases do bring migrations, which is why the section above still applies.
   empty `PLATYPUS_PLUGINS` loads **only** the always-on core tool sets — there is
   no built-in default. A 1.x `.env` predates the plugin system and has no
   `PLATYPUS_PLUGINS` line at all, so upgrading silently strips web-fetch from
-  every Agent. Nothing errors; the tool is simply gone. To keep it you **must**
+  every Agent. Nothing errors; the tool is gone. To keep it you **must**
   add `@platypus/web-fetch` to `PLATYPUS_PLUGINS`.
 </Callout>
 

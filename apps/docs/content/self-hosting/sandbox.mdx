@@ -20,10 +20,13 @@ infrastructure.
 
 ## Sandbox backends
 
-The Sandbox is modelled as a sibling of Provider: one Sandbox row per Workspace,
-with a `backend` discriminator and a JSON config, resolved by an in-tree adapter
-registry at chat-turn time. Filesystem and environment state persist across chat
-turns — that's what makes longer-lived, build-something workflows possible.
+A Workspace has **at most one Sandbox**, and you choose which backend runs it. You
+configure it much as you configure a Provider: pick the backend, fill in its
+settings, save.
+
+Files and environment variables **persist between Chat turns**. That is what makes
+the Sandbox worth having — an Agent can install something in one turn and use it
+in the next, so build-and-test work survives longer than a single reply.
 
 Adding a new backend (Modal, E2B, Daytona, a custom VM) means implementing the
 fixed Sandbox contract; see
