@@ -32,6 +32,7 @@ import {
   Agent,
   ToolSet,
   Skill,
+  providerHasNativeSearch,
 } from "@platypus/schemas";
 import { type PlatypusUIMessage } from "@platypus/backend/src/types";
 import useSWR from "swr";
@@ -406,11 +407,18 @@ export const Chat = ({
     ? providers.find((p) => p.id === resolvedProviderId)
     : null;
   // Show the search toggle only when the resolved provider supports native
-  // search (not Bedrock) and hasn't disabled it. Hidden when nothing is
-  // resolved yet — we can't search without a model. (#167)
+  // search and hasn't disabled it. Hidden when nothing is resolved yet — we
+  // can't search without a model. (#167)
+  //
+  // The capability test is `providerHasNativeSearch`, shared with the backend's
+  // injection gate, rather than a local `!== "Bedrock"`: the gate is the
+  // authority over what a turn actually serves (see `resolveSearchMode`), so a
+  // second copy of the table here would show a toggle that resolves to no
+  // tools. Bedrock is not the only case — OpenAI's search is Responses-API
+  // only, so a chat-completions endpoint (vLLM, llama.cpp) has none either.
   const canSearch =
     !!resolvedProvider &&
-    resolvedProvider.providerType !== "Bedrock" &&
+    providerHasNativeSearch(resolvedProvider) &&
     resolvedProvider.nativeSearchEnabled !== false;
 
   // The media types the currently-selected model ingests natively (issue #328),

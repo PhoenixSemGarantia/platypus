@@ -57,6 +57,9 @@ search for the messages you send while it is on.
 It is only there when the resolved Provider supports it. It is **absent** when:
 
 - the Provider is **Bedrock**, which has no native search;
+- the Provider is **OpenAI** with **API Mode** set to **Chat Completions** —
+  vendor search runs on the Responses API only, so an OpenAI-compatible server
+  (vLLM, Ollama, LiteLLM) has none;
 - an Org Admin has switched native search off on that Provider;
 - nothing has resolved yet, because no Agent or model is selected.
 
