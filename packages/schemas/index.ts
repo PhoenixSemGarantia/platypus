@@ -894,6 +894,32 @@ const providerBaseSchema = z.object({
   // their built-in search. See issue #167 — provides a path to disable native
   // search for OpenAI-compatible endpoints (e.g. vLLM) that can't honor it.
   nativeSearchEnabled: z.boolean().default(true),
+  // The discriminator of the Web-search backend this provider serves search
+  // with, or null/absent for none (ADR-0014). A plugin-contributed backend fills
+  // the slot native search occupies, and takes precedence over it when set —
+  // which is what lets a provider with no native search (Bedrock, vLLM on the
+  // chat API) offer the toggle at all. Not validated against the registry here:
+  // the registry is a backend-runtime concern, and a stale id degrades to no
+  // search tools plus a warn-log rather than blocking the form.
+  //
+  // Length-bounded because the value is free text that reaches a log line on
+  // every searching turn; 200 is far above a namespaced plugin id
+  // (`@scope/name.backend`). `""` normalises to null so the column holds one
+  // representation of "no backend" — a form select's "None" option yields the
+  // empty string, and rejecting it with `.min(1)` would turn "none" into a 400
+  // instead of storing what the Operator meant.
+  //
+  // `.optional()` sits *outside* `.transform()` deliberately: a transform wraps
+  // the field in `ZodEffects`, which hides the optionality `z.infer` reads, so
+  // `.optional().transform(...)` would make `webBackend` a **required** key on
+  // `Provider` whose type merely includes `undefined` — every existing Provider
+  // literal that omits the field stops compiling.
+  webBackend: z
+    .string()
+    .max(200)
+    .nullable()
+    .transform((value) => (value === "" ? null : value))
+    .optional(),
   // Free-text system-prompt security directives appended LAST (recency) to
   // every run on this provider — including sub-agent runs resolved to this
   // provider. Provider-scoped because guard strength is a property of the model
@@ -945,6 +971,36 @@ export const providerSchema = providerBaseSchema
 
 export type Provider = z.infer<typeof providerSchema>;
 
+/**
+ * Whether a provider can search the web on its own, with no Web-search backend
+ * configured — i.e. whether the AI SDK exposes a provider-native `web_search`
+ * tool for this provider type and API mode.
+ *
+ * Lives here, beside `defaultPassthroughFileTypes`, for the same reason: the
+ * backend's injection gate and the frontend's toggle visibility must agree, and
+ * mirrored copies of a capability table drift. Bedrock has no native search, and
+ * OpenAI's lives on the Responses API only — which is why an OpenAI-compatible
+ * endpoint on the chat API (vLLM, llama.cpp, LiteLLM) returns false and gains
+ * search only through a Web-search backend (ADR-0014).
+ *
+ * `default` covers unknown provider types conservatively: a type this table has
+ * never seen cannot be assumed to carry a native tool.
+ */
+export const providerHasNativeSearch = (
+  provider: Pick<Provider, "providerType" | "apiMode">,
+): boolean => {
+  switch (provider.providerType) {
+    case "Anthropic":
+    case "Google":
+    case "OpenRouter":
+      return true;
+    case "OpenAI":
+      return provider.apiMode !== "chat";
+    default:
+      return false;
+  }
+};
+
 export const providerCreateSchema = providerBaseSchema.pick({
   organizationId: true,
   workspaceId: true,
@@ -959,6 +1015,7 @@ export const providerCreateSchema = providerBaseSchema.pick({
   project: true,
   apiMode: true,
   nativeSearchEnabled: true,
+  webBackend: true,
   securityGuardrails: true,
   modelIds: true,
   taskModelId: true,
@@ -1095,6 +1152,7 @@ export const providerUpdateSchema = providerBaseSchema.pick({
   project: true,
   apiMode: true,
   nativeSearchEnabled: true,
+  webBackend: true,
   securityGuardrails: true,
   modelIds: true,
   taskModelId: true,

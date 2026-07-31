@@ -2,7 +2,7 @@ import {
   experimental_createMCPClient as createMCPClient,
   type MCPClient,
 } from "@ai-sdk/mcp";
-import { openProvider } from "./provider.ts";
+import { openProvider, type OpenedProvider } from "./provider.ts";
 import { and, eq, or, inArray } from "drizzle-orm";
 import { db } from "../index.ts";
 import {
@@ -27,7 +27,12 @@ import {
   retrieveRecentSummaries,
   type MemorySummary,
 } from "./memory-retrieval.ts";
+import { providerHasNativeSearch } from "@platypus/schemas";
 import type { Provider, Skill } from "@platypus/schemas";
+import {
+  getWebBackend,
+  type WebBackendContext,
+} from "../web-backends/index.ts";
 import type { LanguageModel, Tool } from "ai";
 import { logger } from "../logger.ts";
 import { buildMcpTransportConfig } from "./mcp-oauth-provider.ts";
@@ -449,19 +454,101 @@ export const drizzleChatTurnQueries: ChatTurnQueries = {
 };
 
 /**
- * Whether the provider's native web_search tool should be injected for this
- * turn. True only when the request opted into search AND the provider hasn't
- * disabled native search. This is the authority over the chat search toggle:
- * it covers both the raw-model and agent paths and ignores a stale client that
- * still sends `search: true` for a provider whose native search was turned off
- * (#167). `nativeSearchEnabled` is undefined for legacy provider rows, which is
- * treated as enabled.
+ * How this turn's web-search slot is filled: by a plugin Web-search backend, by
+ * the provider's native tool, or not at all.
+ *
+ * Three-valued rather than a boolean because the decision and the *reason* for it
+ * are one thing (ADR-0014's explicit-plugin-first resolution). A boolean gate plus
+ * a re-derived branch at the injection site meant a reader had to prove that a
+ * passing gate with no `webBackend` implied native capability; carrying the
+ * backend id in the result removes that step and the unreachable branch with it.
+ *
+ * This is the single authority over the chat search toggle: it covers the
+ * raw-model and agent paths alike, and ignores a stale client that still sends
+ * `search: true` for a provider that cannot serve it (#167).
+ *
+ * Precedence, in order:
+ * 1. the request did not opt in → `none`;
+ * 2. the Operator switched search off on this provider → `none`
+ *    (`nativeSearchEnabled` is undefined for legacy rows, treated as enabled);
+ * 3. a Web-search backend is selected → `backend`, *ahead of* native search —
+ *    explicit Operator selection beats implicit provider capability, and a
+ *    native-first `??` would never reach the backend on exactly the providers
+ *    this feature targets;
+ * 4. the provider has a native tool → `native`;
+ * 5. otherwise `none`.
+ *
+ * Step 4 adds backend-side capability gating that did not exist before: the gate
+ * used to be the toggle alone, with the provider-capability check living only in
+ * the frontend. It is the stale-client case ADR-0014 calls out, not a regression —
+ * a client asking Bedrock for search got an empty tool set anyway.
+ *
+ * `nativeSearchEnabled: false` wins over a configured `webBackend` (step 2 before
+ * step 3): the switch currently means "no search on this provider at all". That
+ * makes an Operator who disabled a *native* tool that never worked also silently
+ * disable a plugin backend they later select — a field-naming problem PR3 carries
+ * (see PLAN § PR3), not a resolution-order one.
  */
-export const shouldInjectNativeSearch = (
+export type SearchResolution =
+  { kind: "none" } | { kind: "native" } | { kind: "backend"; backend: string };
+
+export const resolveSearchMode = (
   requestedSearch: boolean | undefined,
-  provider: Pick<Provider, "nativeSearchEnabled">,
-): boolean =>
-  Boolean(requestedSearch) && provider.nativeSearchEnabled !== false;
+  provider: Pick<
+    Provider,
+    "providerType" | "apiMode" | "nativeSearchEnabled" | "webBackend"
+  >,
+): SearchResolution => {
+  if (!requestedSearch) return { kind: "none" };
+  if (provider.nativeSearchEnabled === false) return { kind: "none" };
+  if (provider.webBackend) {
+    return { kind: "backend", backend: provider.webBackend };
+  }
+  if (providerHasNativeSearch(provider)) return { kind: "native" };
+  return { kind: "none" };
+};
+
+/**
+ * Build the search tools this turn serves, per {@link resolveSearchMode}.
+ *
+ * Awaited alongside `loadTools` and the sub-agent load rather than after them: a
+ * backend's `createExecutors` may open a network connection or warm a pool, and
+ * its `timeoutMs` budget (30s by default, 120s ceiling) would otherwise land on
+ * first-token latency *on top of* the other network waits instead of beside them.
+ */
+const resolveSearchTools = async (
+  resolution: SearchResolution,
+  opened: Pick<OpenedProvider, "searchTools">,
+  provider: Pick<Provider, "id">,
+  ctx: WebBackendContext,
+): Promise<Record<string, Tool>> => {
+  if (resolution.kind === "none") return {};
+  if (resolution.kind === "native") return opened.searchTools?.() ?? {};
+
+  const registration = getWebBackend(resolution.backend);
+  if (!registration) {
+    // The column holds free text and the plugin that contributed this id may
+    // since have been removed from PLATYPUS_PLUGINS. Degrade to no search tools
+    // rather than falling back to native, which would silently serve a different
+    // search than the Operator selected.
+    //
+    // `providerId` is the actionable field: an org-scoped Shared Provider
+    // (ADR-0007) is one row serving many Workspaces, so `workspaceId` alone names
+    // a symptom while the fix is an edit to the Provider this warn cannot
+    // otherwise identify.
+    logger.warn(
+      {
+        orgId: ctx.orgId,
+        workspaceId: ctx.workspaceId,
+        providerId: provider.id,
+        webBackend: resolution.backend,
+      },
+      "provider.webBackend references an unregistered web backend; serving no search tools this turn",
+    );
+    return {};
+  }
+  return registration.buildTurnTools(ctx);
+};
 
 // --- Public Module: prepare a Chat turn ---
 
@@ -520,6 +607,7 @@ export const prepareChatTurn = async (
     userContexts,
     memories,
     sandboxEnvKeys,
+    searchTools,
   ] = await Promise.all([
     loadTools(queries, agent, workspaceId, orgId, frontendUrl, user.id),
     loadSkills(queries, agent, orgId, workspaceId),
@@ -527,14 +615,21 @@ export const prepareChatTurn = async (
     queries.getUserContexts(user.id, workspaceId),
     queries.getRecentMemories(user.id, workspaceId),
     queries.getSandboxEnvKeys(workspaceId),
+    resolveSearchTools(
+      resolveSearchMode(request.search, provider),
+      opened,
+      provider,
+      { orgId, workspaceId, userId: user.id },
+    ),
   ]);
 
   const allMcpClients = [...mcpClients, ...subAgentMcpClients];
 
-  if (shouldInjectNativeSearch(request.search, provider)) {
-    Object.assign(tools, opened.searchTools?.() ?? {});
-  }
-
+  // Assignment order is the precedence order, and it is deliberate: search lands
+  // after `loadTools` so it wins over an agent/MCP tool that happens to share a
+  // name (exactly as native search already did), and before `subAgentTools` so a
+  // sub-agent's tools still win over search.
+  Object.assign(tools, searchTools);
   Object.assign(tools, subAgentTools);
 
   const promptCtx: SystemPromptContext = {

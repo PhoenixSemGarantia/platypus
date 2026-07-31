@@ -4,6 +4,7 @@ import { logger } from "../logger.ts";
 import { checkEgress, EGRESS_BLOCKED_MESSAGE } from "../utils/egress-guard.ts";
 import {
   MAX_READ_URL_CONTENT_CHARS,
+  MAX_READ_URL_SLICE_CHARS,
   MAX_URL_CHARS,
   readUrlInputSchema,
   webSearchInputSchema,
@@ -132,6 +133,43 @@ export const isPresentableUrl = (value: unknown): value is string => {
   }
 };
 
+/**
+ * The `url` a `read_url` result reports, bounded by `MAX_URL_CHARS` on every
+ * branch. The backend's resolved (post-redirect) URL is preferred — it is what a
+ * citation should point at — and falls back to the URL the model asked for.
+ *
+ * Three branches rather than two because `readUrlInputSchema.url` is uncapped,
+ * so the request is not itself a bounded fallback: a presigned S3 or Azure SAS
+ * link can legitimately run past `MAX_URL_CHARS`, and core reads it instead of
+ * failing schema validation. When neither URL fits, the request's origin is the
+ * longest prefix that is still a working link — a citation to the host beats a
+ * URL cut mid-query-string, which is a broken link (the same drop-not-truncate
+ * reasoning as a search result URL, D5).
+ *
+ * Length is checked before scheme for the search loop's reason: `isPresentableUrl`
+ * parses the whole string, and a URL about to be rejected for length should not
+ * be parsed first.
+ */
+const presentableReadUrl = (resolved: unknown, requested: string): string => {
+  if (
+    typeof resolved === "string" &&
+    resolved.length <= MAX_URL_CHARS &&
+    isPresentableUrl(resolved)
+  ) {
+    return resolved;
+  }
+  if (requested.length <= MAX_URL_CHARS) return requested;
+  // Unreachable in practice: `requested` cleared `z.string().url()` and the
+  // egress guard, so it parses and is http(s). Guarded anyway — this runs on the
+  // success path of a tool whose whole contract is to return `{ error }` rather
+  // than throw.
+  try {
+    return new URL(requested).origin;
+  } catch {
+    return "";
+  }
+};
+
 /** Raised when an executor outruns its per-call timeout. */
 class WebBackendTimeoutError extends Error {}
 
@@ -228,11 +266,27 @@ export const composeWebBackend = (
   // does reach `warn` on the two paths that cannot be diagnosed without it — an
   // egress block and a content-cap hit — which is what D3 and the egress-guard
   // contract call for.
+  //
+  // `details` carries whatever the outcome cannot be diagnosed without — the
+  // throw for a failure, the URL and policy `reason` for a block. A blocked
+  // egress used to emit this line *and* a second, `fetchUrl`-shaped one carrying
+  // the same reason; one structured record per call is easier to consume.
+  //
+  // The message is outcome-derived rather than fixed. Folding the two lines into
+  // one must not cost the *event* its name: a block is not an executor failure —
+  // the executor was never called — and `fetchUrl` logs this exact policy event
+  // under this exact message ([tools/fetch.ts]), so an Operator alerting on
+  // blocked egress keys on one string across both tools that fetch a
+  // model-supplied URL.
+  //
+  // `durationMs` therefore means "time spent in this call so far", not "time in
+  // the executor": on the `blocked` path it measures the egress guard's DNS
+  // resolution, since that is all that ran.
   const logCall = (
     toolName: string,
     outcome: "ok" | "timeout" | "blocked" | "error",
     startedAt: number,
-    cause?: unknown,
+    details?: Record<string, unknown>,
   ): void => {
     const line = {
       backend,
@@ -243,9 +297,14 @@ export const composeWebBackend = (
     };
     if (outcome === "ok") {
       logger.debug(line, "Web backend executor call");
-    } else {
-      logger.warn({ ...line, cause }, "Web backend executor call failed");
+      return;
     }
+    logger.warn(
+      { ...line, ...details },
+      outcome === "blocked"
+        ? "Blocked a model-supplied URL by network policy"
+        : "Web backend executor call failed",
+    );
   };
 
   const buildSearchTool = (
@@ -268,12 +327,9 @@ export const composeWebBackend = (
           raw = await withTimeout(() => webSearch({ query }), timeoutMs);
         } catch (cause) {
           const timedOut = cause instanceof WebBackendTimeoutError;
-          logCall(
-            "web_search",
-            timedOut ? "timeout" : "error",
-            startedAt,
+          logCall("web_search", timedOut ? "timeout" : "error", startedAt, {
             cause,
-          );
+          });
           return {
             error: timedOut
               ? timeoutMessage("web_search", timeoutMs)
@@ -290,6 +346,11 @@ export const composeWebBackend = (
         // Counted apart, not as one `dropped` total: an unusable *scheme* is a bug
         // (or worse) in the backend, an over-length URL is routine noise from some
         // upstreams, and an Operator reading the line needs to tell them apart.
+        // `droppedNoUrl` is the third case for the same reason — an entry whose
+        // `url` is not a string at all (absent, null, a number, an object) is a
+        // malformed payload, and folding it into `droppedLength` made a broken
+        // backend read as routine noise.
+        let droppedNoUrl = 0;
         let droppedLength = 0;
         let droppedScheme = 0;
         // Bounded on both ends: `MAX_SEARCH_RESULTS` on what is kept, and
@@ -303,12 +364,13 @@ export const composeWebBackend = (
           // string with `new URL()`, and the CPU argument behind
           // `MAX_SEARCH_RESULT_SCAN` applies just as much to a URL core is about to
           // discard — otherwise a scan's worth of multi-megabyte hrefs gets fully
-          // parsed on the way to being dropped. Both cases drop rather than
-          // truncate: a cut URL is a broken link, worse than no link.
-          if (
-            typeof entry.url !== "string" ||
-            entry.url.length > MAX_URL_CHARS
-          ) {
+          // parsed on the way to being dropped. Every case drops rather than
+          // truncates: a cut URL is a broken link, worse than no link.
+          if (typeof entry.url !== "string") {
+            droppedNoUrl += 1;
+            continue;
+          }
+          if (entry.url.length > MAX_URL_CHARS) {
             droppedLength += 1;
             continue;
           }
@@ -331,11 +393,17 @@ export const composeWebBackend = (
         // `debug`, not `warn`: this is per-call and model-triggerable, and for some
         // upstreams (Brave and Tavily both mix in results core cannot present) it is
         // expected steady state rather than a fault — at `warn` a healthy backend
-        // would log on every search a user runs. The two lines below stay at `warn`
-        // because both mean the *backend* is misbehaving, not merely noisy.
-        if (droppedLength > 0 || droppedScheme > 0) {
+        // would log on every search a user runs. The line below stays at `warn`
+        // because it means the *backend* is misbehaving, not merely noisy.
+        if (droppedNoUrl > 0 || droppedLength > 0 || droppedScheme > 0) {
           logger.debug(
-            { backend, plugin: pluginName, droppedLength, droppedScheme },
+            {
+              backend,
+              plugin: pluginName,
+              droppedNoUrl,
+              droppedLength,
+              droppedScheme,
+            },
             "Dropped web_search results with an unusable URL",
           );
         }
@@ -389,11 +457,13 @@ export const composeWebBackend = (
         // the network — the whole reason core, not the backend, owns this Tool.
         const egress = await checkEgress(url, { resolve: resolveHostname });
         if (!egress.allowed) {
-          logger.warn(
-            { tool: "read_url", backend, url, reason: egress.reason },
-            "Blocked a model-supplied URL by network policy",
-          );
-          logCall("read_url", "blocked", startedAt);
+          // One line, not two: `url` and `reason` ride the outcome record. The
+          // URL is user content and normally debug-only (D9), but a block cannot
+          // be diagnosed without the address that was refused.
+          logCall("read_url", "blocked", startedAt, {
+            url,
+            reason: egress.reason,
+          });
           return { error: EGRESS_BLOCKED_MESSAGE };
         }
 
@@ -402,7 +472,9 @@ export const composeWebBackend = (
           raw = await withTimeout(() => readUrl({ url }), timeoutMs);
         } catch (cause) {
           const timedOut = cause instanceof WebBackendTimeoutError;
-          logCall("read_url", timedOut ? "timeout" : "error", startedAt, cause);
+          logCall("read_url", timedOut ? "timeout" : "error", startedAt, {
+            cause,
+          });
           return {
             error: timedOut
               ? timeoutMessage("read_url", timeoutMs)
@@ -426,7 +498,7 @@ export const composeWebBackend = (
         const capped = full.length > MAX_READ_URL_CONTENT_CHARS;
         if (capped) {
           logger.warn(
-            { backend, url, length: full.length },
+            { backend, plugin: pluginName, url, length: full.length },
             "Web backend read_url content exceeded the core cap and was truncated",
           );
         }
@@ -434,9 +506,14 @@ export const composeWebBackend = (
           ? full.slice(0, MAX_READ_URL_CONTENT_CHARS)
           : full;
 
-        const slice = content.slice(start_index, start_index + max_length);
-        const hasMore = start_index + max_length < content.length;
-        const next_start_index = start_index + max_length;
+        // Clamped, not schema-rejected: `max_length` mirrors `fetchUrl`'s bound so
+        // the two tools accept the same requests, and core narrows the page here.
+        // Silent by design — `next_start_index` below already tells the model the
+        // read continues, which is the only thing it needs to act on.
+        const pageLength = Math.min(max_length, MAX_READ_URL_SLICE_CHARS);
+        const slice = content.slice(start_index, start_index + pageLength);
+        const hasMore = start_index + pageLength < content.length;
+        const next_start_index = start_index + pageLength;
 
         // Same hint text as `fetchUrl`, so a continuation read reads identically
         // whichever page-reader the model reached for. At the tail of a capped
@@ -450,22 +527,11 @@ export const composeWebBackend = (
           body += `\n\n[Content truncated: the page exceeded the ${MAX_READ_URL_CONTENT_CHARS}-character limit and the remainder cannot be read.]`;
         }
 
-        // Same drop-not-truncate treatment as a search result URL (D5): an
-        // over-length resolved URL falls back to the model-supplied one rather
-        // than being cut into a broken link. Length before scheme for the same
-        // reason as the search loop — `isPresentableUrl` parses the whole string.
-        // The fallback is bounded too: `readUrlInputSchema` caps `url` at
-        // `MAX_URL_CHARS`, so this field cannot exceed the cap by either route.
-        const resolvedUrl =
-          typeof payload.url === "string" &&
-          payload.url.length <= MAX_URL_CHARS &&
-          isPresentableUrl(payload.url)
-            ? payload.url
-            : url;
-
         const result: ReadUrlToolResult = {
           content: body,
-          url: resolvedUrl,
+          // Bounded by `MAX_URL_CHARS` down every branch — see
+          // `presentableReadUrl`.
+          url: presentableReadUrl(payload.url, url),
           // Sliced bare rather than through `truncate`: a `…` marker is right for
           // prose a model reads, but `content_type` is machine-readable and a
           // marked cut yields an invalid MIME type instead of a shortened one.
