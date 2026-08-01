@@ -45,6 +45,10 @@ _Avoid_: prompt, preamble, prompt template.
 **Provider**:
 A configured connection to an AI vendor (OpenAI, OpenRouter, Bedrock, Anthropic, Google, …). Carries credentials, base URL, the enabled `modelIds`, and a `taskModelId` for one-shot tasks. Lives at either Organization or Workspace scope.
 
+**Model alias**:
+A stable name a Provider assigns to one of its enabled models, which an Agent or Chat may select in place of a concrete model id. Repointing the alias at a different model upgrades every Agent and Chat using it at once. Provider-scoped: an alias never spans Providers, and the Provider's own pointer-settings (`taskModelId`, `memoryExtractionModelId`, `embeddingModelId`) always name a concrete model, never an alias.
+_Avoid_: model alias name, model shortcut.
+
 **Tool set**:
 A named bundle of Tools an Agent can be granted. Either contributed by a Plugin (registered in code) or backed by an MCP server.
 
