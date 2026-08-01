@@ -976,6 +976,20 @@ export const wrapToolsWithBump = (
   return wrapped;
 };
 
+/**
+ * Why a model reference resolved to nothing, said in the caller's terms: a
+ * dangling alias and a dangling concrete id are different mistakes to fix.
+ */
+const unresolvedModelMessage = (
+  reference: string,
+  providerId: string,
+): string => {
+  const aliasName = aliasNameFromReference(reference);
+  return aliasName === null
+    ? `Model id '${reference}' not enabled for provider '${providerId}'`
+    : `Model alias '${aliasName}' is not defined on provider '${providerId}'`;
+};
+
 const resolveChatContext = async (
   queries: ChatTurnQueries,
   data: ChatTurnRequest,
@@ -1025,11 +1039,8 @@ const resolveChatContext = async (
   // matches nothing is a hard error, never a fallback to some other model.
   const resolvedModelId = resolveModelId(provider, modelReference);
   if (!resolvedModelId) {
-    const aliasName = aliasNameFromReference(modelReference);
     throw new ValidationError(
-      aliasName === null
-        ? `Model id '${modelReference}' not enabled for provider '${resolvedProviderId}'`
-        : `Model alias '${aliasName}' is not defined on provider '${resolvedProviderId}'`,
+      unresolvedModelMessage(modelReference, resolvedProviderId),
     );
   }
 
@@ -1184,11 +1195,8 @@ const loadSubAgents = async (
       // path never goes through `resolveChatContext`.
       const subModelId = resolveModelId(subProvider, modelId);
       if (!subModelId) {
-        const aliasName = aliasNameFromReference(modelId);
         throw new Error(
-          aliasName === null
-            ? `Model id '${modelId}' not enabled for provider '${providerId}' (sub-agent)`
-            : `Model alias '${aliasName}' is not defined on provider '${providerId}' (sub-agent)`,
+          `${unresolvedModelMessage(modelId, providerId)} (sub-agent)`,
         );
       }
       // Each sub-agent gets its OWN resolved provider's security text appended

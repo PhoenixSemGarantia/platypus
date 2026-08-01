@@ -858,6 +858,13 @@ describe("Provider pointer-settings reject alias references", () => {
     });
   }
 
+  it("rejects a differently-cased alias prefix too — the guard is not the parser", () => {
+    expect(
+      providerCreateSchema.safeParse({ ...base, taskModelId: "Alias:flagship" })
+        .success,
+    ).toBe(false);
+  });
+
   it("still accepts a null or absent embeddingModelId", () => {
     expect(
       providerCreateSchema.safeParse({ ...base, embeddingModelId: null })

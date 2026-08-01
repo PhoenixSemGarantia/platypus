@@ -4,6 +4,7 @@ import {
   findModelEntry,
   modelLabelFor,
   modelReferenceFor,
+  resolveModelReference,
   type ConcreteModelId,
   type Provider,
 } from "@platypus/schemas";
@@ -97,10 +98,8 @@ export const findModelOption = (
 export const resolveModelId = (
   provider: Pick<Provider, "modelIds">,
   reference: string,
-): ConcreteModelId | undefined => {
-  const entry = findModelEntry(getModelConfigs(provider), reference);
-  return entry ? (entry.id as ConcreteModelId) : undefined;
-};
+): ConcreteModelId | undefined =>
+  resolveModelReference(getModelConfigs(provider), reference);
 
 /** The resolved passthrough types for a model, filling the provider default. */
 export const getPassthroughFileTypes = (

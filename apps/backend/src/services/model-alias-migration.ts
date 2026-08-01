@@ -5,7 +5,11 @@ import {
   chat as chatTable,
   provider as providerTable,
 } from "../db/schema.ts";
-import { MODEL_ALIAS_PREFIX, type ModelConfig } from "@platypus/schemas";
+import {
+  MODEL_ALIAS_PREFIX,
+  type AliasRepoint,
+  type ModelConfig,
+} from "@platypus/schemas";
 import { logger } from "../logger.ts";
 
 /**
@@ -27,16 +31,7 @@ import { logger } from "../logger.ts";
  */
 
 /** An orphaned alias and the concrete id its references fall back to. */
-export type AliasRepoint = {
-  alias: string;
-  modelId: string;
-};
-
-/** What a de-migration actually rewrote, for the provider form to report. */
-export type AliasRepointResult = AliasRepoint & {
-  agents: number;
-  chats: number;
-};
+type OrphanedAlias = Pick<AliasRepoint, "alias" | "modelId">;
 
 /** Tolerates the legacy bare-`string[]` shape on either side of the diff. */
 const aliasEntries = (
@@ -66,7 +61,7 @@ const aliasEntries = (
 export const orphanedAliasRepoints = (
   previous: ModelConfig[],
   next: ModelConfig[],
-): AliasRepoint[] => {
+): OrphanedAlias[] => {
   const survivingNames = new Set(
     aliasEntries(next).map((entry) => entry.alias.toLowerCase()),
   );
@@ -113,9 +108,9 @@ export const deMigrateOrphanedAliases = async (
   providerId: string,
   previous: ModelConfig[],
   next: ModelConfig[],
-): Promise<AliasRepointResult[]> => {
+): Promise<AliasRepoint[]> => {
   const repoints = orphanedAliasRepoints(previous, next);
-  const results: AliasRepointResult[] = [];
+  const results: AliasRepoint[] = [];
 
   for (const { alias, modelId } of repoints) {
     const reference = `${MODEL_ALIAS_PREFIX}${alias}`.toLowerCase();

@@ -1,7 +1,7 @@
 import {
   defaultPassthroughFileTypes,
-  findModelEntry,
   resolveExtractedTextCap,
+  resolveModelReference,
   type ConcreteModelId,
   type ModelConfig,
   type Provider,
@@ -89,10 +89,8 @@ export const dedupeModelConfigs = (models: ModelConfig[]): ModelConfig[] => {
 export const resolveModelId = (
   provider: Provider,
   reference: string,
-): ConcreteModelId | undefined => {
-  const entry = findModelEntry(resolveProviderModels(provider), reference);
-  return entry ? (entry.id as ConcreteModelId) : undefined;
-};
+): ConcreteModelId | undefined =>
+  resolveModelReference(resolveProviderModels(provider), reference);
 
 /**
  * Brand one of the Provider's own pointer-settings — `taskModelId`,
@@ -105,12 +103,6 @@ export const resolveModelId = (
  */
 export const pointerSettingModelId = (value: string): ConcreteModelId =>
   value as ConcreteModelId;
-
-/** Whether `modelId` is one of the provider's enabled models. */
-export const providerHasModel = (
-  provider: Provider,
-  modelId: ConcreteModelId,
-): boolean => resolveProviderModels(provider).some((m) => m.id === modelId);
 
 /**
  * The media types the given model ingests natively. Falls back to the

@@ -318,6 +318,21 @@ const AgentForm = ({
     setIsSubmitting(true);
     setValidationErrors({});
     try {
+      // Saving migrates a concrete id to the alias its model now carries
+      // (ADR-0017). Once a model is aliased the picker no longer offers the
+      // bare id, so "pin to exactly gpt-4" is not an expressible choice — and
+      // without this the migration would only ever happen when the user
+      // switches to a *different* model, since re-picking the already-selected
+      // option fires no change event. Falls back to the stored value when the
+      // model resolves to nothing, leaving today's dangling-id behaviour alone.
+      const submittedProvider = providers.find(
+        (p) => p.id === formData.providerId,
+      );
+      const submittedModelId =
+        (submittedProvider && formData.modelId
+          ? findModelOption(submittedProvider, formData.modelId)?.value
+          : undefined) ?? formData.modelId;
+
       const payload: Omit<Agent, "id" | "createdAt" | "updatedAt"> = {
         // Scope comes from the route, not the body; the org PUT ignores this.
         workspaceId: orgScoped ? undefined : workspaceId,
@@ -326,7 +341,7 @@ const AgentForm = ({
         description: formData.description,
         inputPlaceholder: formData.inputPlaceholder || undefined,
         instructions: formData.instructions,
-        modelId: formData.modelId,
+        modelId: submittedModelId,
         maxSteps: formData.maxSteps,
         // Send null (not undefined) for cleared sampling params so the key
         // survives JSON.stringify and the backend persists the cleared value

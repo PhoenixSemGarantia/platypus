@@ -47,6 +47,7 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
   DEFAULT_MAX_EXTRACTED_TEXT_CHARS,
+  type AliasRepoint,
   type Provider,
 } from "@platypus/schemas";
 import useSWR from "swr";
@@ -314,12 +315,7 @@ const ProviderForm = ({
     if (!Array.isArray(repoints)) return;
     const count = (n: number, noun: string) =>
       `${n} ${noun}${n === 1 ? "" : "s"}`;
-    for (const repoint of repoints as Array<{
-      alias: string;
-      modelId: string;
-      agents: number;
-      chats: number;
-    }>) {
+    for (const repoint of repoints as AliasRepoint[]) {
       const moved = [
         repoint.agents > 0 ? count(repoint.agents, "Agent") : null,
         repoint.chats > 0 ? count(repoint.chats, "Chat") : null,

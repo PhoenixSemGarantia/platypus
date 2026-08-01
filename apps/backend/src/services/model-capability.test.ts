@@ -4,7 +4,6 @@ import {
   defaultPassthroughFileTypes,
   resolveProviderModels,
   providerModelIds,
-  providerHasModel,
   passthroughFileTypesForModel,
   maxExtractedTextCharsForModel,
   dedupeModelConfigs,
@@ -112,7 +111,7 @@ describe("resolveProviderModels", () => {
   });
 });
 
-describe("providerModelIds / providerHasModel", () => {
+describe("providerModelIds", () => {
   const p = provider({
     modelIds: [
       { id: "a", passthroughFileTypes: [] },
@@ -121,10 +120,6 @@ describe("providerModelIds / providerHasModel", () => {
   });
   it("lists ids in order", () => {
     expect(providerModelIds(p)).toEqual(["a", "b"]);
-  });
-  it("reports membership", () => {
-    expect(providerHasModel(p, concrete("b"))).toBe(true);
-    expect(providerHasModel(p, concrete("z"))).toBe(false);
   });
 });
 

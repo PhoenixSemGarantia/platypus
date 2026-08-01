@@ -661,6 +661,34 @@ export const findModelEntry = <T extends AliasableModel>(
 };
 
 /**
+ * Resolve a stored reference to the concrete model id it names — the SOLE
+ * producer of `ConcreteModelId`, shared by the backend and frontend resolvers
+ * so the brand has exactly one mint. `undefined` means the reference names
+ * nothing this Provider has, which callers must treat as a hard error rather
+ * than falling back to another model.
+ *
+ * Takes already-normalized entries because the two sides normalize differently
+ * (the backend also fills provider-type passthrough defaults).
+ */
+export const resolveModelReference = (
+  models: readonly AliasableModel[],
+  reference: string,
+): ConcreteModelId | undefined => {
+  const entry = findModelEntry(models, reference);
+  return entry ? (entry.id as ConcreteModelId) : undefined;
+};
+
+/** What a de-migration rewrote when an alias stopped existing (see ADR-0017). */
+export type AliasRepoint = {
+  /** The alias name that no longer exists. */
+  alias: string;
+  /** The concrete id its references were rewritten to. */
+  modelId: string;
+  agents: number;
+  chats: number;
+};
+
+/**
  * A Provider pointer-setting: always a concrete model id, never an alias.
  *
  * Schema-enforced rather than conventional. `handleEmbeddingConfigChange`
@@ -674,7 +702,11 @@ export const findModelEntry = <T extends AliasableModel>(
  */
 const pointerModelIdSchema = z
   .string()
-  .refine((value) => !isAliasReference(value), {
+  // Case-insensitive on purpose, unlike `isAliasReference`. That helper reads
+  // the exact storage format; this is a GUARD, so it rejects anything that
+  // merely looks like a reference — `Alias:flagship` would otherwise slip
+  // through as a bogus concrete id and fail the turn far from the typo.
+  .refine((value) => !value.toLowerCase().startsWith(MODEL_ALIAS_PREFIX), {
     message: "Must be a concrete model id, not a Model alias",
   });
 
