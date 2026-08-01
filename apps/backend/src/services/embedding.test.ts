@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import type { Provider } from "@platypus/schemas";
+import type { ConcreteModelId, Provider } from "@platypus/schemas";
+
+const concrete = (id: string) => id as ConcreteModelId;
 
 const { mockEmbed, mockOpenProvider } = vi.hoisted(() => ({
   mockEmbed: vi.fn(),
@@ -39,7 +41,7 @@ describe("generateEmbedding", () => {
 
     const result = await generateEmbedding(
       baseProvider,
-      "text-embedding-3-small",
+      concrete("text-embedding-3-small"),
       "hello world",
     );
 
@@ -57,7 +59,7 @@ describe("generateEmbedding", () => {
     await expect(
       generateEmbedding(
         { ...baseProvider, providerType: "Anthropic" },
-        "model",
+        concrete("model"),
         "text",
       ),
     ).rejects.toThrow(

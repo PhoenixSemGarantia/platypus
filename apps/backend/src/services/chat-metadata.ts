@@ -8,6 +8,7 @@ import {
   workspace as workspaceTable,
 } from "../db/schema.ts";
 import { openProvider } from "./provider.ts";
+import { pointerSettingModelId } from "./model-capability.ts";
 import { dedupeArray, toKebabCase } from "../utils.ts";
 import { UNTITLED_CHAT_TITLE, type Provider } from "@platypus/schemas";
 import type { PlatypusUIMessage } from "../types.ts";
@@ -111,7 +112,9 @@ export const generateChatMetadata = async (
   `);
   const existingTags = existingTagsResult.rows.map((row) => row.tag as string);
 
-  const model = openProvider(provider).languageModel(provider.taskModelId);
+  const model = openProvider(provider).languageModel(
+    pointerSettingModelId(provider.taskModelId),
+  );
 
   const conversationText = messages
     .map((m) => {

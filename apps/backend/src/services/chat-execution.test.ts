@@ -469,6 +469,179 @@ describe("chat-execution", () => {
       ).rejects.toBeInstanceOf(ValidationError);
     });
 
+    // --- Model aliases (issue #386, ADR-0017) ---
+
+    describe("model aliases", () => {
+      const aliasedProvider = {
+        ...baseProvider,
+        modelIds: [
+          { id: "gpt-4", passthroughFileTypes: [], alias: "flagship" },
+          { id: "gpt-3.5", passthroughFileTypes: [] },
+        ],
+      };
+
+      it("runs a Chat turn against the model an alias reference points at", async () => {
+        const queries = createInMemoryChatTurnQueries({
+          workspaces: [baseWorkspace],
+          providers: [aliasedProvider],
+        });
+
+        const turn = await prepareChatTurn(
+          {
+            ...baseInput,
+            request: {
+              providerId: aliasedProvider.id,
+              modelId: "alias:flagship",
+            },
+          },
+          queries,
+        );
+
+        expect(turn.stream.model).toMatchObject({ modelId: "gpt-4" });
+      });
+
+      it("persists the reference, not the resolution, so a repoint reaches the Chat", async () => {
+        const queries = createInMemoryChatTurnQueries({
+          workspaces: [baseWorkspace],
+          providers: [aliasedProvider],
+        });
+
+        const turn = await prepareChatTurn(
+          {
+            ...baseInput,
+            request: {
+              providerId: aliasedProvider.id,
+              modelId: "alias:flagship",
+            },
+          },
+          queries,
+        );
+
+        // Storing "gpt-4" here would pin the Chat to today's model.
+        expect(turn.resolved.modelId).toBe("alias:flagship");
+      });
+
+      it("resolves an Agent whose stored modelId is an alias reference", async () => {
+        const queries = createInMemoryChatTurnQueries({
+          workspaces: [baseWorkspace],
+          agents: [{ ...baseAgent, modelId: "alias:flagship" }],
+          providers: [aliasedProvider],
+        });
+
+        const turn = await prepareChatTurn(
+          { ...baseInput, request: { agentId: baseAgent.id } },
+          queries,
+        );
+
+        expect(turn.stream.model).toMatchObject({ modelId: "gpt-4" });
+      });
+
+      it("follows a repointed alias on the very next turn, with no edit to the Agent", async () => {
+        const agent = { ...baseAgent, modelId: "alias:flagship" };
+        const repointed = {
+          ...baseProvider,
+          modelIds: [
+            { id: "gpt-4", passthroughFileTypes: [] },
+            { id: "gpt-3.5", passthroughFileTypes: [], alias: "flagship" },
+          ],
+        };
+        const queries = createInMemoryChatTurnQueries({
+          workspaces: [baseWorkspace],
+          agents: [agent],
+          providers: [repointed],
+        });
+
+        const turn = await prepareChatTurn(
+          { ...baseInput, request: { agentId: agent.id } },
+          queries,
+        );
+
+        expect(turn.stream.model).toMatchObject({ modelId: "gpt-3.5" });
+      });
+
+      it("keeps resolving a bare id once its entry gains an alias — no migration", async () => {
+        const queries = createInMemoryChatTurnQueries({
+          workspaces: [baseWorkspace],
+          agents: [{ ...baseAgent, modelId: "gpt-4" }],
+          providers: [aliasedProvider],
+        });
+
+        const turn = await prepareChatTurn(
+          { ...baseInput, request: { agentId: baseAgent.id } },
+          queries,
+        );
+
+        expect(turn.stream.model).toMatchObject({ modelId: "gpt-4" });
+      });
+
+      it("fails the turn naming the alias and the Provider, with no fallback", async () => {
+        const queries = createInMemoryChatTurnQueries({
+          workspaces: [baseWorkspace],
+          providers: [aliasedProvider],
+        });
+
+        await expect(
+          prepareChatTurn(
+            {
+              ...baseInput,
+              request: {
+                providerId: aliasedProvider.id,
+                modelId: "alias:ghost",
+              },
+            },
+            queries,
+          ),
+        ).rejects.toThrow(
+          new RegExp(`alias 'ghost'.*${aliasedProvider.id}`, "i"),
+        );
+      });
+
+      it("uses the aliased model's own passthrough types, not the provider default", async () => {
+        const queries = createInMemoryChatTurnQueries({
+          workspaces: [baseWorkspace],
+          providers: [
+            {
+              ...baseProvider,
+              providerType: "OpenRouter" as const,
+              modelIds: [
+                {
+                  id: "qwen-vl",
+                  passthroughFileTypes: ["image/*"],
+                  alias: "vision",
+                },
+              ],
+            },
+          ],
+        });
+
+        // A declared image/* survives resolution through the alias; the
+        // OpenRouter default would have been [] and rejected the image.
+        await expect(
+          validateTurnAttachments(
+            {
+              messages: [
+                {
+                  id: "m1",
+                  role: "user",
+                  parts: [
+                    {
+                      type: "file",
+                      mediaType: "image/png",
+                      url: "storage://x.png",
+                    },
+                  ],
+                },
+              ],
+              request: { providerId: baseProvider.id, modelId: "alias:vision" },
+              orgId: "org-1",
+              workspaceId: "ws-1",
+            },
+            queries,
+          ),
+        ).resolves.toBeUndefined();
+      });
+    });
+
     it("throws NotFoundError when the Workspace does not exist", async () => {
       const queries = createInMemoryChatTurnQueries({});
 

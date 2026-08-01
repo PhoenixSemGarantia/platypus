@@ -304,6 +304,34 @@ const ProviderForm = ({
     apiMode: formData.apiMode,
   }).join(", ");
 
+  /**
+   * Removing or renaming an alias silently rewrites every Agent and Chat that
+   * referenced it back to the concrete model id, so each keeps running against
+   * the model it already used. Those records belong to Workspace Owners who are
+   * not looking at this form, so the edit says what it touched.
+   */
+  const reportAliasRepoints = (repoints: unknown) => {
+    if (!Array.isArray(repoints)) return;
+    const count = (n: number, noun: string) =>
+      `${n} ${noun}${n === 1 ? "" : "s"}`;
+    for (const repoint of repoints as Array<{
+      alias: string;
+      modelId: string;
+      agents: number;
+      chats: number;
+    }>) {
+      const moved = [
+        repoint.agents > 0 ? count(repoint.agents, "Agent") : null,
+        repoint.chats > 0 ? count(repoint.chats, "Chat") : null,
+      ].filter(Boolean);
+      if (moved.length === 0) continue;
+      toast.info(
+        `Alias "${repoint.alias}" is gone — ${moved.join(" and ")} now point at ${repoint.modelId}.`,
+        { duration: 10000 },
+      );
+    }
+  };
+
   const hasEmbeddingConfigChanged = (): boolean => {
     if (!providerId) return false; // New provider, no existing embeddings
     const currentModelId = formData.embeddingModelId || null;
@@ -374,6 +402,8 @@ const ProviderForm = ({
       });
 
       if (response.ok) {
+        const saved = await response.json().catch(() => null);
+        reportAliasRepoints(saved?.aliasRepoints);
         if (providerId) {
           await mutate();
         }
@@ -606,6 +636,31 @@ const ProviderForm = ({
                     />
                     <div className="flex flex-col gap-1">
                       <FieldLabel
+                        htmlFor={`alias-${index}`}
+                        className="text-xs text-muted-foreground"
+                      >
+                        Alias
+                      </FieldLabel>
+                      <Input
+                        id={`alias-${index}`}
+                        placeholder="e.g. flagship"
+                        value={model.alias ?? ""}
+                        onChange={(e) =>
+                          // An empty field means "no alias". Anything else goes
+                          // to the schema as typed, so a whitespace-only name is
+                          // rejected rather than silently dropped.
+                          updateModel(index, {
+                            alias:
+                              e.target.value === ""
+                                ? undefined
+                                : e.target.value,
+                          })
+                        }
+                        disabled={isSubmitting || isReadOnly}
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <FieldLabel
                         htmlFor={`passthrough-${index}`}
                         className="text-xs text-muted-foreground"
                       >
@@ -684,7 +739,9 @@ const ProviderForm = ({
               setting, <strong>not a security filter</strong>. Leave the types
               empty to use the provider-type default. The character cap limits
               how much extracted document text a single file may add, protecting
-              a small context window.
+              a small context window. An optional alias gives a model a stable
+              name Agents and Chats can select instead of the model ID, so
+              pointing the alias at a newer model upgrades all of them at once.
             </FieldDescription>
             {validationErrors.modelIds && (
               <FieldError>{validationErrors.modelIds}</FieldError>

@@ -8,6 +8,7 @@ import {
   provider as providerTable,
 } from "../db/schema.ts";
 import { generateEmbedding } from "../services/embedding.ts";
+import { pointerSettingModelId } from "../services/model-capability.ts";
 import type { Provider } from "@platypus/schemas";
 import { logger } from "../logger.ts";
 
@@ -70,7 +71,7 @@ export const createMemoryTools = (
         // Generate query embedding
         const queryEmbedding = await generateEmbedding(
           embeddingProvider as Provider,
-          embeddingProvider.embeddingModelId,
+          pointerSettingModelId(embeddingProvider.embeddingModelId),
           query,
         );
 

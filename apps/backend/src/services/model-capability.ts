@@ -1,6 +1,8 @@
 import {
   defaultPassthroughFileTypes,
+  findModelEntry,
   resolveExtractedTextCap,
+  type ConcreteModelId,
   type ModelConfig,
   type Provider,
 } from "@platypus/schemas";
@@ -73,10 +75,41 @@ export const dedupeModelConfigs = (models: ModelConfig[]): ModelConfig[] => {
   return [...byId.values()].sort((a, b) => a.id.localeCompare(b.id));
 };
 
+/**
+ * Resolve a stored model reference — `agent.modelId`, `chat.modelId`, or an
+ * API-supplied `modelId` — to the concrete model it names, or `undefined` when
+ * it names nothing this provider has.
+ *
+ * The SOLE producer of `ConcreteModelId`, and therefore the only way into the
+ * capability helpers and `openProvider(...).languageModel(...)` below. Callers
+ * must treat `undefined` as a hard error and never fall back to another model
+ * (ADR-0017): silently answering with a different model is worse than failing
+ * the turn, which is what a dangling concrete id has always done.
+ */
+export const resolveModelId = (
+  provider: Provider,
+  reference: string,
+): ConcreteModelId | undefined => {
+  const entry = findModelEntry(resolveProviderModels(provider), reference);
+  return entry ? (entry.id as ConcreteModelId) : undefined;
+};
+
+/**
+ * Brand one of the Provider's own pointer-settings — `taskModelId`,
+ * `memoryExtractionModelId`, `embeddingModelId` — as concrete.
+ *
+ * Sound because `providerBaseSchema` rejects an `alias:`-prefixed value in all
+ * three, so they cannot hold a reference in the first place. Deliberately
+ * long-named: this is the one hole in the brand, and passing an `agent.modelId`
+ * or `chat.modelId` through it defeats the guarantee the brand exists for.
+ */
+export const pointerSettingModelId = (value: string): ConcreteModelId =>
+  value as ConcreteModelId;
+
 /** Whether `modelId` is one of the provider's enabled models. */
 export const providerHasModel = (
   provider: Provider,
-  modelId: string,
+  modelId: ConcreteModelId,
 ): boolean => resolveProviderModels(provider).some((m) => m.id === modelId);
 
 /**
@@ -86,7 +119,7 @@ export const providerHasModel = (
  */
 export const passthroughFileTypesForModel = (
   provider: Provider,
-  modelId: string,
+  modelId: ConcreteModelId,
 ): string[] => {
   const model = resolveProviderModels(provider).find((m) => m.id === modelId);
   return model
@@ -101,7 +134,7 @@ export const passthroughFileTypesForModel = (
  */
 export const maxExtractedTextCharsForModel = (
   provider: Provider,
-  modelId: string,
+  modelId: ConcreteModelId,
 ): number =>
   resolveExtractedTextCap(
     resolveProviderModels(provider).find((m) => m.id === modelId)

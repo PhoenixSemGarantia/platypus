@@ -71,6 +71,7 @@ not guessed**: each entry in `modelIds` is a per-model object.
 | Per-model field         | Meaning                                                                                                                                                       |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `id`                    | The model id sent to the vendor.                                                                                                                              |
+| `alias`                 | Optional stable name an Agent or Chat selects this model by, so repointing it upgrades them all at once. See [Model aliases](/concepts/providers#model-aliases). |
 | `passthroughFileTypes`  | The media types this model ingests **natively**. Comma-separated in the UI; wildcards like `image/*` allowed. Empty inherits the provider-type default below. |
 | `maxExtractedTextChars` | Cap on the text a single extracted document may add to a turn. Empty uses the default (50,000 characters).                                                    |
 

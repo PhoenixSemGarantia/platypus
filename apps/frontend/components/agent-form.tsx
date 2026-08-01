@@ -49,7 +49,7 @@ import {
 } from "@platypus/schemas";
 import useSWR, { useSWRConfig } from "swr";
 import { fetcher, parseValidationErrors, joinUrl } from "@/lib/utils";
-import { getModelIds } from "@/lib/model-config";
+import { findModelOption, getModelOptions } from "@/lib/model-config";
 import { toast } from "sonner";
 import { useBackendUrl } from "@/app/client-context";
 import { useAuth } from "@/components/auth-provider";
@@ -177,7 +177,7 @@ const AgentForm = ({
       ) {
         setFormData((prevData) => ({
           ...prevData,
-          modelId: getModelIds(providers[0])[0],
+          modelId: getModelOptions(providers[0])[0]?.value,
           providerId: providers[0].id,
         }));
       }
@@ -621,11 +621,25 @@ const AgentForm = ({
           {(() => {
             const modelError =
               validationErrors.modelId || validationErrors.providerId;
+            // Match the stored reference to a model ENTRY, then build the
+            // option value from that entry. A bare `gpt-4` on a model since
+            // given an alias would otherwise match no option and render the
+            // "Select a model" placeholder over a configured Agent (ADR-0017).
+            const provider = providers.find(
+              (p) => p.id === formData.providerId,
+            );
+            const option =
+              provider && formData.modelId
+                ? findModelOption(provider, formData.modelId)
+                : undefined;
+            const selectedModelValue = option
+              ? `provider:${formData.providerId}:${option.value}`
+              : undefined;
             return (
               <Field data-invalid={!!modelError}>
                 <FieldLabel htmlFor="modelId">Model</FieldLabel>
                 <Select
-                  value={`provider:${formData.providerId}:${formData.modelId}`}
+                  value={selectedModelValue}
                   onValueChange={handleModelChange}
                   disabled={isSubmitting || readOnly}
                 >
@@ -640,12 +654,12 @@ const AgentForm = ({
                     {providers.map((provider) => (
                       <SelectGroup key={provider.id}>
                         <SelectLabel>{provider.name}</SelectLabel>
-                        {getModelIds(provider).map((modelId) => (
+                        {getModelOptions(provider).map((model) => (
                           <SelectItem
-                            key={`provider:${provider.id}:${modelId}`}
-                            value={`provider:${provider.id}:${modelId}`}
+                            key={`provider:${provider.id}:${model.value}`}
+                            value={`provider:${provider.id}:${model.value}`}
                           >
-                            {modelId}
+                            {model.label}
                           </SelectItem>
                         ))}
                       </SelectGroup>

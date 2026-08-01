@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import type { Provider } from "@platypus/schemas";
+import type { ConcreteModelId, Provider } from "@platypus/schemas";
 import {
   defaultPassthroughFileTypes,
   resolveProviderModels,
@@ -8,8 +8,16 @@ import {
   passthroughFileTypesForModel,
   maxExtractedTextCharsForModel,
   dedupeModelConfigs,
+  resolveModelId,
 } from "./model-capability.ts";
 import { DEFAULT_MAX_EXTRACTED_TEXT_CHARS } from "@platypus/schemas";
+
+/**
+ * Stand in for the resolver where a test deliberately probes a model the
+ * provider does NOT have — `resolveModelId` returns undefined there by design,
+ * so the defensive fallbacks can only be reached with a hand-made id.
+ */
+const concrete = (id: string) => id as ConcreteModelId;
 
 const provider = (over: Partial<Provider>): Provider => ({
   id: "p1",
@@ -115,8 +123,8 @@ describe("providerModelIds / providerHasModel", () => {
     expect(providerModelIds(p)).toEqual(["a", "b"]);
   });
   it("reports membership", () => {
-    expect(providerHasModel(p, "b")).toBe(true);
-    expect(providerHasModel(p, "z")).toBe(false);
+    expect(providerHasModel(p, concrete("b"))).toBe(true);
+    expect(providerHasModel(p, concrete("z"))).toBe(false);
   });
 });
 
@@ -127,9 +135,11 @@ describe("passthroughFileTypesForModel", () => {
       apiMode: "responses",
       modelIds: [{ id: "claude", passthroughFileTypes: ["image/*"] }],
     });
-    expect(passthroughFileTypesForModel(p, "claude")).toEqual(["image/*"]);
+    expect(passthroughFileTypesForModel(p, concrete("claude"))).toEqual([
+      "image/*",
+    ]);
     // Unknown model → provider default.
-    expect(passthroughFileTypesForModel(p, "ghost")).toEqual([
+    expect(passthroughFileTypesForModel(p, concrete("ghost"))).toEqual([
       "image/*",
       "application/pdf",
     ]);
@@ -143,17 +153,17 @@ describe("maxExtractedTextCharsForModel", () => {
         { id: "qwen", passthroughFileTypes: [], maxExtractedTextChars: 8000 },
       ],
     });
-    expect(maxExtractedTextCharsForModel(p, "qwen")).toBe(8000);
+    expect(maxExtractedTextCharsForModel(p, concrete("qwen"))).toBe(8000);
   });
 
   it("falls back to the shared default when undeclared or unknown", () => {
     const p = provider({
       modelIds: [{ id: "qwen", passthroughFileTypes: [] }],
     });
-    expect(maxExtractedTextCharsForModel(p, "qwen")).toBe(
+    expect(maxExtractedTextCharsForModel(p, concrete("qwen"))).toBe(
       DEFAULT_MAX_EXTRACTED_TEXT_CHARS,
     );
-    expect(maxExtractedTextCharsForModel(p, "ghost")).toBe(
+    expect(maxExtractedTextCharsForModel(p, concrete("ghost"))).toBe(
       DEFAULT_MAX_EXTRACTED_TEXT_CHARS,
     );
   });
@@ -162,7 +172,7 @@ describe("maxExtractedTextCharsForModel", () => {
     const p = provider({
       modelIds: ["legacy"] as unknown as Provider["modelIds"],
     });
-    expect(maxExtractedTextCharsForModel(p, "legacy")).toBe(
+    expect(maxExtractedTextCharsForModel(p, concrete("legacy"))).toBe(
       DEFAULT_MAX_EXTRACTED_TEXT_CHARS,
     );
   });
@@ -180,5 +190,63 @@ describe("dedupeModelConfigs", () => {
       { id: "a", passthroughFileTypes: [] },
       { id: "b", passthroughFileTypes: ["image/*"] },
     ]);
+  });
+});
+
+describe("resolveModelId", () => {
+  const p = provider({
+    modelIds: [
+      { id: "gpt-4", passthroughFileTypes: [], alias: "flagship" },
+      { id: "gpt-4o-mini", passthroughFileTypes: [] },
+    ],
+  });
+
+  it("resolves an alias reference to the concrete id it points at", () => {
+    expect(resolveModelId(p, "alias:flagship")).toBe("gpt-4");
+  });
+
+  it("resolves an alias reference case-insensitively", () => {
+    expect(resolveModelId(p, "alias:FLAGSHIP")).toBe("gpt-4");
+  });
+
+  it("passes a concrete id through, aliased or not", () => {
+    expect(resolveModelId(p, "gpt-4")).toBe("gpt-4");
+    expect(resolveModelId(p, "gpt-4o-mini")).toBe("gpt-4o-mini");
+  });
+
+  it("returns undefined rather than falling back to another model", () => {
+    expect(resolveModelId(p, "alias:ghost")).toBeUndefined();
+    expect(resolveModelId(p, "ghost")).toBeUndefined();
+  });
+
+  it("never resolves an alias reference to a like-named concrete id", () => {
+    expect(resolveModelId(p, "alias:gpt-4o-mini")).toBeUndefined();
+  });
+
+  it("resolves against a legacy string[] model list", () => {
+    const legacy = provider({
+      modelIds: ["legacy"] as unknown as Provider["modelIds"],
+    });
+    expect(resolveModelId(legacy, "legacy")).toBe("legacy");
+    expect(resolveModelId(legacy, "alias:legacy")).toBeUndefined();
+  });
+
+  it("carries the aliased model's own capabilities, not the provider default", () => {
+    const aliased = provider({
+      providerType: "OpenRouter",
+      modelIds: [
+        {
+          id: "qwen-vl",
+          passthroughFileTypes: ["image/*"],
+          alias: "vision",
+          maxExtractedTextChars: 8000,
+        },
+      ],
+    });
+    const resolved = resolveModelId(aliased, "alias:vision")!;
+    expect(passthroughFileTypesForModel(aliased, resolved)).toEqual([
+      "image/*",
+    ]);
+    expect(maxExtractedTextCharsForModel(aliased, resolved)).toBe(8000);
   });
 });

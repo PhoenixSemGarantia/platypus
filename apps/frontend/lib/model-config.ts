@@ -1,6 +1,10 @@
 import {
   classifyFile,
   defaultPassthroughFileTypes,
+  findModelEntry,
+  modelLabelFor,
+  modelReferenceFor,
+  type ConcreteModelId,
   type Provider,
 } from "@platypus/schemas";
 
@@ -16,6 +20,8 @@ export { defaultPassthroughFileTypes };
 
 export type ModelConfigView = {
   id: string;
+  /** Bare Model alias name, when the Provider gave this model one (#386). */
+  alias?: string;
   passthroughFileTypes: string[];
   /** Cap on injected extracted-document text; undefined uses the shared default. */
   maxExtractedTextChars?: number;
@@ -34,19 +40,72 @@ export const getModelConfigs = (
       ? { id: m, passthroughFileTypes: [] }
       : {
           id: m.id,
+          alias: m.alias,
           passthroughFileTypes: m.passthroughFileTypes ?? [],
           maxExtractedTextChars: m.maxExtractedTextChars,
         },
   );
 
-/** The plain model-id list, order preserved. */
-export const getModelIds = (provider: Pick<Provider, "modelIds">): string[] =>
-  getModelConfigs(provider).map((m) => m.id);
+/**
+ * One entry of a model picker. Value and label diverge for the first time with
+ * Model aliases: an aliased model reads as `flagship` but submits
+ * `alias:flagship`, so the two can no longer be the same string (ADR-0017).
+ */
+export type ModelOption = {
+  value: string;
+  label: string;
+};
+
+/**
+ * Options for a picker whose field MAY hold an alias — the Agent and Chat model
+ * selectors. The Provider's own pointer-setting inputs are free text over
+ * concrete ids and deliberately do not use this.
+ */
+export const getModelOptions = (
+  provider: Pick<Provider, "modelIds">,
+): ModelOption[] =>
+  getModelConfigs(provider).map((model) => ({
+    value: modelReferenceFor(model),
+    label: modelLabelFor(model),
+  }));
+
+/**
+ * The option a stored reference selects, matched by ENTRY rather than by
+ * string.
+ *
+ * This is what keeps aliasing an already-referenced model from silently
+ * breaking the UI: a stored bare `gpt-4` still selects the entry now labelled
+ * `flagship` instead of matching no option and leaving the picker showing its
+ * placeholder over an Agent that is in fact configured. `undefined` means the
+ * model is genuinely gone from the Provider, which behaves as it always has.
+ */
+export const findModelOption = (
+  provider: Pick<Provider, "modelIds">,
+  reference: string,
+): ModelOption | undefined => {
+  const entry = findModelEntry(getModelConfigs(provider), reference);
+  return entry
+    ? { value: modelReferenceFor(entry), label: modelLabelFor(entry) }
+    : undefined;
+};
+
+/**
+ * Resolve a stored reference to the concrete model it names — the frontend's
+ * sole producer of `ConcreteModelId`, mirroring the backend resolver so a raw
+ * `agent.modelId` cannot reach capability logic keyed on real model ids.
+ */
+export const resolveModelId = (
+  provider: Pick<Provider, "modelIds">,
+  reference: string,
+): ConcreteModelId | undefined => {
+  const entry = findModelEntry(getModelConfigs(provider), reference);
+  return entry ? (entry.id as ConcreteModelId) : undefined;
+};
 
 /** The resolved passthrough types for a model, filling the provider default. */
 export const getPassthroughFileTypes = (
   provider: Pick<Provider, "modelIds" | "providerType" | "apiMode">,
-  modelId: string,
+  modelId: ConcreteModelId,
 ): string[] => {
   const model = getModelConfigs(provider).find((m) => m.id === modelId);
   const declared = model?.passthroughFileTypes ?? [];
