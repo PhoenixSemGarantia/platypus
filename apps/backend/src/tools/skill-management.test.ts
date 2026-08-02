@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { z } from "zod";
 import { mockDb, resetMockDb } from "../test-utils.ts";
 
 import { createSkillManagementTools } from "./skill-management.ts";
@@ -7,6 +8,8 @@ const ctx = { toolCallId: "test", messages: [], context: {} };
 const workspaceId = "ws-1";
 const orgId = "org-1";
 const frontendUrl = "http://localhost:3000";
+const validBody =
+  "This is the skill body content that should be long enough to pass validation";
 
 describe("createSkillManagementTools", () => {
   let tools: ReturnType<typeof createSkillManagementTools>;
@@ -68,11 +71,34 @@ describe("createSkillManagementTools", () => {
           {
             name: "my-skill",
             description: "A skill for testing purposes",
-            body: "This is the skill body content that should be long enough to pass validation",
+            body: validBody,
           },
           ctx,
         ),
       ).toMatchObject({ name: "my-skill" });
+    });
+
+    describe("description length", () => {
+      const parse = (description: string) =>
+        (tools.upsertSkill.inputSchema as z.ZodType).safeParse({
+          name: "my-skill",
+          description,
+          body: validBody,
+        });
+
+      it.each([24, 129, 500, 1024])(
+        "accepts a description of %i characters",
+        (length) => {
+          expect(parse("a".repeat(length)).success).toBe(true);
+        },
+      );
+
+      it.each([23, 1025])(
+        "rejects a description of %i characters",
+        (length) => {
+          expect(parse("a".repeat(length)).success).toBe(false);
+        },
+      );
     });
   });
 

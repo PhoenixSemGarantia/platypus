@@ -285,7 +285,7 @@ const skillNameRegex = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 // exclusive), mirroring the dual-scope shape of `provider`/`mcp`. Org-scoped
 // Skills are Shared resources managed by Org Admins (ADR-0007). The XOR is
 // enforced on `skillSchema` below; the create routes inject the scope.
-const skillBaseSchema = z.object({
+export const skillBaseSchema = z.object({
   id: z.string(),
   organizationId: z.string().optional(),
   workspaceId: z.string().optional(),
