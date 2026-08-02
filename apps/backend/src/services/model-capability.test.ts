@@ -3,7 +3,7 @@ import type { ConcreteModelId, Provider } from "@platypus/schemas";
 import {
   defaultPassthroughFileTypes,
   resolveProviderModels,
-  providerModelIds,
+  providerModelReferences,
   passthroughFileTypesForModel,
   maxExtractedTextCharsForModel,
   dedupeModelConfigs,
@@ -111,15 +111,37 @@ describe("resolveProviderModels", () => {
   });
 });
 
-describe("providerModelIds", () => {
-  const p = provider({
-    modelIds: [
-      { id: "a", passthroughFileTypes: [] },
-      { id: "b", passthroughFileTypes: [] },
-    ],
-  });
+describe("providerModelReferences", () => {
   it("lists ids in order", () => {
-    expect(providerModelIds(p)).toEqual(["a", "b"]);
+    const p = provider({
+      modelIds: [
+        { id: "a", passthroughFileTypes: [] },
+        { id: "b", passthroughFileTypes: [] },
+      ],
+    });
+    expect(providerModelReferences(p)).toEqual(["a", "b"]);
+  });
+
+  it("lists the alias reference for an aliased model", () => {
+    // What the Agent picker submits: the concrete id of an aliased model is
+    // deliberately not offered, so a repoint reaches every reference (#386).
+    const p = provider({
+      modelIds: [
+        { id: "gpt-4", passthroughFileTypes: [], alias: "flagship" },
+        { id: "gpt-4o-mini", passthroughFileTypes: [] },
+      ],
+    });
+    expect(providerModelReferences(p)).toEqual([
+      "alias:flagship",
+      "gpt-4o-mini",
+    ]);
+  });
+
+  it("lists ids for a legacy string[], which cannot carry aliases", () => {
+    const p = provider({
+      modelIds: ["a", "b"] as unknown as Provider["modelIds"],
+    });
+    expect(providerModelReferences(p)).toEqual(["a", "b"]);
   });
 });
 

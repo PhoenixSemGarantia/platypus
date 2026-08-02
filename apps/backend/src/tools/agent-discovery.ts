@@ -9,7 +9,7 @@ import {
 } from "../db/schema.ts";
 import { getToolSets } from "../tools/index.ts";
 import { buildResourceUrl } from "../utils/resource-url.ts";
-import { providerModelIds } from "../services/model-capability.ts";
+import { providerModelReferences } from "../services/model-capability.ts";
 import type { Provider } from "@platypus/schemas";
 
 /**
@@ -71,7 +71,7 @@ export function createAgentDiscoveryTools(
 
   const listModelProviders = tool({
     description:
-      "List all configured providers and their available model IDs. Use the returned provider IDs and model IDs when creating or updating agents.",
+      "List all configured providers and their available model IDs. Use the returned provider IDs and model IDs when creating or updating agents, and pass a model ID back exactly as returned. An entry of the form 'alias:<name>' is a Model alias the provider gave one of its models: submit it unchanged rather than the vendor model id it currently points at, so the agent follows the alias when an admin repoints it.",
     inputSchema: z.object({}),
     execute: async () => {
       const providers = await db
@@ -87,14 +87,17 @@ export function createAgentDiscoveryTools(
             eq(providerTable.organizationId, orgId),
           ),
         );
-      // Advertise plain model-id strings regardless of whether the row stores
-      // the new per-model objects or a legacy `string[]` (issue #328). Reuse the
-      // canonical resolver so this can't drift from the capability logic. Only
-      // `modelIds` is read for id extraction; the partial row is cast to satisfy
-      // its signature.
+      // Advertise the reference an alias-aware picker would submit — the alias
+      // for an aliased model, the concrete id otherwise — regardless of whether
+      // the row stores the new per-model objects or a legacy `string[]` (issues
+      // #328, #386). This tool is the agentic counterpart of the Agent model
+      // picker, so it must offer the same choices: handing back the concrete id
+      // of an aliased model would silently opt every agent created this way out
+      // of the next repoint (ADR-0017). Only `modelIds` is read, so the partial
+      // row is cast to satisfy the resolver's signature.
       return providers.map((p) => ({
         ...p,
-        modelIds: providerModelIds(p as unknown as Provider),
+        modelIds: providerModelReferences(p as unknown as Provider),
       }));
     },
   });

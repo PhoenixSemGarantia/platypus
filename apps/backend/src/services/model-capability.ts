@@ -1,5 +1,6 @@
 import {
   defaultPassthroughFileTypes,
+  modelReferenceFor,
   resolveExtractedTextCap,
   resolveModelReference,
   type ConcreteModelId,
@@ -57,9 +58,19 @@ export const resolveProviderModels = (provider: Provider): ModelConfig[] => {
   });
 };
 
-/** The plain model-id list, preserving order — for existing `string[]` consumers. */
-export const providerModelIds = (provider: Provider): string[] =>
-  resolveProviderModels(provider).map((model) => model.id);
+/**
+ * The list of model REFERENCES a caller should store, preserving order — the
+ * alias reference for an aliased entry, the concrete id otherwise.
+ *
+ * The backend mirror of the frontend's `getModelOptions`: what an alias-aware
+ * picker submits. Deliberately not a plain id list, so a tool advertising a
+ * Provider's models to an Agent cannot hand back a concrete id the UI would
+ * never have offered and thereby opt that Agent out of future repoints
+ * (ADR-0017). Anything that needs the concrete id must go through
+ * `resolveModelId`, which is the only mint of `ConcreteModelId`.
+ */
+export const providerModelReferences = (provider: Provider): string[] =>
+  resolveProviderModels(provider).map(modelReferenceFor);
 
 /**
  * Dedupe a provider payload's models by id (first entry wins, so an operator's

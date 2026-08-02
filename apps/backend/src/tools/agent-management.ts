@@ -14,6 +14,12 @@ import { buildResourceUrl } from "../utils/resource-url.ts";
 const INSTRUCTIONS_DESCRIPTION =
   "The agent's own instructions — how it should behave. Platypus composes the full system prompt around this, adding workspace and user context, memories, Skills, sub-agents and the provider's security guardrails, so do not restate those here.";
 
+// Also shared, for the same reason. An 'alias:<name>' value is a Model alias
+// (ADR-0017) and must be stored as-is: rewriting it to the vendor model id it
+// points at pins the agent to today's model and opts it out of future repoints.
+const MODEL_ID_DESCRIPTION =
+  "Model ID to use, exactly as listModelProviders returned it — including an 'alias:<name>' value, which must not be replaced with the vendor model id it points at.";
+
 export function createAgentManagementTools(
   workspaceId: string,
   orgId: string,
@@ -26,7 +32,7 @@ export function createAgentManagementTools(
       name: z.string().min(3).max(30).describe("Agent display name"),
       description: z.string().min(1).max(128).describe("Short description"),
       providerId: z.string().describe("Provider ID to use"),
-      modelId: z.string().describe("Model ID to use"),
+      modelId: z.string().describe(MODEL_ID_DESCRIPTION),
       instructions: z.string().optional().describe(INSTRUCTIONS_DESCRIPTION),
       maxSteps: z.number().optional().describe("Max agentic steps"),
       temperature: z.number().optional().describe("Sampling temperature"),
@@ -127,7 +133,7 @@ export function createAgentManagementTools(
         .optional()
         .describe("Short description"),
       providerId: z.string().optional().describe("Provider ID to use"),
-      modelId: z.string().optional().describe("Model ID to use"),
+      modelId: z.string().optional().describe(MODEL_ID_DESCRIPTION),
       instructions: z.string().optional().describe(INSTRUCTIONS_DESCRIPTION),
       maxSteps: z.number().optional().describe("Max agentic steps"),
       temperature: z.number().optional().describe("Sampling temperature"),
