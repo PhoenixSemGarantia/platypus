@@ -1,11 +1,14 @@
 import { tool, type Tool } from "ai";
 import { z } from "zod";
 import { and, eq, sql } from "drizzle-orm";
+import { skillBaseSchema } from "@platypus/schemas";
 import { db } from "../index.ts";
 import { skill as skillTable, agent as agentTable } from "../db/schema.ts";
 import { buildResourceUrl } from "../utils/resource-url.ts";
 
-const skillNameRegex = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+// Field constraints come from the shared schema so the agent-facing tool can
+// never drift from the bounds the HTTP routes and the web form enforce.
+const skillFields = skillBaseSchema.shape;
 
 export function createSkillManagementTools(
   workspaceId: string,
@@ -66,13 +69,13 @@ export function createSkillManagementTools(
     description:
       "Create a new skill or update an existing skill by name. If a skill with the given name already exists in this workspace, it will be updated.",
     inputSchema: z.object({
-      name: z
-        .string()
-        .min(5)
-        .max(64)
-        .regex(skillNameRegex, "Skill name must be kebab-case"),
-      description: z.string().min(24).max(128),
-      body: z.string().min(48).max(50000),
+      name: skillFields.name.describe(
+        "Kebab-case name of the skill, unique within the workspace",
+      ),
+      description: skillFields.description.describe(
+        "Short summary of what the skill does and when to use it",
+      ),
+      body: skillFields.body.describe("The Markdown content of the skill"),
     }),
     execute: async ({ name, description, body }) => {
       const { nanoid } = await import("nanoid");
