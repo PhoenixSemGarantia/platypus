@@ -47,12 +47,13 @@ translating gateway in front of it.
 | `apiKey`             | The vendor credential.                                                                                                                                          |
 | `baseUrl`            | Optional override for OpenAI-compatible / self-hosted endpoints.                                                                                                |
 | `region`             | Required for Bedrock (AWS region).                                                                                                                              |
-| `modelIds`           | The models this Provider exposes for selection (at least one). Each entry carries its own config — see [File handling](#file-handling-what-each-model-accepts). |
-| `taskModelId`        | The model used for one-shot internal tasks (e.g. generating a chat title), not chat turns.                                                                      |
+| `modelIds`           | The models this Provider exposes for selection (at least one). Each entry carries its own config: file capability — see [File handling](#file-handling-what-each-model-accepts) — and an optional [Model alias](/concepts/providers#model-aliases). |
+| `taskModelId`        | The model used for one-shot internal tasks (e.g. generating a chat title), not chat turns. Must be a real model id — a Model alias is rejected.                  |
 | `securityGuardrails` | Optional free-text security directives appended last in the system prompt for every run on this Provider.                                                       |
 
 A Provider also carries the models used for **Memory** (extraction and
-embeddings), so background memory features have a model to call.
+embeddings), so background memory features have a model to call. Like
+`taskModelId`, both name a real model id and reject a Model alias.
 
 <Callout type="info">
   The distinction between a **chat turn** (running the selected Agent/model to
