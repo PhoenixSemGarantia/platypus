@@ -17,11 +17,12 @@ deploy time; it exports a manifest whose `contributes` block fills one or more
 
 ## Which one do you want
 
-| You want to…                                                              | Reach for              | Because                                                                            |
-| ------------------------------------------------------------------------- | ---------------------- | ---------------------------------------------------------------------------------- |
-| Let an Agent call your internal service, or a third-party API             | **MCP server**         | No code in Platypus, no restart, configured per Workspace by whoever needs it       |
-| Ship tools that are part of the product for everyone on the deployment    | **[Tool set](/extending/tool-sets)** contribution | One install, one switch on the Agent form, available to every Workspace |
-| Run an Agent's shell and filesystem tools somewhere new — Modal, E2B, a VM | **[Sandbox backend](/extending/sandbox-backends)** contribution | Core owns the five tools; you supply the environment they run in |
+| You want to…                                                               | Reach for                                                       | Because                                                                       |
+| -------------------------------------------------------------------------- | --------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| Let an Agent call your internal service, or a third-party API              | **MCP server**                                                  | No code in Platypus, no restart, configured per Workspace by whoever needs it |
+| Ship tools that are part of the product for everyone on the deployment     | **[Tool set](/extending/tool-sets)** contribution               | One install, one switch on the Agent form, available to every Workspace       |
+| Run an Agent's shell and filesystem tools somewhere new — Modal, E2B, a VM | **[Sandbox backend](/extending/sandbox-backends)** contribution | Core owns the five tools; you supply the environment they run in              |
+| Serve the Chat **Search** toggle from your own search service              | **[Web-search backend](#web-search-backends)** contribution     | Core owns the two tools and the toggle; you supply the calls to your upstream |
 
 If you are integrating an external service for your own use, you almost always
 want an MCP server. Reach for a Plugin when the capability should ship _with_
@@ -31,8 +32,8 @@ the deployment rather than be configured in it.
   Both Sandbox backends and Tool sets already ship as core plugins —
   `@platypus/tools-basic`, `@platypus/tools-platform`, `@platypus/web-fetch`,
   `@platypus/docker` and `@platypus/ssh`. Yours loads through the same manifest
-  path. The inventory an Operator controls is in
-  [Configuration → Plugins](/self-hosting/configuration#plugins).
+  path. The inventory an Operator controls is in [Configuration →
+  Plugins](/self-hosting/configuration#plugins).
 </Callout>
 
 ## Start here
@@ -57,16 +58,37 @@ what the caps are, what happens at boot. For the exact shape of an interface,
 read it from the package you have installed. A signature pasted onto a docs page
 drifts silently; the one in your `node_modules` cannot.
 
-## A third Extension point, not yet reachable
+## Web-search backends
 
-`contributes.webBackends` exists in the SDK and a Web-search backend
-contribution is validated and registered at boot. Nothing selects one yet — no
-Provider field points at a web backend, and a Chat turn never calls its
-executors.
+A **Web-search backend** fills the **Search** toggle in Chat for Providers whose
+model has no web search of its own — a self-hosted OpenAI-compatible endpoint
+such as vLLM, llama.cpp or LiteLLM. Contribute one under
+`contributes.webBackends`.
+
+You supply two executors: a mandatory `web_search` and an optional `read_url`.
+Core owns everything around them — the tool names and input schemas the model
+sees, the descriptions, a cap of **10** search results, page slicing for reads,
+the per-call timeout (**30 seconds** by default, and a contribution cannot
+declare more than **120**), and a guard that resolves every URL the model
+supplies and refuses loopback, link-local and non-`http(s)` addresses. Your job
+is the call to your upstream and nothing else. Return the full content; core
+truncates.
+
+The tools are ephemeral. They exist for a turn the toggle was on for, and no
+other.
+
+Selection is not on the Provider form yet. In this release the only way to point
+a Provider at your backend is the Provider API's `webBackend` field, set to the
+id your manifest contributes.
 
 <Callout type="warning">
-  Contribute a Web-search backend today and it loads without complaint, appears
-  in **Organization settings → Plugins**, and is never called. If your tools
-  aren't firing, that is why. Wait for a release that wires a Provider to it
-  before building against this point.
+  Two Provider settings decide whether your backend is reached, and both
+  currently work against the endpoints this Extension point exists for. The Chat
+  **Search** toggle is offered only on Providers that have native web search, so
+  on a vLLM or LiteLLM Provider it stays hidden and no Chat message reaches your
+  backend; a Trigger with **Web Search** on is the path that does. Turning
+  **Native web search** off disables your backend along with the built-in tool,
+  so leave it on. To exercise a backend from Chat today, attach it to a Provider
+  that does have native search — a configured backend takes precedence over the
+  built-in tool.
 </Callout>
