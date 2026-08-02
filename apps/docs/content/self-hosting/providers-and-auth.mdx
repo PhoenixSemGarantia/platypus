@@ -76,6 +76,10 @@ not guessed**: each entry in `modelIds` is a per-model object.
 | `passthroughFileTypes`  | The media types this model ingests **natively**. Comma-separated in the UI; wildcards like `image/*` allowed. Empty inherits the provider-type default below. |
 | `maxExtractedTextChars` | Cap on the text a single extracted document may add to a turn. Empty uses the default (50,000 characters).                                                    |
 
+In the form, the last two sit behind **Advanced** on each model row — collapsed
+unless that model already has one of them set. Every field carries an **i** you
+can hover or focus for the same explanation.
+
 On every chat turn, each attached file takes exactly one of these routes:
 
 | Route                  | When                                                      | What the model receives                                                           |
