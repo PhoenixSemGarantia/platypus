@@ -55,6 +55,34 @@ describe("createAgentDiscoveryTools", () => {
         { id: "p1", name: "Provider 1", modelIds: ["model-a", "model-b"] },
       ]);
     });
+
+    it("advertises an aliased model by its alias reference, not its id", async () => {
+      // The tool is the agentic counterpart of the Agent model picker, so it
+      // offers what the picker submits — otherwise an agent it creates pins the
+      // concrete id and misses the next repoint (#386, ADR-0017).
+      mockDb.where.mockResolvedValue([
+        {
+          id: "p1",
+          name: "Provider 1",
+          modelIds: [
+            {
+              id: "gpt-4",
+              passthroughFileTypes: ["image/*"],
+              alias: "flagship",
+            },
+            { id: "gpt-4o-mini", passthroughFileTypes: [] },
+          ],
+        },
+      ]);
+
+      expect(await tools.listModelProviders.execute!({}, ctx)).toEqual([
+        {
+          id: "p1",
+          name: "Provider 1",
+          modelIds: ["alias:flagship", "gpt-4o-mini"],
+        },
+      ]);
+    });
   });
 
   describe("listAgents", () => {
