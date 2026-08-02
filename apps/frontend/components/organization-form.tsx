@@ -23,7 +23,12 @@ import { useState } from "react";
 import { useResetOnChange } from "@/hooks/use-reset-on-change";
 import { useRouter } from "next/navigation";
 import { type Organization } from "@platypus/schemas";
-import { fetcher, parseValidationErrors, joinUrl } from "@/lib/utils";
+import {
+  clearFieldError,
+  fetcher,
+  parseValidationErrors,
+  joinUrl,
+} from "@/lib/utils";
 import { useBackendUrl } from "@/app/client-context";
 import { useAuth } from "@/components/auth-provider";
 import { Trash2 } from "lucide-react";
@@ -74,14 +79,9 @@ const OrganizationForm = ({ classNames, orgId }: OrganizationFormProps) => {
   ) => {
     const { id, value } = e.target;
 
-    // Clear validation error for this field
-    if (validationErrors[id]) {
-      setValidationErrors((prev) => {
-        const newErrors = { ...prev };
-        delete newErrors[id];
-        return newErrors;
-      });
-    }
+    // Clear the error for this field, including any reported against a path
+    // inside it.
+    setValidationErrors((prev) => clearFieldError(prev, id));
 
     setFormData((prevData) => ({
       ...prevData,

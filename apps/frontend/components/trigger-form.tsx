@@ -36,7 +36,12 @@ import {
   type KanbanBoardState,
 } from "@platypus/schemas";
 import useSWR from "swr";
-import { fetcher, parseValidationErrors, joinUrl } from "@/lib/utils";
+import {
+  clearFieldError,
+  fetcher,
+  parseValidationErrors,
+  joinUrl,
+} from "@/lib/utils";
 import { useBackendUrl } from "@/app/client-context";
 import { useAuth } from "@/components/auth-provider";
 import { Cron } from "croner";
@@ -470,13 +475,9 @@ const TriggerForm = ({
   ) => {
     const { id, value } = e.target;
 
-    if (validationErrors[id]) {
-      setValidationErrors((prev) => {
-        const newErrors = { ...prev };
-        delete newErrors[id];
-        return newErrors;
-      });
-    }
+    // Clear the error for this field, including any reported against a path
+    // inside it.
+    setValidationErrors((prev) => clearFieldError(prev, id));
 
     setFormData((prevData) => ({
       ...prevData,

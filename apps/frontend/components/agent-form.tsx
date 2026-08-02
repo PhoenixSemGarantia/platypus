@@ -48,7 +48,12 @@ import {
   type Skill,
 } from "@platypus/schemas";
 import useSWR, { useSWRConfig } from "swr";
-import { fetcher, parseValidationErrors, joinUrl } from "@/lib/utils";
+import {
+  clearFieldError,
+  fetcher,
+  parseValidationErrors,
+  joinUrl,
+} from "@/lib/utils";
 import { findModelOption, getModelOptions } from "@/lib/model-config";
 import { toast } from "sonner";
 import { useBackendUrl } from "@/app/client-context";
@@ -215,14 +220,9 @@ const AgentForm = ({
   // Drop the stored server validation error for the given field(s) so a
   // corrected field stops rendering its error and re-enables the Save button.
   const clearValidationErrors = useCallback((...ids: string[]) => {
-    setValidationErrors((prev) => {
-      if (!ids.some((id) => id in prev)) return prev;
-      const newErrors = { ...prev };
-      for (const id of ids) {
-        delete newErrors[id];
-      }
-      return newErrors;
-    });
+    setValidationErrors((prev) =>
+      ids.reduce((errors, id) => clearFieldError(errors, id), prev),
+    );
   }, []);
 
   const handleChange = (
