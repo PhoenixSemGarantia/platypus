@@ -27,8 +27,11 @@ import {
   retrieveRecentSummaries,
   type MemorySummary,
 } from "./memory-retrieval.ts";
-import { providerHasNativeSearch } from "@platypus/schemas";
-import type { Provider, Skill } from "@platypus/schemas";
+import {
+  aliasNameFromReference,
+  providerHasNativeSearch,
+} from "@platypus/schemas";
+import type { ConcreteModelId, Provider, Skill } from "@platypus/schemas";
 import {
   getWebBackend,
   type WebBackendContext,
@@ -40,7 +43,7 @@ import { inlineFileUrls } from "../storage/utils.ts";
 import {
   maxExtractedTextCharsForModel,
   passthroughFileTypesForModel,
-  providerHasModel,
+  resolveModelId,
 } from "./model-capability.ts";
 import {
   assertFilePartsSupported,
@@ -92,7 +95,14 @@ type McpRow = typeof mcpTable.$inferSelect;
 type ChatContext = {
   provider: Provider;
   agent?: AgentRow;
-  resolvedModelId: string;
+  /**
+   * What the Agent or request actually stores — a concrete id or `alias:<name>`.
+   * Kept alongside the resolved id because it, not the resolution, is what gets
+   * persisted back to `chat.modelId`: writing the resolved id would pin the Chat
+   * to today's model and repointing the alias would never reach it (ADR-0017).
+   */
+  modelReference: string;
+  resolvedModelId: ConcreteModelId;
   resolvedProviderId: string;
   resolvedAgentId?: string;
   resolvedMaxSteps: number;
@@ -725,7 +735,8 @@ export const prepareChatTurn = async (
     resolved: {
       agentId: context.resolvedAgentId,
       providerId: context.resolvedProviderId,
-      modelId: context.resolvedModelId,
+      // The reference, not the resolution — see `ChatContext.modelReference`.
+      modelId: context.modelReference,
       // Only Direct (no-Agent) turns persist generation params on the row;
       // Agent-driven turns read them back from the Agent record.
       //
@@ -965,6 +976,20 @@ export const wrapToolsWithBump = (
   return wrapped;
 };
 
+/**
+ * Why a model reference resolved to nothing, said in the caller's terms: a
+ * dangling alias and a dangling concrete id are different mistakes to fix.
+ */
+const unresolvedModelMessage = (
+  reference: string,
+  providerId: string,
+): string => {
+  const aliasName = aliasNameFromReference(reference);
+  return aliasName === null
+    ? `Model id '${reference}' not enabled for provider '${providerId}'`
+    : `Model alias '${aliasName}' is not defined on provider '${providerId}'`;
+};
+
 const resolveChatContext = async (
   queries: ChatTurnQueries,
   data: ChatTurnRequest,
@@ -974,7 +999,8 @@ const resolveChatContext = async (
   const { agentId, providerId, modelId } = data;
 
   let resolvedProviderId: string;
-  let resolvedModelId: string;
+  // The reference AS STORED — a concrete id, or `alias:<name>` (ADR-0017).
+  let modelReference: string;
   let resolvedAgentId: string | undefined;
   let resolvedMaxSteps = 1;
   let agent: AgentRow | undefined;
@@ -985,11 +1011,11 @@ const resolveChatContext = async (
     if (!found) throw new NotFoundError(`Agent '${agentId}' not found`);
     agent = found;
     resolvedProviderId = agent.providerId;
-    resolvedModelId = agent.modelId;
+    modelReference = agent.modelId;
     resolvedMaxSteps = agent.maxSteps ?? DEFAULT_AGENT_MAX_STEPS;
   } else if (providerId && modelId) {
     resolvedProviderId = providerId;
-    resolvedModelId = modelId;
+    modelReference = modelId;
     resolvedAgentId = undefined;
   } else {
     throw new ValidationError(
@@ -1008,15 +1034,20 @@ const resolveChatContext = async (
     );
   }
 
-  if (!providerHasModel(provider, resolvedModelId)) {
+  // Aliases re-resolve on EVERY turn — no pinning — so repointing an alias
+  // moves every Agent and Chat using it on their next turn. A reference that
+  // matches nothing is a hard error, never a fallback to some other model.
+  const resolvedModelId = resolveModelId(provider, modelReference);
+  if (!resolvedModelId) {
     throw new ValidationError(
-      `Model id '${resolvedModelId}' not enabled for provider '${resolvedProviderId}'`,
+      unresolvedModelMessage(modelReference, resolvedProviderId),
     );
   }
 
   return {
     provider,
     agent,
+    modelReference,
     resolvedModelId,
     resolvedProviderId,
     resolvedAgentId,
@@ -1159,12 +1190,21 @@ const loadSubAgents = async (
       if (!subProvider) {
         throw new Error(`Provider '${providerId}' not found for sub-agent`);
       }
+      // A sub-Agent is an Agent row, so its `modelId` may hold an alias
+      // reference and needs the same resolution the parent turn gets — this
+      // path never goes through `resolveChatContext`.
+      const subModelId = resolveModelId(subProvider, modelId);
+      if (!subModelId) {
+        throw new Error(
+          `${unresolvedModelMessage(modelId, providerId)} (sub-agent)`,
+        );
+      }
       // Each sub-agent gets its OWN resolved provider's security text appended
       // to its instructions (not the parent's, not the org identity) — the one
       // path sub-agents have to the guardrails, since they never call
       // renderSystemPrompt.
       return {
-        model: openProvider(subProvider).languageModel(modelId),
+        model: openProvider(subProvider).languageModel(subModelId),
         securityGuardrails: subProvider.securityGuardrails ?? null,
       };
     },

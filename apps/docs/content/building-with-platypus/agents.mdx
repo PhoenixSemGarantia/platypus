@@ -49,6 +49,11 @@ Open the **Model** dropdown and pick a model. Models are grouped under each
 available Provider has it enabled — that's an Org Admin setting (see
 [Providers & models](/concepts/providers)).
 
+A model listed under a name that isn't a vendor model id — `fast`, say — has
+been given a [Model alias](/concepts/providers#model-aliases). Pick it and the
+Agent follows whatever model that alias points at, so an Org Admin can upgrade
+the Agent later without you editing it.
+
 </Steps>
 
 <Callout type="info">
@@ -120,7 +125,8 @@ A **sub-agent** is just another Agent that this one can hand work to. In the
 to delegate to.
 
 At run time each selected sub-agent is exposed to the parent as a **delegate
-tool** named `delegateTo<AgentName>` — calling it runs the sub-agent (with its
+tool** named `delegateTo` plus the Agent's name in PascalCase — "Research Agent"
+becomes `delegateToResearchAgent`. Calling it runs the sub-agent (with its
 own model, Instructions, and tools) and returns the result. This lets a coordinator
 Agent stay focused while specialists do the detailed work.
 

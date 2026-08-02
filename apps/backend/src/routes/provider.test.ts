@@ -215,6 +215,8 @@ describe("Provider Routes", () => {
       // requireWorkspaceMutable → resolveScoped → workspace-scoped row (no
       // attachment check needed)
       mockDb.limit.mockResolvedValueOnce([{ id: "p1", workspaceId }]);
+      // currentProviderModels → the pre-save models, for the alias diff
+      mockDb.limit.mockResolvedValueOnce([{ modelIds: [{ id: "gpt-4" }] }]);
 
       const updated = { id: "p1", name: "Renamed", workspaceId };
       mockDb.returning.mockResolvedValueOnce([updated]);
@@ -226,8 +228,42 @@ describe("Provider Routes", () => {
       });
 
       expect(res.status).toBe(200);
-      // The single row, not the raw `.returning()` array.
-      expect(await res.json()).toEqual(updated);
+      // The single row, not the raw `.returning()` array, plus the
+      // alias de-migration report (empty — no alias was removed).
+      expect(await res.json()).toEqual({ ...updated, aliasRepoints: [] });
+    });
+
+    it("reports how many Agents and Chats were repointed when an alias is removed", async () => {
+      mockSession();
+      mockDb.limit.mockResolvedValueOnce([{ role: "admin" }]); // requireOrgAccess
+      mockDb.limit.mockResolvedValueOnce([
+        { ownerId: "user-1", organizationId: "org-1" },
+      ]); // requireWorkspaceAccess
+      mockDb.limit.mockResolvedValueOnce([{ id: "p1", workspaceId }]);
+      // The alias `flagship` exists before this save and not after it.
+      mockDb.limit.mockResolvedValueOnce([
+        { modelIds: [{ id: "gpt-4", alias: "flagship" }] },
+      ]);
+
+      const updated = { id: "p1", name: "Renamed", workspaceId };
+      mockDb.returning
+        .mockResolvedValueOnce([updated]) // the provider row
+        .mockResolvedValueOnce([{ id: "a1" }, { id: "a2" }]) // Agents repointed
+        .mockResolvedValueOnce([{ id: "c1" }]); // Chats repointed
+
+      const res = await app.request(`${baseUrl}/p1`, {
+        method: "PUT",
+        body: JSON.stringify(updateBody),
+        headers: { "Content-Type": "application/json" },
+      });
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        ...updated,
+        aliasRepoints: [
+          { alias: "flagship", modelId: "gpt-4", agents: 2, chats: 1 },
+        ],
+      });
     });
 
     it("should 403 when updating an attached org-scoped provider", async () => {

@@ -1,5 +1,5 @@
 import { embed } from "ai";
-import type { Provider } from "@platypus/schemas";
+import type { ConcreteModelId, Provider } from "@platypus/schemas";
 import { openProvider } from "./provider.ts";
 
 /**
@@ -8,7 +8,7 @@ import { openProvider } from "./provider.ts";
  */
 export const generateEmbedding = async (
   provider: Provider,
-  embeddingModelId: string,
+  embeddingModelId: ConcreteModelId,
   text: string,
 ): Promise<number[]> => {
   const opened = openProvider(provider);

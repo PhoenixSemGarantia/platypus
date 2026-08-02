@@ -7,6 +7,10 @@ import { providerCreateSchema, providerUpdateSchema } from "@platypus/schemas";
 import { eq, and } from "drizzle-orm";
 import { handleEmbeddingConfigChange } from "../services/embedding-invalidation.ts";
 import { dedupeModelConfigs } from "../services/model-capability.ts";
+import {
+  currentProviderModels,
+  deMigrateOrphanedAliases,
+} from "../services/model-alias-migration.ts";
 import { requireAuth } from "../middleware/authentication.ts";
 import { requireOrgAccess } from "../middleware/authorization.ts";
 import { requireSharedDeletable } from "../services/scoped-resource.ts";
@@ -97,6 +101,12 @@ orgProvider.put(
     // Detect and handle embedding config changes before the update
     await handleEmbeddingConfigChange(providerId, data);
 
+    // Snapshot the models as stored, so an alias this save removes can
+    // de-migrate its references rather than dangling them (ADR-0017).
+    const previousModels = data.modelIds
+      ? await currentProviderModels(providerId)
+      : null;
+
     // A duplicate name surfaces as a Postgres unique violation, mapped to 409
     // by the central onError (ADR-0010).
     const record = await db
@@ -117,7 +127,18 @@ orgProvider.put(
       throw new NotFoundError("Provider not found");
     }
 
-    return c.json(record[0], 200);
+    // Runs AFTER the row is written: a failed update must not leave Agents
+    // repointed for an alias that still exists.
+    const aliasRepoints =
+      previousModels && data.modelIds
+        ? await deMigrateOrphanedAliases(
+            providerId,
+            previousModels,
+            data.modelIds,
+          )
+        : [];
+
+    return c.json({ ...record[0], aliasRepoints }, 200);
   },
 );
 

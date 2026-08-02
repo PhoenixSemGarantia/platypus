@@ -40,7 +40,7 @@ import { fetcher, joinUrl } from "@/lib/utils";
 import { useResetOnChange } from "@/hooks/use-reset-on-change";
 import { useChatSettings } from "@/hooks/use-chat-settings";
 import { useModelSelection } from "@/hooks/use-model-selection";
-import { getPassthroughFileTypes } from "@/lib/model-config";
+import { getPassthroughFileTypes, resolveModelId } from "@/lib/model-config";
 import { FileCompatibilityWarning } from "./file-compatibility-warning";
 import { useMessageEditing } from "@/hooks/use-message-editing";
 import { useChatTitlePoll } from "@/hooks/use-chat-title-poll";
@@ -423,10 +423,19 @@ export const Chat = ({
 
   // The media types the currently-selected model ingests natively (issue #328),
   // used to warn about incompatible attachments. Empty when nothing resolves yet.
-  const resolvedModelId = agentId ? selectedAgent?.modelId : modelId;
+  //
+  // The Agent's / selection's stored value is a REFERENCE and may be an alias,
+  // so it is resolved to a concrete id first — matching it against entry ids
+  // directly would silently fall back to the provider-type defaults for every
+  // aliased model (ADR-0017).
+  const modelReference = agentId ? selectedAgent?.modelId : modelId;
+  const concreteModelId =
+    resolvedProvider && modelReference
+      ? resolveModelId(resolvedProvider, modelReference)
+      : undefined;
   const passthroughFileTypes =
-    resolvedProvider && resolvedModelId
-      ? getPassthroughFileTypes(resolvedProvider, resolvedModelId)
+    resolvedProvider && concreteModelId
+      ? getPassthroughFileTypes(resolvedProvider, concreteModelId)
       : [];
 
   // Treat a server-side run-in-progress as if we were locally streaming,
@@ -605,6 +614,7 @@ export const Chat = ({
                       providers={providers}
                       agentId={agentId}
                       modelId={modelId}
+                      providerId={providerId}
                       isOpen={isModelSelectorOpen}
                       onOpenChange={(open) => {
                         setIsModelSelectorOpen(open);

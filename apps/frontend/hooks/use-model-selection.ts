@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Provider, Agent, Chat } from "@platypus/schemas";
 import { setWithExpiry, getWithExpiry } from "@/lib/local-storage";
-import { getModelIds } from "@/lib/model-config";
+import { findModelOption, getModelOptions } from "@/lib/model-config";
 
 export interface ModelSelection {
   agentId: string;
@@ -74,12 +74,14 @@ export const useModelSelection = (
         // Check if the persisted provider still exists
         const provider = providers.find((p) => p.id === persistedProviderId);
         if (provider) {
-          // Check if the persisted model is still available for this provider
-          const providerModelIds = getModelIds(provider);
-          if (providerModelIds.includes(persistedModelId)) {
-            // Both provider and model are valid, restore them
+          // Resolve the persisted value to a model ENTRY rather than testing
+          // string membership: once a model is given an alias its option value
+          // becomes `alias:<name>`, so a stored bare id would fail the check
+          // and silently fall through to a DIFFERENT model (ADR-0017).
+          const option = findModelOption(provider, persistedModelId);
+          if (option) {
             setProviderId(persistedProviderId);
-            setModelId(persistedModelId);
+            setModelId(option.value);
             return;
           } else {
             // Provider exists but model is no longer available, use provider's first model
@@ -87,7 +89,7 @@ export const useModelSelection = (
               `Model '${persistedModelId}' no longer available for provider '${persistedProviderId}', falling back to first model`,
             );
             setProviderId(persistedProviderId);
-            setModelId(providerModelIds[0]);
+            setModelId(getModelOptions(provider)[0]?.value ?? "");
             return;
           }
         } else {
@@ -126,12 +128,11 @@ export const useModelSelection = (
           const provider = providers.find(
             (p) => p.id === lastSelection.providerId,
           );
-          if (
-            provider &&
-            getModelIds(provider).includes(lastSelection.modelId)
-          ) {
+          const option =
+            provider && findModelOption(provider, lastSelection.modelId);
+          if (option) {
             setProviderId(lastSelection.providerId);
-            setModelId(lastSelection.modelId);
+            setModelId(option.value);
             return;
           }
           console.warn(`Provider/model from localStorage no longer valid`);
@@ -140,7 +141,7 @@ export const useModelSelection = (
     }
 
     // PRIORITY 3: Fall back to first provider's first model (for new chats, invalid persisted data, or missing chatData)
-    setModelId(getModelIds(providers[0])[0]);
+    setModelId(getModelOptions(providers[0])[0]?.value ?? "");
     setProviderId(providers[0].id);
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [

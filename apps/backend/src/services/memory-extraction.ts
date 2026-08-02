@@ -12,6 +12,7 @@ import type { Provider } from "@platypus/schemas";
 import { logger } from "../logger.ts";
 import type { PlatypusUIMessage } from "../types.ts";
 import { openProvider } from "./provider.ts";
+import { pointerSettingModelId } from "./model-capability.ts";
 import { generateEmbedding } from "./embedding.ts";
 
 /**
@@ -137,7 +138,7 @@ const processChat = async (
 
   // Create the model
   const model = openProvider(extractionProvider as Provider).languageModel(
-    extractionProvider.memoryExtractionModelId,
+    pointerSettingModelId(extractionProvider.memoryExtractionModelId),
   );
 
   // Call the LLM for summary generation
@@ -176,7 +177,7 @@ const processChat = async (
     try {
       embedding = await generateEmbedding(
         embeddingProvider as Provider,
-        embeddingProvider.embeddingModelId,
+        pointerSettingModelId(embeddingProvider.embeddingModelId),
         updatedSummary,
       );
     } catch (error) {

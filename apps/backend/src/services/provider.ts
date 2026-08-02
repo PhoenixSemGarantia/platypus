@@ -5,11 +5,17 @@ import { createAmazonBedrock } from "@ai-sdk/amazon-bedrock";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import type { LanguageModel, EmbeddingModel, Tool } from "ai";
-import type { Provider } from "@platypus/schemas";
+import type { ConcreteModelId, Provider } from "@platypus/schemas";
 
+/**
+ * `ConcreteModelId` rather than `string` so a raw `agent.modelId` — which may
+ * hold an `alias:` reference the vendor SDK knows nothing about — cannot reach
+ * the endpoint. `resolveModelId` is the only way to produce one; the Provider's
+ * own pointer-settings go through `pointerSettingModelId` (ADR-0017).
+ */
 export interface OpenedProvider {
-  languageModel(modelId: string): LanguageModel;
-  embeddingModel?(modelId: string): EmbeddingModel;
+  languageModel(modelId: ConcreteModelId): LanguageModel;
+  embeddingModel?(modelId: ConcreteModelId): EmbeddingModel;
   searchTools?(): Record<string, Tool>;
 }
 

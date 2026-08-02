@@ -22,6 +22,12 @@ import {
   extractableDocumentFormat,
   resolveExtractedTextCap,
   DEFAULT_MAX_EXTRACTED_TEXT_CHARS,
+  MODEL_ALIAS_PREFIX,
+  isAliasReference,
+  aliasNameFromReference,
+  modelReferenceFor,
+  modelLabelFor,
+  findModelEntry,
 } from "./index";
 
 describe("Organization Schema", () => {
@@ -727,5 +733,192 @@ describe("resolveExtractedTextCap", () => {
         DEFAULT_MAX_EXTRACTED_TEXT_CHARS,
       );
     }
+  });
+});
+
+describe("Model aliases (modelIds)", () => {
+  const base = {
+    organizationId: "org-123",
+    name: "Test Provider",
+    providerType: "OpenAI" as const,
+    apiKey: "sk-test",
+    taskModelId: "gpt-4",
+    memoryExtractionModelId: "gpt-4",
+  };
+
+  const parseModels = (modelIds: unknown) =>
+    providerCreateSchema.safeParse({ ...base, modelIds });
+
+  it("accepts an alias on an entry and trims surrounding whitespace", () => {
+    const result = parseModels([{ id: "gpt-4", alias: "  flagship  " }]);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.modelIds[0].alias).toBe("flagship");
+    }
+  });
+
+  it("leaves alias undefined when not declared", () => {
+    const result = parseModels([{ id: "gpt-4" }]);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.modelIds[0].alias).toBeUndefined();
+    }
+  });
+
+  it("rejects an empty or whitespace-only alias", () => {
+    for (const alias of ["", "   ", "\t"]) {
+      expect(parseModels([{ id: "gpt-4", alias }]).success).toBe(false);
+    }
+  });
+
+  it("rejects an alias that itself begins with the alias prefix", () => {
+    for (const alias of ["alias:flagship", "ALIAS:flagship"]) {
+      expect(parseModels([{ id: "gpt-4", alias }]).success).toBe(false);
+    }
+  });
+
+  it("accepts distinct aliases across entries", () => {
+    expect(
+      parseModels([
+        { id: "gpt-4", alias: "flagship" },
+        { id: "gpt-4o-mini", alias: "fast" },
+      ]).success,
+    ).toBe(true);
+  });
+
+  it("rejects two aliases differing only in case", () => {
+    const result = parseModels([
+      { id: "gpt-4", alias: "Fast" },
+      { id: "gpt-4o-mini", alias: "fast" },
+    ]);
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects an alias duplicating another entry's concrete id, case-insensitively", () => {
+    expect(
+      parseModels([{ id: "gpt-4" }, { id: "gpt-4o-mini", alias: "GPT-4" }])
+        .success,
+    ).toBe(false);
+  });
+
+  it("rejects an alias duplicating its own entry's concrete id", () => {
+    expect(parseModels([{ id: "gpt-4", alias: "gpt-4" }]).success).toBe(false);
+  });
+
+  it("still coerces a legacy string[] with no aliases", () => {
+    const result = parseModels(["gpt-4", "gpt-4o"]);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.modelIds).toEqual([
+        { id: "gpt-4", passthroughFileTypes: [] },
+        { id: "gpt-4o", passthroughFileTypes: [] },
+      ]);
+    }
+  });
+});
+
+describe("Provider pointer-settings reject alias references", () => {
+  const base = {
+    organizationId: "org-123",
+    name: "Test Provider",
+    providerType: "OpenAI" as const,
+    apiKey: "sk-test",
+    modelIds: [{ id: "gpt-4", alias: "flagship" }],
+    taskModelId: "gpt-4",
+    memoryExtractionModelId: "gpt-4",
+  };
+
+  it("accepts concrete ids in all three pointer-settings", () => {
+    expect(
+      providerCreateSchema.safeParse({ ...base, embeddingModelId: "embed-3" })
+        .success,
+    ).toBe(true);
+  });
+
+  for (const field of [
+    "taskModelId",
+    "memoryExtractionModelId",
+    "embeddingModelId",
+  ] as const) {
+    it(`rejects an alias reference in ${field} on create`, () => {
+      expect(
+        providerCreateSchema.safeParse({
+          ...base,
+          [field]: `${MODEL_ALIAS_PREFIX}flagship`,
+        }).success,
+      ).toBe(false);
+    });
+
+    it(`rejects an alias reference in ${field} on update`, () => {
+      expect(
+        providerUpdateSchema.safeParse({
+          [field]: `${MODEL_ALIAS_PREFIX}flagship`,
+        }).success,
+      ).toBe(false);
+    });
+  }
+
+  it("rejects a differently-cased alias prefix too — the guard is not the parser", () => {
+    expect(
+      providerCreateSchema.safeParse({ ...base, taskModelId: "Alias:flagship" })
+        .success,
+    ).toBe(false);
+  });
+
+  it("still accepts a null or absent embeddingModelId", () => {
+    expect(
+      providerCreateSchema.safeParse({ ...base, embeddingModelId: null })
+        .success,
+    ).toBe(true);
+    expect(providerCreateSchema.safeParse(base).success).toBe(true);
+  });
+});
+
+describe("Model reference helpers", () => {
+  const models = [
+    { id: "gpt-4", passthroughFileTypes: [], alias: "flagship" },
+    { id: "gpt-4o-mini", passthroughFileTypes: [] },
+  ];
+
+  it("marks only alias references", () => {
+    expect(isAliasReference("alias:flagship")).toBe(true);
+    expect(isAliasReference("gpt-4")).toBe(false);
+  });
+
+  it("reads the bare name out of a reference", () => {
+    expect(aliasNameFromReference("alias:flagship")).toBe("flagship");
+    expect(aliasNameFromReference("gpt-4")).toBeNull();
+  });
+
+  it("submits an alias reference for an aliased entry and the id otherwise", () => {
+    expect(modelReferenceFor(models[0])).toBe("alias:flagship");
+    expect(modelReferenceFor(models[1])).toBe("gpt-4o-mini");
+  });
+
+  it("labels an aliased entry with its alias and the id otherwise", () => {
+    expect(modelLabelFor(models[0])).toBe("flagship");
+    expect(modelLabelFor(models[1])).toBe("gpt-4o-mini");
+  });
+
+  it("resolves a bare id to its entry even once that entry is aliased", () => {
+    expect(findModelEntry(models, "gpt-4")).toBe(models[0]);
+  });
+
+  it("resolves an alias reference to its entry, ignoring case", () => {
+    expect(findModelEntry(models, "alias:flagship")).toBe(models[0]);
+    expect(findModelEntry(models, "alias:FLAGSHIP")).toBe(models[0]);
+  });
+
+  it("matches concrete ids case-sensitively, as vendor strings", () => {
+    expect(findModelEntry(models, "GPT-4")).toBeUndefined();
+  });
+
+  it("returns undefined for a reference matching no entry", () => {
+    expect(findModelEntry(models, "alias:ghost")).toBeUndefined();
+    expect(findModelEntry(models, "ghost")).toBeUndefined();
+  });
+
+  it("never resolves an alias reference to a like-named concrete id", () => {
+    expect(findModelEntry(models, "alias:gpt-4")).toBeUndefined();
   });
 });

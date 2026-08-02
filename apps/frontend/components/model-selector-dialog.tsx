@@ -11,7 +11,7 @@ import {
 } from "./ai-elements/model-selector";
 import { AgentAvatar } from "./agent-avatar";
 import { Button } from "./ui/button";
-import { getModelIds } from "@/lib/model-config";
+import { findModelOption, getModelOptions } from "@/lib/model-config";
 
 const filterByKeywords = (
   _value: string,
@@ -27,6 +27,7 @@ interface ModelSelectorDialogProps {
   providers: Provider[];
   agentId: string;
   modelId: string;
+  providerId: string;
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   onModelChange: (value: string) => void;
@@ -37,11 +38,22 @@ export const ModelSelectorDialog = ({
   providers,
   agentId,
   modelId,
+  providerId,
   isOpen,
   onOpenChange,
   onModelChange,
 }: ModelSelectorDialogProps) => {
   const selectedAgent = agentId ? agents.find((a) => a.id === agentId) : null;
+
+  // Label the trigger with what the picker shows, never the stored reference —
+  // `alias:flagship` is a storage disambiguator and is never user-visible.
+  const selectedProvider = providerId
+    ? providers.find((p) => p.id === providerId)
+    : undefined;
+  const selectedModelLabel =
+    selectedProvider && modelId
+      ? findModelOption(selectedProvider, modelId)?.label
+      : undefined;
 
   return (
     <ModelSelector open={isOpen} onOpenChange={onOpenChange}>
@@ -57,7 +69,7 @@ export const ModelSelectorDialog = ({
           <span className="truncate">
             {agentId
               ? selectedAgent?.name || "Select model"
-              : modelId || "Select model"}
+              : selectedModelLabel || "Select model"}
           </span>
         </Button>
       </ModelSelectorTrigger>
@@ -89,18 +101,18 @@ export const ModelSelectorDialog = ({
           {/* Providers Group */}
           {providers.map((provider) => (
             <ModelSelectorGroup key={provider.id} heading={provider.name}>
-              {getModelIds(provider).map((model) => (
+              {getModelOptions(provider).map((model) => (
                 <ModelSelectorItem
-                  key={`provider:${provider.id}:${model}`}
+                  key={`provider:${provider.id}:${model.value}`}
                   className="cursor-pointer"
-                  value={`provider:${provider.id}:${model}`}
-                  keywords={[model, provider.name]}
+                  value={`provider:${provider.id}:${model.value}`}
+                  keywords={[model.label, provider.name]}
                   onSelect={() => {
-                    onModelChange(`provider:${provider.id}:${model}`);
+                    onModelChange(`provider:${provider.id}:${model.value}`);
                     onOpenChange(false);
                   }}
                 >
-                  {model}
+                  {model.label}
                 </ModelSelectorItem>
               ))}
             </ModelSelectorGroup>

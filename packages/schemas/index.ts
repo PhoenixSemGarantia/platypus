@@ -587,8 +587,142 @@ export type ProviderApiMode = z.infer<typeof providerApiModeSchema>;
 // the operator's responsibility — e.g. `*/*` on an OpenAI chat-completions
 // provider will forward a PDF raw and the endpoint will reject the turn. Use it
 // only on endpoints that genuinely accept those types natively.
+// --- Model aliases (issue #386, ADR-0017) ---
+//
+// A Model alias is a stable name a Provider gives one of its enabled models, so
+// an Agent or Chat can reference the name instead of the concrete vendor id and
+// repointing the alias upgrades every reference at once.
+//
+// The prefix marks REFERENCES, never DEFINITIONS. `modelIds[].alias` holds the
+// bare name (`flagship`); `agent.modelId` / `chat.modelId` hold
+// `alias:flagship`. Those two fields are the only places a string could mean
+// either thing, so they are the only ones that need marking — and the marking
+// makes a stored row readable on its own, without cross-referencing the
+// Provider. The prefix is never user-visible: an Org Admin types `flagship`.
+export const MODEL_ALIAS_PREFIX = "alias:";
+
+/**
+ * A model id that has been resolved against a Provider's `modelIds` — never a
+ * raw `agent.modelId` / `chat.modelId`, which may hold an alias reference.
+ *
+ * Nominal on purpose. Every bug this feature keeps producing has one shape:
+ * logic answering "did the model change?" or "which entry is this?" by
+ * string-comparing a stored reference. The backend resolver is the sole
+ * producer, the capability helpers and the provider SDK require it, so passing
+ * an unresolved reference into id-keyed code is a compile error rather than
+ * something an audit has to keep catching. Storage types stay plain `string`.
+ */
+export type ConcreteModelId = string & {
+  readonly __concreteModelId: unique symbol;
+};
+
+/** Whether a stored model reference names an alias rather than a concrete id. */
+export const isAliasReference = (reference: string): boolean =>
+  reference.startsWith(MODEL_ALIAS_PREFIX);
+
+/** The bare alias name in a reference, or null when it names a concrete id. */
+export const aliasNameFromReference = (reference: string): string | null =>
+  isAliasReference(reference)
+    ? reference.slice(MODEL_ALIAS_PREFIX.length)
+    : null;
+
+/** The narrow shape the reference helpers need — satisfied by `ModelConfig`. */
+type AliasableModel = { id: string; alias?: string };
+
+/** The reference a picker submits for an entry: its alias if it has one. */
+export const modelReferenceFor = (model: AliasableModel): string =>
+  model.alias ? `${MODEL_ALIAS_PREFIX}${model.alias}` : model.id;
+
+/** The label an alias-aware picker shows for an entry. */
+export const modelLabelFor = (model: AliasableModel): string =>
+  model.alias ?? model.id;
+
+/**
+ * Resolve a stored reference to the `modelIds` ENTRY it names.
+ *
+ * Entry-based rather than string-based so that aliasing an already-referenced
+ * model doesn't silently break selection: a stored bare `gpt-4` keeps matching
+ * the entry now labelled `flagship`, and `alias:flagship` matches the same
+ * entry. Alias names compare case-insensitively (the namespace rule below
+ * guarantees at most one match); concrete ids compare exactly, because they are
+ * case-sensitive vendor strings. An alias reference NEVER falls back to a
+ * like-named concrete id — that ambiguity is what the prefix exists to prevent.
+ */
+export const findModelEntry = <T extends AliasableModel>(
+  models: readonly T[],
+  reference: string,
+): T | undefined => {
+  const aliasName = aliasNameFromReference(reference);
+  if (aliasName !== null) {
+    const folded = aliasName.toLowerCase();
+    return models.find((m) => m.alias?.toLowerCase() === folded);
+  }
+  return models.find((m) => m.id === reference);
+};
+
+/**
+ * Resolve a stored reference to the concrete model id it names — the SOLE
+ * producer of `ConcreteModelId`, shared by the backend and frontend resolvers
+ * so the brand has exactly one mint. `undefined` means the reference names
+ * nothing this Provider has, which callers must treat as a hard error rather
+ * than falling back to another model.
+ *
+ * Takes already-normalized entries because the two sides normalize differently
+ * (the backend also fills provider-type passthrough defaults).
+ */
+export const resolveModelReference = (
+  models: readonly AliasableModel[],
+  reference: string,
+): ConcreteModelId | undefined => {
+  const entry = findModelEntry(models, reference);
+  return entry ? (entry.id as ConcreteModelId) : undefined;
+};
+
+/** What a de-migration rewrote when an alias stopped existing (see ADR-0017). */
+export type AliasRepoint = {
+  /** The alias name that no longer exists. */
+  alias: string;
+  /** The concrete id its references were rewritten to. */
+  modelId: string;
+  agents: number;
+  chats: number;
+};
+
+/**
+ * A Provider pointer-setting: always a concrete model id, never an alias.
+ *
+ * Schema-enforced rather than conventional. `handleEmbeddingConfigChange`
+ * decides whether to null every stored embedding by string-comparing the
+ * incoming `embeddingModelId` against the stored one, and the provider form
+ * gates its confirmation dialog on the same comparison — an alias would leave
+ * that string byte-identical across a repoint, skipping both the invalidation
+ * and the warning and leaving vectors from a superseded embedding model in
+ * place. Aliasing these three would save no edits anyway: each is referenced by
+ * exactly one row, the Provider that defines the alias. See ADR-0017.
+ */
+const pointerModelIdSchema = z
+  .string()
+  // Case-insensitive on purpose, unlike `isAliasReference`. That helper reads
+  // the exact storage format; this is a GUARD, so it rejects anything that
+  // merely looks like a reference — `Alias:flagship` would otherwise slip
+  // through as a bogus concrete id and fail the turn far from the typo.
+  .refine((value) => !value.toLowerCase().startsWith(MODEL_ALIAS_PREFIX), {
+    message: "Must be a concrete model id, not a Model alias",
+  });
+
 export const modelConfigSchema = z.object({
   id: z.string().min(1),
+  // The bare alias name. Absent means the model is referenced by its id.
+  // Whitespace is trimmed; the remaining name must be non-empty and must not
+  // itself look like a reference (no `alias:alias:foo`).
+  alias: z
+    .string()
+    .trim()
+    .min(1, "Alias cannot be empty")
+    .refine((value) => !value.toLowerCase().startsWith(MODEL_ALIAS_PREFIX), {
+      message: `Alias cannot begin with "${MODEL_ALIAS_PREFIX}"`,
+    })
+    .optional(),
   passthroughFileTypes: z.array(z.string()).default([]),
   maxExtractedTextChars: z.number().int().positive().optional(),
 });
@@ -608,7 +742,38 @@ export const modelIdsSchema = z
         ? { id: item, passthroughFileTypes: [] as string[] }
         : item,
     ),
-  );
+  )
+  // Aliases and concrete ids share one flat namespace per Provider. Because the
+  // `alias:` prefix is hidden in the UI, an alias named after a real model id
+  // would render a second, identical-looking picker option pointing somewhere
+  // else entirely. Compared case-insensitively (the maintainer's call on #386):
+  // two options differing only in case read as duplicates to a human.
+  //
+  // A whole-array invariant, so it cannot live on `modelConfigSchema`, and it
+  // sits after the `.transform()` so it sees normalized objects — which also
+  // means the provider form and the API validation get it for free.
+  //
+  // Only alias-vs-alias and alias-vs-id are checked. Duplicate concrete ids
+  // stay legal here and are collapsed by `dedupeModelConfigs` on the route, as
+  // they were before aliases existed.
+  .superRefine((models, ctx) => {
+    const idsFolded = new Set(models.map((m) => m.id.toLowerCase()));
+    const seenAliases = new Set<string>();
+    models.forEach((model, index) => {
+      if (!model.alias) return;
+      const folded = model.alias.toLowerCase();
+      const clashes = seenAliases.has(folded) || idsFolded.has(folded);
+      if (!clashes) {
+        seenAliases.add(folded);
+        return;
+      }
+      ctx.addIssue({
+        code: "custom",
+        path: [index, "alias"],
+        message: `Alias "${model.alias}" duplicates another model's alias or id`,
+      });
+    });
+  });
 
 // --- Model file-capability helpers (issue #328) ---
 //
@@ -929,9 +1094,14 @@ const providerBaseSchema = z.object({
   // Length-bounded against abuse; nullable so existing providers are unchanged.
   securityGuardrails: z.string().max(8000).nullable().optional(),
   modelIds: modelIdsSchema,
-  taskModelId: z.string(),
-  memoryExtractionModelId: z.string(),
-  embeddingModelId: z.string().nullable().optional(),
+  // The three pointer-settings hold a concrete model id and never an alias —
+  // enforced on the FIELD, not in a `providerSchema.refine`, because
+  // `providerCreateSchema` / `providerUpdateSchema` are `.pick()`ed off this
+  // base and so never see `providerSchema`'s refinements. The API routes
+  // validate with those two, which is exactly where the guard has to bite.
+  taskModelId: pointerModelIdSchema,
+  memoryExtractionModelId: pointerModelIdSchema,
+  embeddingModelId: pointerModelIdSchema.nullable().optional(),
   embeddingDimensions: z
     .number()
     .int()

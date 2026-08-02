@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { Mock } from "vitest";
-import type { Provider } from "@platypus/schemas";
+import type { ConcreteModelId, Provider } from "@platypus/schemas";
+
+/** These tests drive the SDK surface directly; the resolver is covered elsewhere. */
+const concrete = (id: string) => id as ConcreteModelId;
 
 type ProviderInstance = Mock<
   (modelId: string) => { modelId: string; _sentinel: boolean }
@@ -91,7 +94,7 @@ describe("openProvider", () => {
   });
 
   it("opens an OpenAI SDK client with provider config", () => {
-    openProvider(baseProvider).languageModel("gpt-4");
+    openProvider(baseProvider).languageModel(concrete("gpt-4"));
     expect(mockCreateOpenAI.creator).toHaveBeenCalledWith({
       baseURL: undefined,
       apiKey: "sk-test",
@@ -109,7 +112,7 @@ describe("openProvider", () => {
       apiMode: "chat",
       name: "vLLM Local",
       baseUrl: "http://localhost:8000/v1",
-    }).languageModel("qwen3");
+    }).languageModel(concrete("qwen3"));
     expect(mockCreateOpenAICompatible.creator).toHaveBeenCalledWith({
       name: "vLLM Local",
       baseURL: "http://localhost:8000/v1",
@@ -130,7 +133,7 @@ describe("openProvider", () => {
       ...baseProvider,
       apiMode: "chat",
       baseUrl: undefined,
-    }).languageModel("gpt-4");
+    }).languageModel(concrete("gpt-4"));
     expect(mockCreateOpenAICompatible.creator).toHaveBeenCalledWith(
       expect.objectContaining({ baseURL: "https://api.openai.com/v1" }),
     );
@@ -140,7 +143,7 @@ describe("openProvider", () => {
     openProvider({
       ...baseProvider,
       apiMode: "responses",
-    }).languageModel("gpt-4");
+    }).languageModel(concrete("gpt-4"));
     expect(mockCreateOpenAICompatible.creator).not.toHaveBeenCalled();
     expect(mockCreateOpenAI.instance).toHaveBeenCalledWith("gpt-4");
   });
@@ -149,7 +152,7 @@ describe("openProvider", () => {
     openProvider({
       ...baseProvider,
       providerType: "OpenRouter" as const,
-    }).languageModel("openai/gpt-4");
+    }).languageModel(concrete("openai/gpt-4"));
     expect(mockCreateOpenRouter.creator).toHaveBeenCalled();
   });
 
@@ -157,7 +160,7 @@ describe("openProvider", () => {
     openProvider({
       ...baseProvider,
       providerType: "Bedrock" as const,
-    }).languageModel("anthropic.claude-v2");
+    }).languageModel(concrete("anthropic.claude-v2"));
     expect(mockCreateAmazonBedrock.creator).toHaveBeenCalled();
   });
 
@@ -165,7 +168,7 @@ describe("openProvider", () => {
     openProvider({
       ...baseProvider,
       providerType: "Google" as const,
-    }).languageModel("gemini-pro");
+    }).languageModel(concrete("gemini-pro"));
     expect(mockCreateGoogleGenerativeAI.creator).toHaveBeenCalled();
   });
 
@@ -173,7 +176,7 @@ describe("openProvider", () => {
     openProvider({
       ...baseProvider,
       providerType: "Anthropic" as const,
-    }).languageModel("claude-3-opus-20240229");
+    }).languageModel(concrete("claude-3-opus-20240229"));
     expect(mockCreateAnthropic.creator).toHaveBeenCalled();
   });
 
