@@ -25,13 +25,20 @@ import {
 } from "@/components/ui/collapsible";
 import {
   Building,
+  ChevronRight,
   ChevronsUpDown,
   Eye,
   EyeOff,
+  Info,
   OctagonX,
   Plus,
   Trash2,
 } from "lucide-react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
   Select,
   SelectContent,
@@ -51,7 +58,7 @@ import {
   type Provider,
 } from "@platypus/schemas";
 import useSWR from "swr";
-import { fetcher, parseValidationErrors, joinUrl } from "@/lib/utils";
+import { cn, fetcher, parseValidationErrors, joinUrl } from "@/lib/utils";
 import {
   getModelConfigs,
   defaultPassthroughFileTypes,
@@ -60,6 +67,215 @@ import {
 import { toast } from "sonner";
 import { useBackendUrl } from "@/app/client-context";
 import { useAuth } from "@/components/auth-provider";
+
+/**
+ * Per-field help for a model row. The four fields each need a paragraph of
+ * explanation, which as one block under the list was a wall nobody read and
+ * left the reader matching sentences to fields by hand.
+ */
+const InfoHint = ({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) => (
+  // A short delay, so sweeping the pointer across a row of fields doesn't fire
+  // a tooltip at every icon on the way past.
+  <Tooltip delayDuration={400}>
+    <TooltipTrigger
+      // Focusable, so the help is reachable by keyboard and not hover-only.
+      type="button"
+      aria-label={`About ${label}`}
+      className="text-muted-foreground hover:text-foreground focus-visible:border-ring focus-visible:ring-ring/50 rounded-full outline-none focus-visible:ring-[3px]"
+    >
+      <Info className="size-3.5" />
+    </TooltipTrigger>
+    <TooltipContent className="max-w-xs">{children}</TooltipContent>
+  </Tooltip>
+);
+
+const ModelField = ({
+  htmlFor,
+  label,
+  hint,
+  children,
+}: {
+  htmlFor: string;
+  label: string;
+  hint: React.ReactNode;
+  children: React.ReactNode;
+}) => (
+  <div className="flex flex-col gap-1">
+    <div className="flex items-center gap-1.5">
+      <FieldLabel htmlFor={htmlFor} className="text-xs text-muted-foreground">
+        {label}
+      </FieldLabel>
+      <InfoHint label={label}>{hint}</InfoHint>
+    </div>
+    {children}
+  </div>
+);
+
+/**
+ * One entry in the Models list. The file-handling settings are collapsed by
+ * default — most models take the provider-type defaults, and two extra inputs
+ * per row turned a ten-model provider into a wall. A row that has either value
+ * set opens expanded, so nothing configured is hidden from the reader.
+ */
+const ModelRow = ({
+  model,
+  index,
+  disabled,
+  fileTypesPlaceholder,
+  onChange,
+  onRemove,
+}: {
+  model: ModelConfigView;
+  index: number;
+  disabled: boolean;
+  fileTypesPlaceholder: string;
+  onChange: (patch: Partial<ModelConfigView>) => void;
+  onRemove: () => void;
+}) => {
+  const [showAdvanced, setShowAdvanced] = useState(
+    model.passthroughFileTypes.length > 0 ||
+      model.maxExtractedTextChars !== undefined,
+  );
+
+  // Passthrough types are edited as a comma-separated string of media types.
+  const parsePassthroughTypes = (value: string): string[] =>
+    value
+      .split(",")
+      .map((t) => t.trim())
+      .filter((t) => t.length > 0);
+
+  // An empty (or nonsense) cap means "use the shared default" rather than 0 —
+  // sending 0 would truncate every extracted document to nothing (issue #342).
+  const parseExtractedTextCap = (value: string): number | undefined => {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+  };
+
+  return (
+    <div className="flex items-start gap-2 rounded-md border p-3">
+      <div className="flex flex-1 flex-col gap-3">
+        <ModelField
+          htmlFor={`model-id-${index}`}
+          label="Model ID"
+          hint="The model id sent to the vendor, exactly as the vendor names it."
+        >
+          <Input
+            id={`model-id-${index}`}
+            placeholder="e.g. gpt-4o"
+            value={model.id}
+            onChange={(e) => onChange({ id: e.target.value })}
+            disabled={disabled}
+          />
+        </ModelField>
+
+        <ModelField
+          htmlFor={`alias-${index}`}
+          label="Alias"
+          hint="Optional stable name Agents and Chats can select instead of the model ID. Pointing the alias at a newer model upgrades all of them at once."
+        >
+          <Input
+            id={`alias-${index}`}
+            placeholder="e.g. flagship"
+            value={model.alias ?? ""}
+            onChange={(e) =>
+              // An empty field means "no alias". Anything else goes to the
+              // schema as typed, so a whitespace-only name is rejected rather
+              // than silently dropped.
+              onChange({
+                alias: e.target.value === "" ? undefined : e.target.value,
+              })
+            }
+            disabled={disabled}
+          />
+        </ModelField>
+
+        <Collapsible open={showAdvanced} onOpenChange={setShowAdvanced}>
+          <CollapsibleTrigger
+            // Not a ghost Button: the trigger sits flush with the left edge of
+            // the inputs above it, so it takes no horizontal padding and no
+            // hover fill. `h-9` matches an Input, keeping the hit box the size
+            // of the fields it sits among rather than the size of its text.
+            className="flex h-9 w-fit items-center gap-1 rounded-sm text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          >
+            <ChevronRight
+              className={cn(
+                "size-3.5 transition-transform",
+                showAdvanced && "rotate-90",
+              )}
+            />
+            Advanced
+          </CollapsibleTrigger>
+          <CollapsibleContent className="flex flex-col gap-3 pt-3">
+            <ModelField
+              htmlFor={`passthrough-${index}`}
+              label="Native file types"
+              hint={
+                <>
+                  Media types this model ingests <strong>natively</strong>,
+                  comma-separated (wildcards like <code>image/*</code> allowed).
+                  Other types are converted to text where possible, so this is a
+                  capability setting, <strong>not a security filter</strong>.
+                  Leave empty to use the provider-type default.
+                </>
+              }
+            >
+              <Input
+                id={`passthrough-${index}`}
+                placeholder={fileTypesPlaceholder}
+                value={model.passthroughFileTypes.join(", ")}
+                onChange={(e) =>
+                  onChange({
+                    passthroughFileTypes: parsePassthroughTypes(e.target.value),
+                  })
+                }
+                disabled={disabled}
+              />
+            </ModelField>
+
+            <ModelField
+              htmlFor={`extracted-chars-${index}`}
+              label="Max extracted text characters"
+              hint="How much extracted document text a single file may add to a turn. Protects a small context window. Leave empty for the default."
+            >
+              <Input
+                id={`extracted-chars-${index}`}
+                type="number"
+                min={1}
+                placeholder={String(DEFAULT_MAX_EXTRACTED_TEXT_CHARS)}
+                value={model.maxExtractedTextChars ?? ""}
+                onChange={(e) =>
+                  onChange({
+                    maxExtractedTextChars: parseExtractedTextCap(
+                      e.target.value,
+                    ),
+                  })
+                }
+                disabled={disabled}
+              />
+            </ModelField>
+          </CollapsibleContent>
+        </Collapsible>
+      </div>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="shrink-0"
+        aria-label={`Remove model ${index + 1}`}
+        onClick={onRemove}
+        disabled={disabled}
+      >
+        <Trash2 />
+      </Button>
+    </div>
+  );
+};
 
 type ProviderFormData = Omit<
   Provider,
@@ -291,20 +507,6 @@ const ProviderForm = ({
       ...prev,
       modelIds: prev.modelIds.filter((_, i) => i !== index),
     }));
-  };
-
-  // Passthrough types are edited as a comma-separated string of media types.
-  const parsePassthroughTypes = (value: string): string[] =>
-    value
-      .split(",")
-      .map((t) => t.trim())
-      .filter((t) => t.length > 0);
-
-  // An empty (or nonsense) cap means "use the shared default" rather than 0 —
-  // sending 0 would truncate every extracted document to nothing (issue #342).
-  const parseExtractedTextCap = (value: string): number | undefined => {
-    const parsed = Number.parseInt(value, 10);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
   };
 
   // Placeholder for the native-file-types input: the provider-type default an
@@ -628,102 +830,15 @@ const ProviderForm = ({
                 </p>
               )}
               {formData.modelIds.map((model, index) => (
-                <div
+                <ModelRow
                   key={index}
-                  className="flex items-start gap-2 rounded-md border p-3"
-                >
-                  <div className="flex flex-1 flex-col gap-2">
-                    <Input
-                      aria-label={`Model ID ${index + 1}`}
-                      placeholder="Model ID (e.g. gpt-4o)"
-                      value={model.id}
-                      onChange={(e) =>
-                        updateModel(index, { id: e.target.value })
-                      }
-                      disabled={isSubmitting || isReadOnly}
-                    />
-                    <div className="flex flex-col gap-1">
-                      <FieldLabel
-                        htmlFor={`alias-${index}`}
-                        className="text-xs text-muted-foreground"
-                      >
-                        Alias
-                      </FieldLabel>
-                      <Input
-                        id={`alias-${index}`}
-                        placeholder="e.g. flagship"
-                        value={model.alias ?? ""}
-                        onChange={(e) =>
-                          // An empty field means "no alias". Anything else goes
-                          // to the schema as typed, so a whitespace-only name is
-                          // rejected rather than silently dropped.
-                          updateModel(index, {
-                            alias:
-                              e.target.value === ""
-                                ? undefined
-                                : e.target.value,
-                          })
-                        }
-                        disabled={isSubmitting || isReadOnly}
-                      />
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      <FieldLabel
-                        htmlFor={`passthrough-${index}`}
-                        className="text-xs text-muted-foreground"
-                      >
-                        Native file types
-                      </FieldLabel>
-                      <Input
-                        id={`passthrough-${index}`}
-                        placeholder={defaultFileTypesPlaceholder}
-                        value={model.passthroughFileTypes.join(", ")}
-                        onChange={(e) =>
-                          updateModel(index, {
-                            passthroughFileTypes: parsePassthroughTypes(
-                              e.target.value,
-                            ),
-                          })
-                        }
-                        disabled={isSubmitting || isReadOnly}
-                      />
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      <FieldLabel
-                        htmlFor={`extracted-chars-${index}`}
-                        className="text-xs text-muted-foreground"
-                      >
-                        Max extracted text characters
-                      </FieldLabel>
-                      <Input
-                        id={`extracted-chars-${index}`}
-                        type="number"
-                        min={1}
-                        placeholder={String(DEFAULT_MAX_EXTRACTED_TEXT_CHARS)}
-                        value={model.maxExtractedTextChars ?? ""}
-                        onChange={(e) =>
-                          updateModel(index, {
-                            maxExtractedTextChars: parseExtractedTextCap(
-                              e.target.value,
-                            ),
-                          })
-                        }
-                        disabled={isSubmitting || isReadOnly}
-                      />
-                    </div>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="shrink-0"
-                    aria-label={`Remove model ${index + 1}`}
-                    onClick={() => removeModel(index)}
-                    disabled={isSubmitting || isReadOnly}
-                  >
-                    <Trash2 />
-                  </Button>
-                </div>
+                  model={model}
+                  index={index}
+                  disabled={isSubmitting || isReadOnly}
+                  fileTypesPlaceholder={defaultFileTypesPlaceholder}
+                  onChange={(patch) => updateModel(index, patch)}
+                  onRemove={() => removeModel(index)}
+                />
               ))}
             </div>
             {!isReadOnly && (
@@ -739,17 +854,8 @@ const ProviderForm = ({
               </Button>
             )}
             <FieldDescription>
-              Models this provider exposes. For each model, list the file media
-              types it can ingest <strong>natively</strong> (comma-separated,
-              wildcards like <code>image/*</code> allowed). Files of other types
-              are converted to text where possible — text and code files are
-              inlined, PDF and DOCX are extracted — so this is a capability
-              setting, <strong>not a security filter</strong>. Leave the types
-              empty to use the provider-type default. The character cap limits
-              how much extracted document text a single file may add, protecting
-              a small context window. An optional alias gives a model a stable
-              name Agents and Chats can select instead of the model ID, so
-              pointing the alias at a newer model upgrades all of them at once.
+              The models this provider exposes. Agents and Chats choose from
+              this list.
             </FieldDescription>
             {validationErrors.modelIds && (
               <FieldError>{validationErrors.modelIds}</FieldError>
