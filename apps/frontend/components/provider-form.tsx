@@ -249,7 +249,22 @@ const ProviderForm = ({
 
   // --- Per-model config editing (issue #328) ---
 
+  // The submit button is disabled while ANY validation error is outstanding, so
+  // every edit to the model list has to retract the list's error — otherwise
+  // fixing the mistake leaves the form unsubmittable and the only ways out are
+  // unrelated. Reachable since Model aliases (#386) gave `modelIds` rules a
+  // user can plausibly break, like naming two models the same thing.
+  const clearModelIdsError = () => {
+    if (!validationErrors.modelIds) return;
+    setValidationErrors((prev) => {
+      const next = { ...prev };
+      delete next.modelIds;
+      return next;
+    });
+  };
+
   const updateModel = (index: number, patch: Partial<ModelConfigView>) => {
+    clearModelIdsError();
     setFormData((prev) => ({
       ...prev,
       modelIds: prev.modelIds.map((m, i) =>
@@ -259,13 +274,7 @@ const ProviderForm = ({
   };
 
   const addModel = () => {
-    if (validationErrors.modelIds) {
-      setValidationErrors((prev) => {
-        const next = { ...prev };
-        delete next.modelIds;
-        return next;
-      });
-    }
+    clearModelIdsError();
     setFormData((prev) => ({
       ...prev,
       // Leave file types empty: an empty set inherits the provider-type default
@@ -277,6 +286,7 @@ const ProviderForm = ({
   };
 
   const removeModel = (index: number) => {
+    clearModelIdsError();
     setFormData((prev) => ({
       ...prev,
       modelIds: prev.modelIds.filter((_, i) => i !== index),
@@ -321,8 +331,10 @@ const ProviderForm = ({
         repoint.chats > 0 ? count(repoint.chats, "Chat") : null,
       ].filter(Boolean);
       if (moved.length === 0) continue;
+      // Phrased so the verb never has to agree with the count: "1 Agent" and
+      // "2 Agents and 1 Chat" both read correctly after "repointed".
       toast.info(
-        `Alias "${repoint.alias}" is gone — ${moved.join(" and ")} now point at ${repoint.modelId}.`,
+        `Alias "${repoint.alias}" is gone — repointed ${moved.join(" and ")} to ${repoint.modelId}.`,
         { duration: 10000 },
       );
     }
