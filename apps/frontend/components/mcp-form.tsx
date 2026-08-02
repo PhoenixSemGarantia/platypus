@@ -26,7 +26,12 @@ import { useResetOnChange } from "@/hooks/use-reset-on-change";
 import { useRouter } from "next/navigation";
 import { type MCP } from "@platypus/schemas";
 import useSWR from "swr";
-import { fetcher, parseValidationErrors, joinUrl } from "@/lib/utils";
+import {
+  clearFieldError,
+  fetcher,
+  parseValidationErrors,
+  joinUrl,
+} from "@/lib/utils";
 import { toast } from "sonner";
 import { useBackendUrl } from "@/app/client-context";
 import { useAuth } from "@/components/auth-provider";
@@ -143,14 +148,9 @@ const McpForm = ({
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { id, value } = e.target;
 
-    // Clear validation error for this field
-    if (validationErrors[id]) {
-      setValidationErrors((prev) => {
-        const newErrors = { ...prev };
-        delete newErrors[id];
-        return newErrors;
-      });
-    }
+    // Clear the error for this field, including any reported against a path
+    // inside it.
+    setValidationErrors((prev) => clearFieldError(prev, id));
 
     setFormData((prevData) => ({
       ...prevData,
@@ -162,14 +162,9 @@ const McpForm = ({
   };
 
   const handleSelectChange = (id: string, value: string) => {
-    // Clear validation error for this field
-    if (validationErrors[id]) {
-      setValidationErrors((prev) => {
-        const newErrors = { ...prev };
-        delete newErrors[id];
-        return newErrors;
-      });
-    }
+    // Clear the error for this field, including any reported against a path
+    // inside it.
+    setValidationErrors((prev) => clearFieldError(prev, id));
 
     // Clear bearerToken error when authType changes
     if (id === "authType" && validationErrors.bearerToken) {

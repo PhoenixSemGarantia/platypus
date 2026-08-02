@@ -58,7 +58,13 @@ import {
   type Provider,
 } from "@platypus/schemas";
 import useSWR from "swr";
-import { cn, fetcher, parseValidationErrors, joinUrl } from "@/lib/utils";
+import {
+  clearFieldError,
+  cn,
+  fetcher,
+  parseValidationErrors,
+  joinUrl,
+} from "@/lib/utils";
 import {
   getModelConfigs,
   defaultPassthroughFileTypes,
@@ -99,14 +105,16 @@ const ModelField = ({
   htmlFor,
   label,
   hint,
+  error,
   children,
 }: {
   htmlFor: string;
   label: string;
   hint: React.ReactNode;
+  error?: string;
   children: React.ReactNode;
 }) => (
-  <div className="flex flex-col gap-1">
+  <div className="flex flex-col gap-1" data-invalid={!!error}>
     <div className="flex items-center gap-1.5">
       <FieldLabel htmlFor={htmlFor} className="text-xs text-muted-foreground">
         {label}
@@ -114,8 +122,12 @@ const ModelField = ({
       <InfoHint label={label}>{hint}</InfoHint>
     </div>
     {children}
+    {error && <FieldError>{error}</FieldError>}
   </div>
 );
+
+/** Errors reported against one model row, split by the field each belongs to. */
+type ModelRowErrors = { row?: string; fields: Record<string, string> };
 
 /**
  * One entry in the Models list. The file-handling settings are collapsed by
@@ -128,6 +140,7 @@ const ModelRow = ({
   index,
   disabled,
   fileTypesPlaceholder,
+  errors,
   onChange,
   onRemove,
 }: {
@@ -135,6 +148,7 @@ const ModelRow = ({
   index: number;
   disabled: boolean;
   fileTypesPlaceholder: string;
+  errors: ModelRowErrors;
   onChange: (patch: Partial<ModelConfigView>) => void;
   onRemove: () => void;
 }) => {
@@ -142,6 +156,13 @@ const ModelRow = ({
     model.passthroughFileTypes.length > 0 ||
       model.maxExtractedTextChars !== undefined,
   );
+
+  // A rejected row is no use collapsed: the reader has to see the field the
+  // server is complaining about.
+  const hasAdvancedError =
+    !!errors.fields.passthroughFileTypes ||
+    !!errors.fields.maxExtractedTextChars;
+  const advancedOpen = showAdvanced || hasAdvancedError;
 
   // Passthrough types are edited as a comma-separated string of media types.
   const parsePassthroughTypes = (value: string): string[] =>
@@ -160,10 +181,13 @@ const ModelRow = ({
   return (
     <div className="flex items-start gap-2 rounded-md border p-3">
       <div className="flex flex-1 flex-col gap-3">
+        {errors.row && <FieldError>{errors.row}</FieldError>}
+
         <ModelField
           htmlFor={`model-id-${index}`}
           label="Model ID"
           hint="The model id sent to the vendor, exactly as the vendor names it."
+          error={errors.fields.id}
         >
           <Input
             id={`model-id-${index}`}
@@ -171,6 +195,7 @@ const ModelRow = ({
             value={model.id}
             onChange={(e) => onChange({ id: e.target.value })}
             disabled={disabled}
+            aria-invalid={!!errors.fields.id}
           />
         </ModelField>
 
@@ -178,11 +203,13 @@ const ModelRow = ({
           htmlFor={`alias-${index}`}
           label="Alias"
           hint="Optional stable name Agents and Chats can select instead of the model ID. Pointing the alias at a newer model upgrades all of them at once."
+          error={errors.fields.alias}
         >
           <Input
             id={`alias-${index}`}
             placeholder="e.g. flagship"
             value={model.alias ?? ""}
+            aria-invalid={!!errors.fields.alias}
             onChange={(e) =>
               // An empty field means "no alias". Anything else goes to the
               // schema as typed, so a whitespace-only name is rejected rather
@@ -195,7 +222,7 @@ const ModelRow = ({
           />
         </ModelField>
 
-        <Collapsible open={showAdvanced} onOpenChange={setShowAdvanced}>
+        <Collapsible open={advancedOpen} onOpenChange={setShowAdvanced}>
           <CollapsibleTrigger
             // Not a ghost Button: the trigger sits flush with the left edge of
             // the inputs above it, so it takes no horizontal padding and no
@@ -206,7 +233,7 @@ const ModelRow = ({
             <ChevronRight
               className={cn(
                 "size-3.5 transition-transform",
-                showAdvanced && "rotate-90",
+                advancedOpen && "rotate-90",
               )}
             />
             Advanced
@@ -224,6 +251,7 @@ const ModelRow = ({
                   Leave empty to use the provider-type default.
                 </>
               }
+              error={errors.fields.passthroughFileTypes}
             >
               <Input
                 id={`passthrough-${index}`}
@@ -242,6 +270,7 @@ const ModelRow = ({
               htmlFor={`extracted-chars-${index}`}
               label="Max extracted text characters"
               hint="How much extracted document text a single file may add to a turn. Protects a small context window. Leave empty for the default."
+              error={errors.fields.maxExtractedTextChars}
             >
               <Input
                 id={`extracted-chars-${index}`}
@@ -405,13 +434,7 @@ const ProviderForm = ({
     const { id, value } = e.target;
 
     // Clear validation error for this field
-    if (validationErrors[id]) {
-      setValidationErrors((prev) => {
-        const newErrors = { ...prev };
-        delete newErrors[id];
-        return newErrors;
-      });
-    }
+    setValidationErrors((prev) => clearFieldError(prev, id));
     setError(null);
 
     if (id === "headers") {
@@ -448,13 +471,7 @@ const ProviderForm = ({
 
   const handleSelectChange = (id: string, value: string) => {
     // Clear validation error for this field
-    if (validationErrors[id]) {
-      setValidationErrors((prev) => {
-        const newErrors = { ...prev };
-        delete newErrors[id];
-        return newErrors;
-      });
-    }
+    setValidationErrors((prev) => clearFieldError(prev, id));
     setError(null);
 
     setFormData((prevData) => {
@@ -465,19 +482,36 @@ const ProviderForm = ({
 
   // --- Per-model config editing (issue #328) ---
 
-  // The submit button is disabled while ANY validation error is outstanding, so
-  // every edit to the model list has to retract the list's error — otherwise
-  // fixing the mistake leaves the form unsubmittable and the only ways out are
-  // unrelated. Reachable since Model aliases (#386) gave `modelIds` rules a
-  // user can plausibly break, like naming two models the same thing.
+  // Retracts the list's error and every row error under it, so a stale message
+  // doesn't sit under a row the user has already corrected.
   const clearModelIdsError = () => {
-    if (!validationErrors.modelIds) return;
-    setValidationErrors((prev) => {
-      const next = { ...prev };
-      delete next.modelIds;
-      return next;
-    });
+    setValidationErrors((prev) => clearFieldError(prev, "modelIds"));
   };
+
+  /**
+   * Split the outstanding errors for one row out of the flat map. A row rule
+   * reports as `modelIds.<index>.<field>`; `modelIds.<index>` is the row as a
+   * whole.
+   */
+  const errorsForRow = (index: number): ModelRowErrors => {
+    const prefix = `modelIds.${index}`;
+    const result: ModelRowErrors = { fields: {} };
+    for (const [key, message] of Object.entries(validationErrors)) {
+      if (key === prefix) result.row = message;
+      else if (key.startsWith(`${prefix}.`))
+        result.fields[key.slice(prefix.length + 1)] = message;
+    }
+    return result;
+  };
+
+  // `parseValidationErrors` mirrors every row error onto `modelIds` as well, so
+  // a form that only knows flat names still shows something. This one knows
+  // better: when a row is showing the message, the list's own slot stays empty
+  // rather than repeating it.
+  const hasRowError = Object.keys(validationErrors).some((key) =>
+    key.startsWith("modelIds."),
+  );
+  const modelIdsError = hasRowError ? undefined : validationErrors.modelIds;
 
   const updateModel = (index: number, patch: Partial<ModelConfigView>) => {
     clearModelIdsError();
@@ -821,7 +855,10 @@ const ProviderForm = ({
             )}
           </Field>
 
-          <Field data-invalid={!!validationErrors.modelIds}>
+          {/* Invalid only for an error against the list itself: `data-invalid`
+              reddens every descendant, which on a row error would paint the
+              innocent rows the same colour as the guilty one. */}
+          <Field data-invalid={!!modelIdsError}>
             <FieldLabel htmlFor="modelIds">Models</FieldLabel>
             <div className="flex flex-col gap-3">
               {formData.modelIds.length === 0 && (
@@ -836,6 +873,7 @@ const ProviderForm = ({
                   index={index}
                   disabled={isSubmitting || isReadOnly}
                   fileTypesPlaceholder={defaultFileTypesPlaceholder}
+                  errors={errorsForRow(index)}
                   onChange={(patch) => updateModel(index, patch)}
                   onRemove={() => removeModel(index)}
                 />
@@ -857,9 +895,7 @@ const ProviderForm = ({
               The models this provider exposes. Agents and Chats choose from
               this list.
             </FieldDescription>
-            {validationErrors.modelIds && (
-              <FieldError>{validationErrors.modelIds}</FieldError>
-            )}
+            {modelIdsError && <FieldError>{modelIdsError}</FieldError>}
           </Field>
 
           <Field data-invalid={!!validationErrors.taskModelId}>
@@ -1145,13 +1181,14 @@ const ProviderForm = ({
         <div className="flex gap-2">
           <Button
             className="cursor-pointer"
+            // Deliberately NOT gated on `validationErrors`. Those come back
+            // from the server, and every key needs a matching path that
+            // retracts it; one that has none disables Save forever, with no
+            // way out but reloading. Re-submitting simply re-validates. The
+            // JSON errors below are different — they are computed here as the
+            // user types and always clear themselves.
             onClick={handleSubmit}
-            disabled={
-              isSubmitting ||
-              !!headersError ||
-              !!extraBodyError ||
-              Object.keys(validationErrors).length > 0
-            }
+            disabled={isSubmitting || !!headersError || !!extraBodyError}
           >
             {providerId ? "Update" : "Save"}
           </Button>

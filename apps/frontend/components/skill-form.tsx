@@ -20,7 +20,12 @@ import { useRouter } from "next/navigation";
 import { Trash2 } from "lucide-react";
 import { type Skill, type Agent } from "@platypus/schemas";
 import useSWR from "swr";
-import { fetcher, parseValidationErrors, joinUrl } from "@/lib/utils";
+import {
+  clearFieldError,
+  fetcher,
+  parseValidationErrors,
+  joinUrl,
+} from "@/lib/utils";
 import { useBackendUrl } from "@/app/client-context";
 import { useAuth } from "@/components/auth-provider";
 import { AgentAvatar } from "@/components/agent-avatar";
@@ -114,14 +119,9 @@ const SkillForm = ({
   ) => {
     const { id, value } = e.target;
 
-    // Clear validation error for this field
-    if (validationErrors[id]) {
-      setValidationErrors((prev) => {
-        const newErrors = { ...prev };
-        delete newErrors[id];
-        return newErrors;
-      });
-    }
+    // Clear the error for this field, including any reported against a path
+    // inside it.
+    setValidationErrors((prev) => clearFieldError(prev, id));
 
     const nextValue = id === "name" ? value.toLowerCase() : value;
 
