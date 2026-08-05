@@ -160,6 +160,30 @@ Everything else is absent:
   for a coordinator plus a flat set of specialists, not deep chains.
 </Callout>
 
+### When a sub-agent can't run
+
+Selecting a sub-agent in the form is not a guarantee it will be there at run
+time. Each one is built fresh on every turn, and that build fails if its
+Provider no longer resolves in this Workspace — a Shared Provider that was
+detached, say — or if its pinned model is gone from the Provider's model list.
+
+A sub-agent that fails to build gets **no delegate tool for that turn**. The
+parent Agent is told which ones are unavailable and why, so ask it and it will
+tell you. The switch stays flipped in the form either way: the assignment is
+still saved, it just can't be honoured right now. Fix the sub-agent's Provider
+or model and the tool comes back on the next turn.
+
+<Callout type="warning">
+  "The Agent says it can't reach its sub-agent, but I can see the switch is on"
+  is the trap. The **Sub-Agents** card shows what you assigned, not what loaded.
+  Open the sub-agent itself and check its Provider and model still resolve.
+</Callout>
+
+If the sub-agent builds but its run then fails part-way, the delegate tool
+reports an **error** rather than a short answer. Anything the sub-agent had
+written before the failure comes back with it, so the parent can say what was
+done and what wasn't instead of passing a half-finished reply off as the result.
+
 Click **Save** to create the Agent. You can edit every field later from the same
 form.
 

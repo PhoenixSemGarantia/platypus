@@ -29,7 +29,7 @@ import { useMemo, type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 
 type SubAgentActivityEntry = {
-  type: "tool-call" | "thinking" | "generating";
+  type: "tool-call" | "thinking" | "generating" | "failed";
   toolName?: string;
   status: "running" | "completed" | "error";
   error?: string;
@@ -135,6 +135,11 @@ const entryConfig: Record<
     icon: PenLineIcon,
     activeColor: "text-amber-500",
     label: () => "Generating response\u2026",
+  },
+  failed: {
+    icon: XCircleIcon,
+    activeColor: "text-red-500",
+    label: () => "Run failed",
   },
 };
 

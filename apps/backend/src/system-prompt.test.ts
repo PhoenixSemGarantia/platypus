@@ -318,6 +318,38 @@ describe("renderSystemPrompt — sub-agents", () => {
     expect(out).toContain("`delegateToHelper`");
     expect(out).toContain("No description provided");
   });
+
+  it("names sub-agents that failed to load as unavailable, with the reason", () => {
+    const ctx = baseCtx();
+    ctx.subAgents = [{ name: "Obsidian Agent", description: "Notes." }];
+    ctx.unavailableSubAgents = [
+      {
+        name: "Dashboard Agent",
+        reason: "Provider 'p1' not found for sub-agent",
+      },
+    ];
+    const out = renderSystemPrompt(ctx);
+
+    expect(out).toContain("## Unavailable Sub-Agents");
+    expect(out).toContain(
+      "- **Dashboard Agent**: Provider 'p1' not found for sub-agent — no `delegateToDashboardAgent` tool exists this turn.",
+    );
+    // The working one is still advertised normally.
+    expect(out).toContain(
+      "- **Obsidian Agent**: Use the `delegateToObsidianAgent` tool. Notes.",
+    );
+  });
+
+  it("emits the unavailable block even when no sub-agent loaded at all", () => {
+    const ctx = baseCtx();
+    ctx.subAgents = [];
+    ctx.unavailableSubAgents = [{ name: "Kanban Agent" }];
+    const out = renderSystemPrompt(ctx);
+
+    expect(out).not.toContain("## Available Sub-Agents");
+    expect(out).toContain("## Unavailable Sub-Agents");
+    expect(out).toContain("- **Kanban Agent**: failed to load");
+  });
 });
 
 describe("renderSystemPrompt — headless run mode", () => {
