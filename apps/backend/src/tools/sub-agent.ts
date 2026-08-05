@@ -8,6 +8,7 @@ import {
 import { z } from "zod";
 import { logger } from "../logger.ts";
 import { renderSecurityGuardrails } from "../security-prompt.ts";
+import { withNormalizedResults } from "../services/tool-result.ts";
 
 /**
  * Single source of truth for the sub-agent delegation tool name.
@@ -23,7 +24,7 @@ export const subAgentToolName = (subAgent: { name: string }): string =>
  * Activity log entry for a sub-agent's execution.
  */
 type SubAgentActivityEntry = {
-  type: "tool-call" | "thinking" | "generating";
+  type: "tool-call" | "thinking" | "generating" | "failed";
   toolName?: string;
   status: "running" | "completed" | "error";
   error?: string;
@@ -47,6 +48,21 @@ type ToolResultSummary = { toolName?: string; output: unknown };
  * than silently empty. Returns "" when there is no tool result to summarize —
  * `toModelOutput` then supplies its own generic fallback.
  */
+/**
+ * Renders an unknown thrown/streamed value as a one-line message. `String(...)`
+ * alone turns a plain object into "[object Object]", which is exactly the kind
+ * of uninformative error this module exists to stop producing.
+ */
+const describeError = (error: unknown): string => {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  try {
+    return JSON.stringify(error) ?? String(error);
+  } catch {
+    return String(error);
+  }
+};
+
 const summarizeToolResult = (
   toolResult: ToolResultSummary | undefined,
 ): string => {
@@ -117,7 +133,11 @@ export const createSubAgentTool = (options: SubAgentToolOptions) => {
   const agent = new ToolLoopAgent({
     model,
     instructions: composedInstructions,
-    tools,
+    // The sub-agent's own tools never pass through the parent turn's
+    // `wrapToolsWithBump`, so #321 recurs one level down: a raw Drizzle `Date`
+    // in a tool result fails the sub-agent's next-step prompt validation and
+    // kills its stream mid-run.
+    tools: withNormalizedResults(tools),
     stopWhen: [stepCountIs(maxSteps)],
   });
 
@@ -147,6 +167,11 @@ export const createSubAgentTool = (options: SubAgentToolOptions) => {
         // Last tool result, used to synthesize a meaningful fallback when the
         // sub-agent produced no assistant text at all.
         let lastToolResult: ToolResultSummary | undefined;
+        // Set when the sub-agent's own stream reports a failure. The stream
+        // ENDS NORMALLY after an error part, so without this the generator
+        // would return whatever text had accumulated — typically the model's
+        // opening preamble — and the parent would read a crash as an answer.
+        let streamFailure: string | undefined;
 
         const completeLastRunning = (type: SubAgentActivityEntry["type"]) => {
           const entry = entries.findLast(
@@ -205,6 +230,24 @@ export const createSubAgentTool = (options: SubAgentToolOptions) => {
             case "text-end":
               completeLastRunning("generating");
               break;
+            case "error":
+              streamFailure = describeError(part.error);
+              entries.push({
+                type: "failed",
+                status: "error",
+                error: streamFailure,
+              });
+              break;
+            case "abort":
+              streamFailure = part.reason
+                ? `Stopped before finishing: ${part.reason}`
+                : "Stopped before finishing.";
+              entries.push({
+                type: "failed",
+                status: "error",
+                error: streamFailure,
+              });
+              break;
             default:
               changed = false;
           }
@@ -219,6 +262,24 @@ export const createSubAgentTool = (options: SubAgentToolOptions) => {
           .map((t) => t.trim())
           .filter(Boolean)
           .join("\n\n");
+
+        // Throw rather than return: a failed delegation must reach the parent
+        // as a tool error, not as a short answer it might summarize and pass
+        // off to the user as the sub-agent's finding. Any partial text rides
+        // along in the message so the work isn't lost.
+        if (streamFailure) {
+          logger.error(
+            { subAgentName: name, error: streamFailure },
+            `Sub-agent "${name}" stream failed`,
+          );
+          throw new Error(
+            `Sub-agent "${name}" did not complete: ${streamFailure}` +
+              (aggregatedText
+                ? `\n\nPartial output before the failure:\n${aggregatedText}`
+                : ""),
+          );
+        }
+
         const text = aggregatedText || summarizeToolResult(lastToolResult);
 
         // Yield (not return) the final value with text — the SDK's executeTool
@@ -234,13 +295,24 @@ export const createSubAgentTool = (options: SubAgentToolOptions) => {
 };
 
 /**
+ * A sub-agent that could not be turned into a callable tool this turn.
+ * Returned — not just logged — because the caller has to keep the system
+ * prompt in step with the toolset: describing a delegation tool that was never
+ * registered makes the model call it and take an `AI_NoSuchToolError`.
+ */
+export type SubAgentFailure = { id: string; name: string; reason: string };
+
+/**
  * Creates sub-agent tools for all sub-agents assigned to a parent agent.
  * Each sub-agent becomes its own tool that the parent can call.
+ *
+ * A sub-agent that fails to initialize is skipped rather than failing the whole
+ * turn, and is reported in `failures` so the caller can stop advertising it.
  *
  * @param subAgents List of sub-agent configurations from the database
  * @param createModelFn Factory function to create a model instance for a sub-agent
  * @param loadToolsFn Async function to load tools for a sub-agent
- * @returns Array of {toolName, tool} objects to add to the parent's tools
+ * @returns The callable tools keyed by tool name, plus the sub-agents that failed
  */
 export const createSubAgentTools = async (
   subAgents: Array<{
@@ -262,8 +334,12 @@ export const createSubAgentTools = async (
     toolSetIds: string[],
   ) => Promise<Record<string, Tool>>,
   onProgress?: () => void,
-): Promise<Record<string, Tool>> => {
+): Promise<{
+  tools: Record<string, Tool>;
+  failures: SubAgentFailure[];
+}> => {
   const tools: Record<string, Tool> = {};
+  const failures: SubAgentFailure[] = [];
 
   for (const subAgent of subAgents) {
     try {
@@ -299,8 +375,13 @@ export const createSubAgentTools = async (
         `Failed to create sub-agent tool for "${subAgent.name}"`,
       );
       // Continue with other sub-agents even if one fails
+      failures.push({
+        id: subAgent.id,
+        name: subAgent.name,
+        reason: describeError(error),
+      });
     }
   }
 
-  return tools;
+  return { tools, failures };
 };

@@ -26,6 +26,13 @@ export type SystemPromptContext = {
   skills: Array<Pick<Skill, "name" | "description">>;
   subAgents: Array<{ name: string; description?: string | null }>;
   /**
+   * Sub-agents assigned to this Agent that failed to initialize for this turn
+   * and therefore have no delegation tool. Named in the prompt as explicitly
+   * unavailable: staying silent leaves the model to discover the gap by taking
+   * an AI_NoSuchToolError, and leaves the user with no idea why.
+   */
+  unavailableSubAgents?: Array<{ name: string; reason?: string }>;
+  /**
    * Names of workspace-default env vars that will be merged into every
    * sandbox shell.exec call. Keys only — values never enter the system prompt
    * (see docs/adr/0004-sandbox-workspace-default-env-vars.md).
@@ -130,18 +137,40 @@ const skillsFragment: Fragment = (ctx) => {
 };
 
 const subAgentsFragment: Fragment = (ctx) => {
-  if (!ctx.subAgents.length) return null;
-  const lines = ctx.subAgents.map(
-    (sa) =>
-      `- **${sa.name}**: Use the \`${subAgentToolName(sa)}\` tool. ${sa.description || "No description provided"}`,
-  );
-  return `## Available Sub-Agents
+  const unavailable = ctx.unavailableSubAgents ?? [];
+  if (!ctx.subAgents.length && !unavailable.length) return null;
+
+  const sections: string[] = [];
+
+  if (ctx.subAgents.length) {
+    const lines = ctx.subAgents.map(
+      (sa) =>
+        `- **${sa.name}**: Use the \`${subAgentToolName(sa)}\` tool. ${sa.description || "No description provided"}`,
+    );
+    sections.push(`## Available Sub-Agents
 
 You can delegate specialized tasks to the following sub-agents. Each sub-agent has its own dedicated tool:
 
 ${lines.join("\n")}
 
-Each task description MUST be entirely self-contained — sub-agents cannot see the parent conversation, other tasks, or any prior context. Include all relevant information directly in each task description. Wait for the sub-agent to complete before using its result.`;
+Each task description MUST be entirely self-contained — sub-agents cannot see the parent conversation, other tasks, or any prior context. Include all relevant information directly in each task description. Wait for the sub-agent to complete before using its result.`);
+  }
+
+  if (unavailable.length) {
+    const lines = unavailable.map(
+      (sa) =>
+        `- **${sa.name}**: ${sa.reason || "failed to load"} — no \`${subAgentToolName(sa)}\` tool exists this turn.`,
+    );
+    sections.push(`## Unavailable Sub-Agents
+
+These sub-agents are assigned to you but failed to load, so they cannot be delegated to right now:
+
+${lines.join("\n")}
+
+Do not try to call a delegation tool for them. If a request needs one, tell the user it is unavailable and give the reason above rather than silently working around it.`);
+  }
+
+  return sections.join("\n\n");
 };
 
 const sandboxFragment: Fragment = (ctx) => {

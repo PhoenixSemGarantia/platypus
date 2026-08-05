@@ -352,6 +352,108 @@ describe("createSubAgentTool", () => {
       expect(final.text).toContain("Board One");
     });
 
+    // A stream `error` part ends the stream normally, so before this the
+    // generator returned whatever text had accumulated — usually the model's
+    // opening preamble — and the parent read the crash as the answer.
+    it("throws when the sub-agent stream reports an error", async () => {
+      mockStream.mockResolvedValue({
+        fullStream: createMockFullStream([
+          { type: "text-start", id: "t1" },
+          {
+            type: "text-delta",
+            id: "t1",
+            text: "I'll start by inspecting the agent.",
+          },
+          {
+            type: "error",
+            error: new Error(
+              "Model tried to call unavailable tool 'delegateToDashboardAgent'.",
+            ),
+          },
+        ]),
+        text: Promise.resolve(""),
+      });
+
+      const { tool } = createSubAgentTool(baseOptions);
+      const gen = tool.execute(
+        { task: "Check the dashboard" },
+        {} as ToolExecutionOptions<Record<string, unknown>>,
+      ) as AsyncGenerator<SubAgentActivity>;
+
+      await expect(consumeGenerator(gen)).rejects.toThrow(
+        /Sub-agent "Research Agent" did not complete: Model tried to call unavailable tool/,
+      );
+    });
+
+    it("includes any partial text in the failure so the work is not lost", async () => {
+      mockStream.mockResolvedValue({
+        fullStream: createMockFullStream([
+          { type: "text-start", id: "t1" },
+          { type: "text-delta", id: "t1", text: "Found 3 stale cards." },
+          { type: "text-end", id: "t1" },
+          { type: "error", error: "upstream connection reset" },
+        ]),
+        text: Promise.resolve(""),
+      });
+
+      const { tool } = createSubAgentTool(baseOptions);
+      const gen = tool.execute(
+        { task: "Audit the board" },
+        {} as ToolExecutionOptions<Record<string, unknown>>,
+      ) as AsyncGenerator<SubAgentActivity>;
+
+      await expect(consumeGenerator(gen)).rejects.toThrow(
+        /Partial output before the failure:\nFound 3 stale cards\./,
+      );
+    });
+
+    it("records the failure in the activity log before throwing", async () => {
+      mockStream.mockResolvedValue({
+        fullStream: createMockFullStream([
+          { type: "error", error: new Error("boom") },
+        ]),
+        text: Promise.resolve(""),
+      });
+
+      const { tool } = createSubAgentTool(baseOptions);
+      const gen = tool.execute(
+        { task: "Do something" },
+        {} as ToolExecutionOptions<Record<string, unknown>>,
+      ) as AsyncGenerator<SubAgentActivity>;
+
+      const yielded: SubAgentActivity[] = [];
+      await expect(
+        (async () => {
+          for await (const value of gen) yielded.push(structuredClone(value));
+        })(),
+      ).rejects.toThrow(/boom/);
+
+      expect(yielded.at(-1)?.entries).toContainEqual({
+        type: "failed",
+        status: "error",
+        error: "boom",
+      });
+    });
+
+    it("throws when the sub-agent stream aborts", async () => {
+      mockStream.mockResolvedValue({
+        fullStream: createMockFullStream([
+          { type: "abort", reason: "step limit" },
+        ]),
+        text: Promise.resolve(""),
+      });
+
+      const { tool } = createSubAgentTool(baseOptions);
+      const gen = tool.execute(
+        { task: "Do something" },
+        {} as ToolExecutionOptions<Record<string, unknown>>,
+      ) as AsyncGenerator<SubAgentActivity>;
+
+      await expect(consumeGenerator(gen)).rejects.toThrow(
+        /Stopped before finishing: step limit/,
+      );
+    });
+
     it("marks tool-call entry as error on tool-error event", async () => {
       mockStream.mockResolvedValue({
         fullStream: createMockFullStream([
@@ -430,6 +532,65 @@ describe("createSubAgentTool", () => {
     });
   });
 
+  // Regression for #321 recurring one level down. The parent turn normalizes
+  // tool results in `wrapToolsWithBump`, but a sub-agent's own tools go from
+  // `loadTools` straight into its ToolLoopAgent. A raw Drizzle `Date` then
+  // fails the sub-agent's next-step prompt validation and kills its stream.
+  describe("sub-agent tool results", () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+    });
+
+    type ExecutableTool = {
+      execute: (args: unknown, opts: unknown) => unknown;
+    };
+
+    const toolPassedToAgent = (name: string) => {
+      const { tools } = agentConstructorSpy.mock.calls[0][0] as {
+        tools: Record<string, ExecutableTool>;
+      };
+      return tools[name];
+    };
+
+    it("normalizes Date values out of an async tool result", async () => {
+      const createdAt = new Date("2026-08-06T00:00:00.000Z");
+      createSubAgentTool({
+        ...baseOptions,
+        tools: {
+          listBoards: {
+            execute: () => Promise.resolve([{ id: "b1", createdAt }]),
+          } as never,
+        },
+      });
+
+      const result = await toolPassedToAgent("listBoards").execute({}, {});
+      expect(result).toEqual([
+        { id: "b1", createdAt: createdAt.toISOString() },
+      ]);
+    });
+
+    it("normalizes a synchronous tool result too", () => {
+      createSubAgentTool({
+        ...baseOptions,
+        tools: {
+          now: {
+            execute: () => ({ at: new Date("2026-08-06T00:00:00.000Z") }),
+          } as never,
+        },
+      });
+
+      expect(toolPassedToAgent("now").execute({}, {})).toEqual({
+        at: "2026-08-06T00:00:00.000Z",
+      });
+    });
+
+    it("leaves a tool without an execute function alone", () => {
+      const bare = { description: "no execute" } as never;
+      createSubAgentTool({ ...baseOptions, tools: { bare } });
+      expect(toolPassedToAgent("bare")).toBe(bare);
+    });
+  });
+
   describe("toModelOutput", () => {
     it("extracts text from activity output", () => {
       const { tool } = createSubAgentTool(baseOptions);
@@ -470,7 +631,7 @@ describe("createSubAgentTools", () => {
 
   it("returns empty object when given no sub-agents", async () => {
     const result = await createSubAgentTools([], vi.fn(), vi.fn());
-    expect(result).toEqual({});
+    expect(result).toEqual({ tools: {}, failures: [] });
   });
 
   it("creates tools for each sub-agent", async () => {
@@ -502,14 +663,15 @@ describe("createSubAgentTools", () => {
       loadToolsFn,
     );
 
-    expect(Object.keys(result)).toHaveLength(2);
-    expect(result).toHaveProperty("delegateToResearch");
-    expect(result).toHaveProperty("delegateToCoder");
+    expect(Object.keys(result.tools)).toHaveLength(2);
+    expect(result.tools).toHaveProperty("delegateToResearch");
+    expect(result.tools).toHaveProperty("delegateToCoder");
+    expect(result.failures).toEqual([]);
     expect(createModelFn).toHaveBeenCalledTimes(2);
     expect(loadToolsFn).toHaveBeenCalledTimes(2);
   });
 
-  it("continues when a sub-agent fails to initialize", async () => {
+  it("continues when a sub-agent fails to initialize, and reports it as a failure", async () => {
     const subAgents = [
       {
         id: "sa-1",
@@ -537,8 +699,13 @@ describe("createSubAgentTools", () => {
       loadToolsFn,
     );
 
-    expect(Object.keys(result)).toHaveLength(1);
-    expect(result).toHaveProperty("delegateToWorking");
+    expect(Object.keys(result.tools)).toHaveLength(1);
+    expect(result.tools).toHaveProperty("delegateToWorking");
+    // The dropped sub-agent must come back named, so the caller can stop
+    // advertising a tool it never registered.
+    expect(result.failures).toEqual([
+      { id: "sa-1", name: "Failing", reason: "Model not found" },
+    ]);
   });
 
   it("uses default maxSteps when not provided", async () => {
@@ -563,7 +730,7 @@ describe("createSubAgentTools", () => {
       loadToolsFn,
     );
 
-    expect(Object.keys(result)).toHaveLength(1);
+    expect(Object.keys(result.tools)).toHaveLength(1);
   });
 
   it("passes each sub-agent's own provider security text into its instructions", async () => {

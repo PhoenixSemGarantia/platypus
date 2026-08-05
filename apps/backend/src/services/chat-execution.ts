@@ -18,7 +18,11 @@ import {
 } from "../db/schema.ts";
 import { getToolSet } from "../tools/index.ts";
 import { createLoadSkillTool } from "../tools/skill.ts";
-import { createSubAgentTools } from "../tools/sub-agent.ts";
+import {
+  createSubAgentTools,
+  type SubAgentFailure,
+} from "../tools/sub-agent.ts";
+import { normalizeToolResult } from "./tool-result.ts";
 import {
   renderSystemPrompt,
   type SystemPromptContext,
@@ -613,7 +617,7 @@ export const prepareChatTurn = async (
   const [
     { tools, mcpClients },
     skills,
-    { subAgents, subAgentTools, subAgentMcpClients },
+    { subAgents, unavailableSubAgents, subAgentTools, subAgentMcpClients },
     userContexts,
     memories,
     sandboxEnvKeys,
@@ -654,6 +658,7 @@ export const prepareChatTurn = async (
     memories,
     skills,
     subAgents,
+    unavailableSubAgents,
     sandboxEnvKeys,
     fallbackInstructions: request.instructions,
     runMode,
@@ -881,28 +886,16 @@ export const createToolHeartbeat = (
  * correctness no longer depends on those yields being frequent enough.
  */
 /**
- * Normalize a tool's final result into a JSON-serializable value.
+ * Re-exported so callers and tests that reach the normalizer through this
+ * module keep working. It lives in `tool-result.ts` because the sub-agent tool
+ * builder needs it too, and this module already imports that one.
  *
- * AI SDK v7 feeds each tool result into the next model step, where
- * `standardizePrompt()` validates tool-result parts against a strict JSON-value
- * schema. Non-JSON values — most commonly a raw `Date` from a Drizzle/`pg` query
- * row (a `createdAt`/`updatedAt` timestamp) — fail that validation and crash the
- * turn with `InvalidPromptError`. A JSON round-trip converts `Date` → ISO string
- * and drops `undefined`. Applied at the wrapper's result paths (promise-resolved
- * and synchronous return), it covers every current and future value-returning
- * tool at once. The async-iterable path (sub-agent tools) is intentionally
- * exempt — its yields are streamed UI parts, not the result fed to the model.
- *
- * Deliberate trade-off: a plain round-trip throws on `BigInt`. Tools are not
- * expected to return `BigInt`, so we accept that rather than complicate the
- * normalizer. A top-level `undefined`/function return (whose `JSON.stringify` is
- * `undefined`) is passed through unchanged instead of crashing `JSON.parse`.
+ * `wrapToolsWithBump` applies it at the promise-resolved and synchronous return
+ * paths, covering every value-returning tool on the parent turn at once. The
+ * async-iterable path (sub-agent delegate tools) is intentionally exempt — its
+ * yields are streamed UI parts, not the result fed to the model.
  */
-export const normalizeToolResult = (value: unknown): unknown => {
-  const json = JSON.stringify(value);
-  if (json === undefined) return value;
-  return JSON.parse(json);
-};
+export { normalizeToolResult };
 
 export const wrapToolsWithBump = (
   tools: Record<string, Tool>,
@@ -1162,24 +1155,24 @@ const loadSubAgents = async (
   onProgress?: () => void,
 ): Promise<{
   subAgents: Array<{ id: string; name: string; description?: string | null }>;
+  unavailableSubAgents: SubAgentFailure[];
   subAgentTools: Record<string, Tool>;
   subAgentMcpClients: MCPClient[];
 }> => {
   if (!agent?.subAgentIds || agent.subAgentIds.length === 0) {
-    return { subAgents: [], subAgentTools: {}, subAgentMcpClients: [] };
+    return {
+      subAgents: [],
+      unavailableSubAgents: [],
+      subAgentTools: {},
+      subAgentMcpClients: [],
+    };
   }
 
   const subAgentRecords = await queries.getSubAgentsByIds(agent.subAgentIds);
 
-  const subAgents = subAgentRecords.map((sa) => ({
-    id: sa.id,
-    name: sa.name,
-    description: sa.description,
-  }));
-
   const subAgentMcpClients: MCPClient[] = [];
 
-  const subAgentTools = await createSubAgentTools(
+  const { tools: subAgentTools, failures } = await createSubAgentTools(
     subAgentRecords,
     async (providerId: string, modelId: string) => {
       const subProvider = await queries.getProvider(
@@ -1223,5 +1216,22 @@ const loadSubAgents = async (
     onProgress,
   );
 
-  return { subAgents, subAgentTools, subAgentMcpClients };
+  // The system prompt must describe only sub-agents that produced a callable
+  // tool. Listing one that dropped out tells the model to call a tool that was
+  // never registered, and the turn dies on AI_NoSuchToolError.
+  const failedIds = new Set(failures.map((f) => f.id));
+  const subAgents = subAgentRecords
+    .filter((sa) => !failedIds.has(sa.id))
+    .map((sa) => ({
+      id: sa.id,
+      name: sa.name,
+      description: sa.description,
+    }));
+
+  return {
+    subAgents,
+    unavailableSubAgents: failures,
+    subAgentTools,
+    subAgentMcpClients,
+  };
 };
