@@ -86,6 +86,8 @@ vi.mock("../logger.ts", () => ({
 }));
 
 import { AgentRunner } from "./agent-runner.ts";
+import { TRUNCATED_BY_TOKEN_LIMIT } from "./stream-error.ts";
+import { logger } from "../logger.ts";
 import { runRegistry, TimeoutError } from "./run-registry.ts";
 import type { ResolvedRunPlan, RunInput, RunSink } from "./types.ts";
 import type { WorkspaceScope } from "../scope.ts";
@@ -175,6 +177,165 @@ const fakeGenerateResult = {
   steps: [],
   totalUsage: { inputTokens: 10, outputTokens: 5 },
 };
+
+// Issue #406: a step that ended at the output ceiling, or that the provider
+// rejected as a malformed tool use, used to log identically to a clean one.
+// The unified reason alone is not enough — it is exactly what collapses
+// Bedrock's `malformed_tool_use` into `other`, so the raw value must survive.
+describe("finish reason instrumentation", () => {
+  let runner: AgentRunner;
+  beforeEach(() => {
+    runner = new AgentRunner();
+    vi.clearAllMocks();
+  });
+
+  const stepLogs = () =>
+    vi
+      .mocked(logger.info)
+      .mock.calls.filter((call) => call[1] === "Step finished")
+      .map((call) => call[0] as Record<string, unknown>);
+
+  it("logs both the unified and the raw finish reason for every step", async () => {
+    mockPrepareChatTurn.mockResolvedValueOnce(fakeTurn());
+    mockGenerateText.mockImplementationOnce(
+      (args: { onStepFinish: (s: unknown) => void }) => {
+        args.onStepFinish({
+          toolCalls: [{ toolName: "listBoards" }],
+          usage: { inputTokens: 10, outputTokens: 5 },
+          finishReason: "tool-calls",
+          rawFinishReason: "tool_use",
+        });
+        return fakeGenerateResult;
+      },
+    );
+
+    await runner.generate({
+      scope,
+      input: baseInput,
+      sink: new RecordingSink(),
+    });
+
+    expect(stepLogs()[0]).toMatchObject({
+      finishReason: "tool-calls",
+      rawFinishReason: "tool_use",
+    });
+  });
+
+  // The whole point of keeping the raw value: an unrecognised provider reason
+  // collapses to `other` in the unified union and is otherwise unrecoverable.
+  it("logs an unrecognised raw finish reason verbatim rather than swallowing it", async () => {
+    mockPrepareChatTurn.mockResolvedValueOnce(fakeTurn());
+    mockGenerateText.mockImplementationOnce(
+      (args: { onStepFinish: (s: unknown) => void }) => {
+        args.onStepFinish({
+          toolCalls: [],
+          usage: { inputTokens: 1, outputTokens: 1 },
+          finishReason: "other",
+          rawFinishReason: "malformed_tool_use",
+        });
+        return fakeGenerateResult;
+      },
+    );
+
+    await runner.generate({
+      scope,
+      input: baseInput,
+      sink: new RecordingSink(),
+    });
+
+    expect(stepLogs()[0]).toMatchObject({
+      finishReason: "other",
+      rawFinishReason: "malformed_tool_use",
+    });
+  });
+
+  it("warns when a step stops at the output token limit", async () => {
+    mockPrepareChatTurn.mockResolvedValueOnce(fakeTurn());
+    mockGenerateText.mockImplementationOnce(
+      (args: { onStepFinish: (s: unknown) => void }) => {
+        args.onStepFinish({
+          toolCalls: [],
+          usage: { inputTokens: 1, outputTokens: 1 },
+          finishReason: "length",
+          rawFinishReason: "max_tokens",
+        });
+        return fakeGenerateResult;
+      },
+    );
+
+    await runner.generate({
+      scope,
+      input: baseInput,
+      sink: new RecordingSink(),
+    });
+
+    const warned = vi
+      .mocked(logger.warn)
+      .mock.calls.some((call) => /truncated/i.test(String(call[1])));
+    expect(warned).toBe(true);
+  });
+
+  it("tells the caller when an unattended run was cut off at the token limit", async () => {
+    mockPrepareChatTurn.mockResolvedValueOnce(fakeTurn());
+    mockGenerateText.mockResolvedValueOnce({
+      ...fakeGenerateResult,
+      text: "half an ans",
+      finishReason: "length",
+      rawFinishReason: "max_tokens",
+    });
+
+    const result = await runner.generate({
+      scope,
+      input: baseInput,
+      sink: new RecordingSink(),
+    });
+
+    // The model that receives this text can adapt; previously it could not
+    // tell a truncated answer from a complete one.
+    expect(result.text).toContain("half an ans");
+    expect(result.text).toContain(TRUNCATED_BY_TOKEN_LIMIT);
+  });
+
+  it("leaves a cleanly finished unattended run's text untouched", async () => {
+    mockPrepareChatTurn.mockResolvedValueOnce(fakeTurn());
+    mockGenerateText.mockResolvedValueOnce({
+      ...fakeGenerateResult,
+      finishReason: "stop",
+      rawFinishReason: "end_turn",
+    });
+
+    const result = await runner.generate({
+      scope,
+      input: baseInput,
+      sink: new RecordingSink(),
+    });
+
+    expect(result.text).toBe("ok");
+  });
+
+  it("records the finish reasons on the unattended completion log", async () => {
+    mockPrepareChatTurn.mockResolvedValueOnce(fakeTurn());
+    mockGenerateText.mockResolvedValueOnce({
+      ...fakeGenerateResult,
+      finishReason: "stop",
+      rawFinishReason: "end_turn",
+    });
+
+    await runner.generate({
+      scope,
+      input: baseInput,
+      sink: new RecordingSink(),
+    });
+
+    const completed = vi
+      .mocked(logger.info)
+      .mock.calls.find((call) => call[1] === "Run generate completed");
+    expect(completed?.[0]).toMatchObject({
+      finishReason: "stop",
+      rawFinishReason: "end_turn",
+    });
+  });
+});
 
 describe("AgentRunner.generate", () => {
   let runner: AgentRunner;
