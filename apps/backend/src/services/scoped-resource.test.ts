@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
+// test-utils installs the drizzle-orm mock, so it must be imported before the
+// operators this file asserts on — `inArray` is a spy only through that mock.
 import { mockDb, resetMockDb, asDb } from "../test-utils.ts";
+import { inArray } from "drizzle-orm";
 import {
   resolveScoped,
   listScoped,
@@ -108,16 +111,24 @@ describe("ScopedResource read module", () => {
         .mockResolvedValueOnce([wsRow])
         .mockResolvedValueOnce([{ agent: orgRow }]);
 
-      const results = await listScopedByIds(
-        asDb(mockDb),
-        "agent",
-        ["ws-a", "org-a", "invisible"],
-        ctx,
-      );
+      const ids = ["ws-a", "org-a", "invisible"];
+      const results = await listScopedByIds(asDb(mockDb), "agent", ids, ctx);
       expect(results).toEqual([
         { row: wsRow, scope: "workspace" },
         { row: orgRow, scope: "organization" },
       ]);
+      // Both scope branches are narrowed to the ids asked for — without this the
+      // call would read every row of the type and filter in memory.
+      expect(inArray).toHaveBeenCalledTimes(2);
+      expect(inArray).toHaveBeenNthCalledWith(1, expect.anything(), ids);
+      expect(inArray).toHaveBeenNthCalledWith(2, expect.anything(), ids);
+    });
+
+    it("applies no id filter when listing the whole type", async () => {
+      mockDb.where.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+
+      await listScoped(asDb(mockDb), "agent", ctx);
+      expect(inArray).not.toHaveBeenCalled();
     });
 
     it("returns an empty list without querying when given no ids", async () => {

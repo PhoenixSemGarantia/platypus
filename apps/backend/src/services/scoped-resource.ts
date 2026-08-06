@@ -78,6 +78,23 @@ export type ScopeContext = { orgId: string; wsId: string };
 type Database = typeof db;
 
 /**
+ * Whether a row is a **Shared resource** of this Organization: org-scoped, and at
+ * no Workspace. The two scope columns are mutually exclusive by a Zod refinement
+ * on write, not by a database constraint, so "has this organizationId" is not on
+ * its own enough — a row holding both belongs to its Workspace and must not reach
+ * another one on the strength of the org column. Absent rows are not Shared, so a
+ * dangling id fails this too.
+ *
+ * Exported because the Promotion guard (`findNonSharedReferences`) asks the same
+ * question of rows it fetched itself.
+ */
+export const isSharedRow = (
+  row:
+    { organizationId: string | null; workspaceId: string | null } | undefined,
+  orgId: string,
+): boolean => !!row && row.organizationId === orgId && !row.workspaceId;
+
+/**
  * Resolves a single resource visible inside this Workspace, or `null` when it
  * is not visible here. A Workspace-scoped row matches directly; an
  * Organization-scoped (Shared) row is visible only where an Attachment for this
@@ -107,17 +124,13 @@ export const resolveScoped = async <T extends ScopedResourceType>(
   const row = rows[0] as RowOf[T] | undefined;
   if (!row) return null;
 
-  // Classified by which scope the row actually carries, not by elimination. The
-  // two columns are mutually exclusive on write but nothing in the database
-  // enforces it, and a row holding both would otherwise fall through to
-  // "workspace" — making another Workspace's row visible here on the strength of
-  // its organizationId alone.
+  // Classified by which scope the row actually carries, not by elimination: a row
+  // holding both columns would otherwise fall through to "workspace" and be
+  // visible here on the strength of its organizationId alone.
   if (row.workspaceId === ctx.wsId) {
     return { row, scope: "workspace" };
   }
-  if (!(row.organizationId === ctx.orgId && !row.workspaceId)) {
-    return null;
-  }
+  if (!isSharedRow(row, ctx.orgId)) return null;
 
   // A Shared resource is visible here only through an Attachment (ADR-0007).
   const [attached] = await database
@@ -136,11 +149,12 @@ export const resolveScoped = async <T extends ScopedResourceType>(
 };
 
 /**
- * The two queries behind `listScoped` and `listScopedByIds`: the Workspace's own
- * rows, then the Organization-scoped rows an Attachment exposes here. `ids`
- * narrows both to a known set of references; omitted, it lists the type.
+ * Lists the resources of this type visible in the Workspace: its Workspace-scoped
+ * rows plus the Organization-scoped (Shared) rows attached to it. `ids` narrows
+ * both to a known set of references — pass it through `listScopedByIds`, which
+ * handles the empty case. Never throws.
  */
-const listVisible = async <T extends ScopedResourceType>(
+export const listScoped = async <T extends ScopedResourceType>(
   database: Database,
   type: T,
   ctx: ScopeContext,
@@ -200,23 +214,12 @@ const listVisible = async <T extends ScopedResourceType>(
 };
 
 /**
- * Lists every resource of this type visible in the Workspace: its
- * Workspace-scoped rows plus the Organization-scoped (Shared) rows attached to
- * it. Never throws.
- */
-export const listScoped = <T extends ScopedResourceType>(
-  database: Database,
-  type: T,
-  ctx: ScopeContext,
-): Promise<{ row: RowOf[T]; scope: Scope }[]> =>
-  listVisible(database, type, ctx);
-
-/**
  * The subset of `ids` visible in this Workspace, each with its scope — the
  * single authority for "which of these references may this Workspace use?".
  * Ids that resolve to nothing are simply absent, so a caller can compare against
  * what it asked for (a save-time rejection) or carry on without them (a
- * run-time drop). Never throws; no query runs for an empty `ids`.
+ * run-time drop). Never throws; no query runs for an empty `ids`, which would
+ * otherwise reach the database as `IN ()`.
  */
 export const listScopedByIds = <T extends ScopedResourceType>(
   database: Database,
@@ -224,9 +227,7 @@ export const listScopedByIds = <T extends ScopedResourceType>(
   ids: string[],
   ctx: ScopeContext,
 ): Promise<{ row: RowOf[T]; scope: Scope }[]> =>
-  ids.length === 0
-    ? Promise.resolve([])
-    : listVisible(database, type, ctx, ids);
+  ids.length === 0 ? Promise.resolve([]) : listScoped(database, type, ctx, ids);
 
 /**
  * Like `resolveScoped` but throws `NotFoundError` when the resource is not

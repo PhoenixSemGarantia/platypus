@@ -7,6 +7,7 @@ import {
 } from "../db/schema.ts";
 import { eq, inArray } from "drizzle-orm";
 import { getToolSets } from "../tools/index.ts";
+import { isSharedRow } from "./scoped-resource.ts";
 
 /**
  * A reference that blocks Promotion because it is not itself Organization-scoped
@@ -25,20 +26,6 @@ type AgentReferences = {
   subAgentIds?: string[] | null;
   toolSetIds?: string[] | null;
 };
-
-/**
- * Whether a referenced row is genuinely a Shared resource of this Organization:
- * org-scoped **and** at no Workspace. The two scope columns are mutually
- * exclusive by a Zod refinement on write, not by a database constraint, so a row
- * carrying both must not count as Shared — that would let a Shared Agent
- * reference a Workspace-private row, which is the one thing this rule forbids.
- * A missing row is not Shared either, so a dangling id is always a blocker.
- */
-const isShared = (
-  row:
-    { organizationId: string | null; workspaceId: string | null } | undefined,
-  orgId: string,
-): boolean => !!row && row.organizationId === orgId && !row.workspaceId;
 
 /**
  * The defining rule of a Shared resource: it may reference only other Shared
@@ -74,7 +61,7 @@ export const findNonSharedReferences = async (
     .from(providerTable)
     .where(eq(providerTable.id, refs.providerId));
   const prov = providerRows[0];
-  if (!isShared(prov, orgId)) {
+  if (!isSharedRow(prov, orgId)) {
     blockers.push({
       type: "provider",
       id: refs.providerId,
@@ -97,7 +84,7 @@ export const findNonSharedReferences = async (
     const byId = new Map(rows.map((r) => [r.id, r]));
     for (const id of skillIds) {
       const row = byId.get(id);
-      if (!isShared(row, orgId)) {
+      if (!isSharedRow(row, orgId)) {
         blockers.push({ type: "skill", id, name: row?.name ?? id });
       }
     }
@@ -118,7 +105,7 @@ export const findNonSharedReferences = async (
     const byId = new Map(rows.map((r) => [r.id, r]));
     for (const id of subAgentIds) {
       const row = byId.get(id);
-      if (!isShared(row, orgId)) {
+      if (!isSharedRow(row, orgId)) {
         blockers.push({ type: "subAgent", id, name: row?.name ?? id });
       }
     }
@@ -143,7 +130,7 @@ export const findNonSharedReferences = async (
     const byId = new Map(rows.map((r) => [r.id, r]));
     for (const id of mcpIds) {
       const row = byId.get(id);
-      if (!isShared(row, orgId)) {
+      if (!isSharedRow(row, orgId)) {
         blockers.push({ type: "mcp", id, name: row?.name ?? id });
       }
     }

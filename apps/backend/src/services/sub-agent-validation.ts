@@ -2,6 +2,15 @@ import { db } from "../index.ts";
 import { listScopedByIds, type ScopeContext } from "./scoped-resource.ts";
 
 /**
+ * Rejection message for an Agent listed among its own sub-agents. Shared with
+ * the Organization surface, which applies this same rule while resolving
+ * sub-Agents differently (a Shared Agent's sub-Agents must themselves be
+ * Shared), so the two surfaces cannot drift on the wording an Operator sees.
+ */
+export const SUB_AGENT_SELF_ASSIGNMENT_ERROR =
+  "An agent cannot assign itself as a sub-agent";
+
+/**
  * Save-time guard on an Agent's `subAgentIds`, applied wherever a Workspace
  * surface writes them (the Agent routes and the agent-management tools).
  *
@@ -14,15 +23,6 @@ import { listScopedByIds, type ScopeContext } from "./scoped-resource.ts";
  * Promotion is a separate, stricter rule: a Shared Agent may reference only
  * other Shared resources (`findNonSharedReferences`).
  */
-/**
- * Rejection message for an Agent listed among its own sub-agents. Shared with
- * the Organization surface, which applies the same rule under a different
- * visibility rule (a Shared Agent's sub-Agents must themselves be Shared), so
- * the two surfaces cannot drift on the wording an Operator sees.
- */
-export const SUB_AGENT_SELF_ASSIGNMENT_ERROR =
-  "An agent cannot assign itself as a sub-agent";
-
 export const validateSubAgentAssignment = async (
   ctx: ScopeContext,
   agentId: string,

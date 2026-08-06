@@ -82,6 +82,12 @@ mcp.post(
       .values({
         id: nanoid(),
         ...data,
+        // The scope comes from the route, never the body — as it does for Agents
+        // and Skills. Spreading the body let a caller name another Workspace, or
+        // set `organizationId` and mint a Shared MCP from the Workspace surface,
+        // which only an Org Admin may do (ADR-0006, ADR-0007).
+        workspaceId: c.req.param("workspaceId")!,
+        organizationId: null,
       })
       .returning();
     return c.json(sanitizeMcpResponse(record[0]), 201);

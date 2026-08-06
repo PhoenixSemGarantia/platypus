@@ -42,6 +42,39 @@ describe("Provider Routes", () => {
       expect(await res.json()).toEqual(mockProvider);
     });
 
+    it("takes the scope from the route, ignoring any scope in the body", async () => {
+      // A workspace-surface create is always Workspace-scoped. Spreading the body
+      // let a caller name another Workspace, or set organizationId and mint a
+      // Shared Provider here — which only an Org Admin may do (ADR-0006/0007).
+      mockSession();
+      mockDb.limit.mockResolvedValueOnce([{ role: "admin" }]); // requireOrgAccess
+      mockDb.limit.mockResolvedValueOnce([
+        { ownerId: "user-1", organizationId: "org-1" },
+      ]); // requireWorkspaceAccess
+
+      mockDb.returning.mockResolvedValueOnce([{ id: "p1", name: "OpenAI" }]);
+
+      const res = await app.request(baseUrl, {
+        method: "POST",
+        body: JSON.stringify({
+          name: "OpenAI",
+          providerType: "OpenAI",
+          apiKey: "sk-123",
+          modelIds: ["gpt-4"],
+          taskModelId: "gpt-4",
+          memoryExtractionModelId: "gpt-4",
+          workspaceId: "ws-somewhere-else",
+          organizationId: orgId,
+        }),
+        headers: { "Content-Type": "application/json" },
+      });
+
+      expect(res.status).toBe(201);
+      expect(mockDb.values).toHaveBeenCalledWith(
+        expect.objectContaining({ workspaceId, organizationId: null }),
+      );
+    });
+
     it("should return 409 if provider name already exists in workspace", async () => {
       mockSession();
       mockDb.limit.mockResolvedValueOnce([{ role: "admin" }]); // requireOrgAccess

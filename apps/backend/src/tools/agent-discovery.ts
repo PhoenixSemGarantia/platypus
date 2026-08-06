@@ -114,9 +114,10 @@ export function createAgentDiscoveryTools(
         return { error: "Agent not found" };
       }
 
-      // Projected field by field rather than spread, so the avatar key stays out
-      // of the tool result (it is not a field the model has any use for).
-      const { row, scope } = found;
+      // Everything but the avatar key, which is a storage detail the model has no
+      // use for. Dropped by name rather than listing the twenty fields that stay,
+      // so a column added to `agent` later is included, not silently missed.
+      const { avatarKey: _avatarKey, ...rest } = found.row;
       const url = buildResourceUrl(
         frontendUrl,
         orgId,
@@ -124,31 +125,7 @@ export function createAgentDiscoveryTools(
         `agents/${agentId}`,
       );
 
-      return {
-        id: row.id,
-        organizationId: row.organizationId,
-        workspaceId: row.workspaceId,
-        scope,
-        name: row.name,
-        description: row.description,
-        providerId: row.providerId,
-        modelId: row.modelId,
-        instructions: row.instructions,
-        maxSteps: row.maxSteps,
-        temperature: row.temperature,
-        topP: row.topP,
-        topK: row.topK,
-        seed: row.seed,
-        presencePenalty: row.presencePenalty,
-        frequencyPenalty: row.frequencyPenalty,
-        toolSetIds: row.toolSetIds,
-        skillIds: row.skillIds,
-        subAgentIds: row.subAgentIds,
-        inputPlaceholder: row.inputPlaceholder,
-        createdAt: row.createdAt,
-        updatedAt: row.updatedAt,
-        ...(url && { url }),
-      };
+      return { ...rest, scope: found.scope, ...(url && { url }) };
     },
   });
 

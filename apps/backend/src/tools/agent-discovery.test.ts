@@ -72,6 +72,9 @@ describe("createAgentDiscoveryTools", () => {
       expect(await tools.listModelProviders.execute!({}, ctx)).toEqual([
         { id: "p1", name: "Provider 1", modelIds: ["model-a"] },
       ]);
+      // The org-scoped half is gated by a join on the Attachment table. Without
+      // it the whole organization's providers would be listed, attached or not.
+      expect(mockDb.innerJoin).toHaveBeenCalledTimes(1);
     });
 
     it("flattens per-model object modelIds to plain id strings", async () => {

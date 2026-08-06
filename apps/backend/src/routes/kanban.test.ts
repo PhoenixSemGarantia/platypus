@@ -729,6 +729,9 @@ describe("Kanban Routes", () => {
         expect(res.status).toBe(400);
         const body = (await res.json()) as Record<string, unknown>;
         expect(body.error).toBe("Invalid agent assignee");
+        // Both scopes were consulted: the second query is the Attachment join
+        // that a workspace-only lookup never makes.
+        expect(mockDb.innerJoin).toHaveBeenCalledTimes(1);
       });
 
       it("should allow org member to be assigned", async () => {
