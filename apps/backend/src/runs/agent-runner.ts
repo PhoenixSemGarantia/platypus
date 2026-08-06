@@ -7,7 +7,11 @@ import {
   stepCountIs,
   streamText,
 } from "ai";
-import { formatStreamError, TRUNCATED_BY_TOKEN_LIMIT } from "./stream-error.ts";
+import {
+  formatStreamError,
+  isTruncatedByTokenLimit,
+  TRUNCATED_BY_TOKEN_LIMIT,
+} from "./stream-error.ts";
 import {
   prepareChatTurn,
   validateTurnAttachments,
@@ -338,7 +342,7 @@ export class AgentRunner {
         },
         "Step finished",
       );
-      if (step.finishReason === "length") {
+      if (isTruncatedByTokenLimit(step.finishReason)) {
         logger.warn(
           {
             runId: input.runId,
@@ -522,6 +526,10 @@ export class AgentRunner {
             toolName: trip.toolName,
             count: trip.count,
             duration: Date.now() - startTime,
+            // Carried here too: this path returns before the completion log
+            // below, so without it a no-progress run records neither reason.
+            finishReason: result.finishReason,
+            rawFinishReason: result.rawFinishReason,
             stats,
           },
           "Run aborted: no progress",
@@ -549,10 +557,9 @@ export class AgentRunner {
       // from a complete one: the caller stores it, and whatever reads it later
       // has no way to know the tail is missing. Say so in the text itself, which
       // is the only channel an unattended caller has.
-      const text =
-        result.finishReason === "length"
-          ? `${result.text}\n\n${TRUNCATED_BY_TOKEN_LIMIT}`
-          : result.text;
+      const text = isTruncatedByTokenLimit(result.finishReason)
+        ? `${result.text}\n\n${TRUNCATED_BY_TOKEN_LIMIT}`
+        : result.text;
       return { text, stats };
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));

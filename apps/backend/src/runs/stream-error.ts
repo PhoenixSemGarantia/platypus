@@ -7,21 +7,28 @@ import {
 import { logger } from "../logger.ts";
 
 /**
- * What the user and the model are told when a generation stopped because it
- * ran out of output budget rather than because it was finished.
+ * What an unattended caller is told when a generation stopped because it ran
+ * out of output budget rather than because it was finished.
  *
- * A constant so the streaming and unattended paths cannot word this
- * differently, and so a test can assert on it without restating the prose.
+ * A constant so the wording is asserted in tests without restating the prose.
+ * Currently appended only by the unattended (`generate`) path — the streaming
+ * path reports truncation to the operator via `logger.warn` and has no seam for
+ * injecting text into an already-flushed stream.
  */
 export const TRUNCATED_BY_TOKEN_LIMIT =
   "The response was truncated because it reached the maximum output token limit. Retry with a shorter response, or split the work across several steps.";
+
+/** The unified finish reason the SDK reports for an output-budget cutoff. */
+export const isTruncatedByTokenLimit = (
+  finishReason: string | undefined,
+): boolean => finishReason === "length";
 
 /** How much of a single validation issue is worth repeating back. */
 const MAX_ISSUE_LENGTH = 160;
 /** Beyond a handful of issues the list stops being diagnostic. */
 const MAX_ISSUES = 5;
 
-/** A Zod issue, structurally — avoids importing zod into the run pipeline. */
+/** A Zod issue, structurally — avoids coupling to a specific zod version. */
 type ZodLikeIssue = { path?: unknown[]; message?: string };
 
 const truncate = (text: string, max: number): string =>
@@ -59,17 +66,7 @@ const formatPath = (path: unknown[] | undefined): string => {
  * single over-long field became several thousand characters of unreadable
  * output for the user and the model alike (issue #406).
  */
-const describeValidationFailure = (error: InvalidToolInputError): string => {
-  const issues = findIssues(error.cause);
-  if (!issues) {
-    // No structured issues to unpack — fall back to the cause's own text,
-    // capped, which is still better than the full SDK message.
-    const cause = error.cause;
-    const message =
-      cause instanceof Error ? cause.message : stringify(cause ?? "unknown");
-    return truncate(message.replace(/\s+/g, " ").trim(), MAX_ISSUE_LENGTH);
-  }
-
+const formatIssues = (issues: ZodLikeIssue[]): string => {
   const shown = issues
     .slice(0, MAX_ISSUES)
     .map(
@@ -81,6 +78,63 @@ const describeValidationFailure = (error: InvalidToolInputError): string => {
     );
   const omitted = issues.length - shown.length;
   return shown.join("; ") + (omitted > 0 ? ` (+${omitted} more)` : "");
+};
+
+const describeValidationFailure = (error: InvalidToolInputError): string => {
+  const issues = findIssues(error.cause);
+  if (issues) return formatIssues(issues);
+  // No structured issues to unpack — fall back to the cause's own text,
+  // capped, which is still better than the full SDK message.
+  const cause = error.cause;
+  const message =
+    cause instanceof Error ? cause.message : stringify(cause ?? "unknown");
+  return truncate(message.replace(/\s+/g, " ").trim(), MAX_ISSUE_LENGTH);
+};
+
+/**
+ * The same failure, arriving as a string instead of an `Error`.
+ *
+ * The streaming path never hands us the instance: an invalid tool call becomes
+ * a `tool-error` stream part whose `error` is `getErrorMessage(cause)` — which
+ * is `error.toString()` — and that string is what reaches `onError`. So the
+ * `isInstance` branches below cannot fire for the case this issue is about, and
+ * without this the real production failure lands in the generic fallback.
+ *
+ * Matching on the SDK's message format is unavoidably coupled to that format.
+ * It degrades safely: an unrecognised shape falls through to returning the
+ * string unchanged, which is still better than discarding it.
+ */
+const TOOL_INPUT_MESSAGE =
+  /^(?:AI_)?InvalidToolInputError: Invalid input for tool (\S+?):\s*([\s\S]*)$/;
+/** The SDK appends the serialized ZodError after this marker. */
+const ISSUES_MARKER = "Error message:";
+
+const describeStringifiedToolInputError = (
+  text: string,
+): string | undefined => {
+  const match = TOOL_INPUT_MESSAGE.exec(text);
+  if (!match) return undefined;
+  const [, toolName, detail] = match;
+
+  const markerAt = detail.lastIndexOf(ISSUES_MARKER);
+  if (markerAt !== -1) {
+    try {
+      const parsed: unknown = JSON.parse(
+        detail.slice(markerAt + ISSUES_MARKER.length).trim(),
+      );
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return `Invalid input for tool "${toolName}": ${formatIssues(parsed as ZodLikeIssue[])}`;
+      }
+    } catch {
+      // Fall through to the capped detail below.
+    }
+  }
+  // Strip the echoed value, which is the bulk of the SDK's message.
+  const withoutValue = detail.split(/Value:/)[0] || detail;
+  return `Invalid input for tool "${toolName}": ${truncate(
+    withoutValue.replace(/\s+/g, " ").trim(),
+    MAX_ISSUE_LENGTH,
+  )}`;
 };
 
 /**
@@ -114,10 +168,24 @@ export const formatStreamError = (error: unknown): string => {
     return `Invalid input for tool "${error.toolName}": ${describeValidationFailure(error)}`;
   }
   if (NoSuchToolError.isInstance(error)) {
-    const available = error.availableTools?.length
-      ? ` Available tools: ${error.availableTools.join(", ")}.`
-      : "";
-    return `The tool "${error.toolName}" does not exist and cannot be called.${available}`;
+    return `The tool "${error.toolName}" does not exist and cannot be called.`;
+  }
+  // The streaming path stringifies tool-call failures before they reach here,
+  // so the same two cases have to be recognised again in text form.
+  if (typeof error === "string") {
+    const asToolInput = describeStringifiedToolInputError(error);
+    if (asToolInput) return asToolInput;
+    const noSuchTool = /^(?:AI_)?NoSuchToolError:\s*([\s\S]*)$/.exec(error);
+    if (noSuchTool) {
+      return truncate(
+        noSuchTool[1].replace(/\s+/g, " ").trim(),
+        MAX_ISSUE_LENGTH,
+      );
+    }
+    // Any other string is returned as-is: it used to be discarded entirely in
+    // favour of the generic fallback, which is how the reported failure lost
+    // the one sentence that named its cause.
+    return error;
   }
   if (error instanceof Error) {
     return error.message;

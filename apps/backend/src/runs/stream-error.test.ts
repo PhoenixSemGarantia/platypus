@@ -131,6 +131,56 @@ describe("formatStreamError", () => {
     });
   });
 
+  // The streaming path never hands the formatter an Error for this case. An
+  // invalid tool call is converted to a `tool-error` stream part whose `error`
+  // is `getErrorMessage(cause)` — i.e. `error.toString()`, a plain string — so
+  // `isInstance` is false and the real production failure lands here. Both
+  // production log lines from the reported incident are represented below.
+  describe("invalid tool input arriving as a stringified error", () => {
+    const stringified = (toolName: string, issues: unknown) =>
+      `AI_InvalidToolInputError: Invalid input for tool ${toolName}: ` +
+      `AI_TypeValidationError: Type validation failed: Value: ${JSON.stringify({ body: "z".repeat(2900) })}.\n` +
+      `Error message: ${JSON.stringify(issues, null, 2)}`;
+
+    it("names the tool and the failing field instead of the generic fallback", () => {
+      const formatted = formatStreamError(
+        stringified("updateNotification", [
+          {
+            origin: "string",
+            code: "too_big",
+            maximum: 2000,
+            path: ["body"],
+            message: "Too big: expected string to have <=2000 characters",
+          },
+        ]),
+      );
+
+      expect(formatted).toContain("updateNotification");
+      expect(formatted).toContain("body");
+      expect(formatted).toContain("2000");
+      expect(formatted).not.toContain("An unexpected error occurred");
+      // The rejected value must not be echoed back.
+      expect(formatted).not.toContain("z".repeat(50));
+      expect(formatted.length).toBeLessThan(500);
+    });
+
+    it("still names the tool when the issue JSON cannot be parsed", () => {
+      const formatted = formatStreamError(
+        "AI_InvalidToolInputError: Invalid input for tool upsertSkill: something went wrong",
+      );
+
+      expect(formatted).toContain("upsertSkill");
+      expect(formatted).not.toContain("An unexpected error occurred");
+    });
+
+    it("passes an unrecognised string through rather than discarding it", () => {
+      // Previously ANY string hit the generic fallback and its content was lost.
+      expect(formatStreamError("upstream connection reset")).toContain(
+        "upstream connection reset",
+      );
+    });
+  });
+
   describe("unknown tool", () => {
     it("names the tool the model tried to call", () => {
       const error = new NoSuchToolError({
@@ -145,10 +195,12 @@ describe("formatStreamError", () => {
   });
 
   describe("generic fallback", () => {
+    // Strings are handled above — they carry their own message and are
+    // returned rather than replaced. The fallback is for values that don't.
     it.each([
-      ["a string throw", "just a string"],
       ["a plain object throw", { nope: true }],
       ["a null throw", null],
+      ["an undefined throw", undefined],
     ])("records what actually arrived for %s", (_label, thrown) => {
       const formatted = formatStreamError(thrown);
       expect(formatted).toContain("An unexpected error occurred");
