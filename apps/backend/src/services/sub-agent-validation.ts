@@ -1,9 +1,21 @@
 import { db } from "../index.ts";
-import { agent as agentTable } from "../db/schema.ts";
-import { and, eq, inArray } from "drizzle-orm";
+import { listScoped, type ScopeContext } from "./scoped-resource.ts";
 
+/**
+ * Save-time guard on an Agent's `subAgentIds`, applied wherever a Workspace
+ * surface writes them (the Agent routes and the agent-management tools).
+ *
+ * A sub-Agent must be **visible in this Workspace** — Workspace-scoped here, or
+ * an Organization-scoped (Shared) Agent attached here (ADR-0007) — which is the
+ * same rule the Chat turn applies when it loads them. Validating at Workspace
+ * scope alone rejected an attached Shared Agent, so promoting a sub-Agent left
+ * its parent unsavable from the Workspace surface.
+ *
+ * Promotion is a separate, stricter rule: a Shared Agent may reference only
+ * other Shared resources (`findNonSharedReferences`).
+ */
 export const validateSubAgentAssignment = async (
-  workspaceId: string,
+  ctx: ScopeContext,
   agentId: string,
   subAgentIds: string[],
 ): Promise<{ valid: boolean; error?: string }> => {
@@ -15,22 +27,16 @@ export const validateSubAgentAssignment = async (
     };
   }
 
-  // 2. Fetch all proposed sub-agents
-  const subAgents = await db
-    .select()
-    .from(agentTable)
-    .where(
-      and(
-        eq(agentTable.workspaceId, workspaceId),
-        inArray(agentTable.id, subAgentIds),
-      ),
-    );
+  if (subAgentIds.length === 0) return { valid: true };
 
-  // 3. Verify all sub-agents exist in workspace
-  if (subAgents.length !== subAgentIds.length) {
+  // 2. Every proposed sub-agent must be visible in this workspace at either scope
+  const visible = await listScoped(db, "agent", ctx);
+  const visibleIds = new Set(visible.map(({ row }) => row.id));
+
+  if (subAgentIds.some((id) => !visibleIds.has(id))) {
     return {
       valid: false,
-      error: "One or more sub-agents not found in workspace",
+      error: "One or more sub-agents are not available in this workspace",
     };
   }
 

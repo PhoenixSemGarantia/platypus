@@ -26,12 +26,18 @@ export type SystemPromptContext = {
   skills: Array<Pick<Skill, "name" | "description">>;
   subAgents: Array<{ name: string; description?: string | null }>;
   /**
-   * Sub-agents assigned to this Agent that failed to initialize for this turn
-   * and therefore have no delegation tool. Named in the prompt as explicitly
-   * unavailable: staying silent leaves the model to discover the gap by taking
-   * an AI_NoSuchToolError, and leaves the user with no idea why.
+   * Sub-agents assigned to this Agent that have no delegation tool this turn.
+   * Named in the prompt as explicitly unavailable: staying silent leaves the
+   * model to discover the gap by taking an AI_NoSuchToolError, and leaves the
+   * user with no idea why.
+   *
+   * `name` is present only where the sub-agent's row resolved and the failure
+   * came after (its Provider, its model). An assignment that did not resolve in
+   * this Workspace has no name to report — deliberately: reading one off the row
+   * is the Workspace boundary crossing being closed — so it is identified by the
+   * `id` the Agent's own configuration holds.
    */
-  unavailableSubAgents?: Array<{ name: string; reason?: string }>;
+  unavailableSubAgents?: Array<{ id: string; name?: string; reason?: string }>;
   /**
    * Names of workspace-default env vars that will be merged into every
    * sandbox shell.exec call. Keys only — values never enter the system prompt
@@ -157,9 +163,12 @@ Each task description MUST be entirely self-contained — sub-agents cannot see 
   }
 
   if (unavailable.length) {
-    const lines = unavailable.map(
-      (sa) =>
-        `- **${sa.name}**: ${sa.reason || "failed to load"} — no \`${subAgentToolName(sa)}\` tool exists this turn.`,
+    const lines = unavailable.map((sa) =>
+      // A nameless entry never resolved, so there is no tool slug to quote —
+      // deriving one from `undefined` would invent `delegateToUndefined`.
+      sa.name
+        ? `- **${sa.name}**: ${sa.reason || "failed to load"} — no \`${subAgentToolName({ name: sa.name })}\` tool exists this turn.`
+        : `- Sub-agent \`${sa.id}\`: ${sa.reason || "failed to load"} — no delegation tool exists this turn.`,
     );
     sections.push(`## Unavailable Sub-Agents
 

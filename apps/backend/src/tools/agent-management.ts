@@ -72,7 +72,7 @@ export function createAgentManagementTools(
       if (data.subAgentIds && data.subAgentIds.length > 0) {
         const newId = nanoid();
         const validation = await validateSubAgentAssignment(
-          workspaceId,
+          { orgId, wsId: workspaceId },
           newId,
           data.subAgentIds,
         );
@@ -170,7 +170,7 @@ export function createAgentManagementTools(
 
       if (data.subAgentIds) {
         const validation = await validateSubAgentAssignment(
-          workspaceId,
+          { orgId, wsId: workspaceId },
           agentId,
           data.subAgentIds,
         );

@@ -337,6 +337,94 @@ describe("chat-execution", () => {
       ).rejects.toBeInstanceOf(NotFoundError);
     });
 
+    it("resolves a sub-agent at the invoking Workspace's scope, or org-scoped where attached", async () => {
+      const workspaceSubAgent = {
+        ...baseAgent,
+        id: "sub-ws",
+        name: "Research Agent",
+        description: "Looks things up.",
+      };
+      const orgSubAgent = {
+        ...baseAgent,
+        id: "sub-org",
+        name: "Shared Agent",
+        description: "Shared specialist.",
+        organizationId: "org-1",
+        workspaceId: null,
+      };
+      const parent = {
+        ...baseAgent,
+        subAgentIds: ["sub-ws", "sub-org"],
+      };
+
+      const queries = createInMemoryChatTurnQueries({
+        workspaces: [baseWorkspace],
+        agents: [parent, workspaceSubAgent, orgSubAgent],
+        providers: [baseProvider],
+        attachments: [
+          { workspaceId: "ws-1", resourceType: "agent", resourceId: "sub-org" },
+        ],
+      });
+
+      const turn = await prepareChatTurn(
+        { ...baseInput, request: { agentId: parent.id } },
+        queries,
+      );
+
+      expect(turn.stream.tools).toHaveProperty("delegateToResearchAgent");
+      expect(turn.stream.tools).toHaveProperty("delegateToSharedAgent");
+      expect(turn.stream.system).toContain("Research Agent");
+      expect(turn.stream.system).toContain("Shared Agent");
+      expect(turn.stream.system).not.toContain("## Unavailable Sub-Agents");
+    });
+
+    it("does not resolve a sub-agent that is not visible in the invoking Workspace, and reports it by id", async () => {
+      const foreignSubAgent = {
+        ...baseAgent,
+        id: "sub-foreign",
+        name: "Foreign Agent",
+        description: "Belongs to another workspace.",
+        workspaceId: "ws-other",
+      };
+      const detachedSharedSubAgent = {
+        ...baseAgent,
+        id: "sub-detached",
+        name: "Detached Agent",
+        description: "Shared but not attached here.",
+        organizationId: "org-1",
+        workspaceId: null,
+      };
+      const parent = {
+        ...baseAgent,
+        subAgentIds: ["sub-foreign", "sub-detached"],
+      };
+
+      const queries = createInMemoryChatTurnQueries({
+        workspaces: [baseWorkspace],
+        agents: [parent, foreignSubAgent, detachedSharedSubAgent],
+        providers: [baseProvider],
+      });
+
+      const turn = await prepareChatTurn(
+        { ...baseInput, request: { agentId: parent.id } },
+        queries,
+      );
+
+      // No delegate tool, and nothing read off the unresolvable rows reaches the
+      // prompt — the ids the parent's own configuration holds identify them.
+      expect(turn.stream.tools).not.toHaveProperty("delegateToForeignAgent");
+      expect(turn.stream.tools).not.toHaveProperty("delegateToDetachedAgent");
+      expect(turn.stream.system).not.toContain("Foreign Agent");
+      expect(turn.stream.system).not.toContain("Belongs to another workspace.");
+      expect(turn.stream.system).not.toContain("Detached Agent");
+      expect(turn.stream.system).not.toContain("Shared but not attached here.");
+
+      expect(turn.stream.system).toContain("## Unavailable Sub-Agents");
+      expect(turn.stream.system).toContain("`sub-foreign`");
+      expect(turn.stream.system).toContain("`sub-detached`");
+      expect(turn.stream.system).toContain("not available in this workspace");
+    });
+
     it("Direct Provider+Model selection persists the user's own prompt text, not the composed prompt", async () => {
       const queries = createInMemoryChatTurnQueries({
         workspaces: [{ ...baseWorkspace, context: "Ships on Fridays." }],
