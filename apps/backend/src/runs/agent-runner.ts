@@ -1,6 +1,4 @@
 import {
-  APICallError,
-  LoadAPIKeyError,
   convertToModelMessages,
   createIdGenerator,
   createUIMessageStreamResponse,
@@ -9,6 +7,11 @@ import {
   stepCountIs,
   streamText,
 } from "ai";
+import {
+  formatStreamError,
+  isTruncatedByTokenLimit,
+  TRUNCATED_BY_TOKEN_LIMIT,
+} from "./stream-error.ts";
 import {
   prepareChatTurn,
   validateTurnAttachments,
@@ -318,6 +321,13 @@ export class AgentRunner {
     const onStep = (step: {
       toolCalls?: Array<{ toolName: string }>;
       usage?: { inputTokens?: number; outputTokens?: number };
+      // Both, deliberately. The unified union collapses any reason the
+      // provider adapter doesn't recognise into `other` — which is how
+      // Bedrock's `malformed_tool_use` becomes indistinguishable from a
+      // dozen other endings. The raw value is the only record of what the
+      // provider actually said (issue #406).
+      finishReason?: string;
+      rawFinishReason?: string;
     }): void => {
       handle.bumpStep();
       accumulateStepStats(state.stats, step);
@@ -326,10 +336,22 @@ export class AgentRunner {
           runId: input.runId,
           step: state.stats.steps,
           toolCalls: step.toolCalls?.map((tc) => tc.toolName) ?? [],
+          finishReason: step.finishReason,
+          rawFinishReason: step.rawFinishReason,
           stats: state.stats,
         },
         "Step finished",
       );
+      if (isTruncatedByTokenLimit(step.finishReason)) {
+        logger.warn(
+          {
+            runId: input.runId,
+            step: state.stats.steps,
+            rawFinishReason: step.rawFinishReason,
+          },
+          "Step truncated at the output token limit",
+        );
+      }
       // Sink decides write cadence (FlushScheduler in ChatSink).
       void sink
         .onProgress({
@@ -504,6 +526,10 @@ export class AgentRunner {
             toolName: trip.toolName,
             count: trip.count,
             duration: Date.now() - startTime,
+            // Carried here too: this path returns before the completion log
+            // below, so without it a no-progress run records neither reason.
+            finishReason: result.finishReason,
+            rawFinishReason: result.rawFinishReason,
             stats,
           },
           "Run aborted: no progress",
@@ -512,18 +538,29 @@ export class AgentRunner {
         return { text: result.text, stats };
       }
 
+      // Nobody is watching an unattended run, so this log is the only record
+      // of how it ended. Carry both reasons for the same reason `onStep` does.
       logger.info(
         {
           runId: input.runId,
           duration: Date.now() - startTime,
           responseLength: result.text.length,
+          finishReason: result.finishReason,
+          rawFinishReason: result.rawFinishReason,
           stats,
         },
         "Run generate completed",
       );
 
       await finalize("succeeded");
-      return { text: result.text, stats };
+      // A truncated answer is worse than a failed one when it's indistinguishable
+      // from a complete one: the caller stores it, and whatever reads it later
+      // has no way to know the tail is missing. Say so in the text itself, which
+      // is the only channel an unattended caller has.
+      const text = isTruncatedByTokenLimit(result.finishReason)
+        ? `${result.text}\n\n${TRUNCATED_BY_TOKEN_LIMIT}`
+        : result.text;
+      return { text, stats };
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       logger.error(
@@ -546,33 +583,6 @@ export class AgentRunner {
     }
   }
 }
-
-/**
- * Converts AI SDK errors into user-facing strings for the UI message stream.
- * Behaviour-preserving copy of the previous inline `onError` handler.
- */
-const formatStreamError = (error: unknown): string => {
-  logger.error({ error }, "Chat stream error");
-  if (LoadAPIKeyError.isInstance(error)) {
-    return "AI provider API key is missing or not configured.";
-  }
-  if (APICallError.isInstance(error)) {
-    if (error.statusCode === 401 || error.statusCode === 403) {
-      return "AI provider authentication failed. Your API key may be invalid or expired.";
-    }
-    if (error.statusCode === 429) {
-      return "AI provider rate limit exceeded. Please try again later.";
-    }
-    if (error.statusCode != null && error.statusCode >= 500) {
-      return "AI provider is currently unavailable. Please try again later.";
-    }
-    return `AI provider error: ${error.message}`;
-  }
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return "An unexpected error occurred.";
-};
 
 /** Singleton runner — services and routes share one instance. */
 export const agentRunner = new AgentRunner();
