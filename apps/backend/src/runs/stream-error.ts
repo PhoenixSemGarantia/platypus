@@ -5,6 +5,13 @@ import {
   NoSuchToolError,
 } from "ai";
 import { logger } from "../logger.ts";
+import {
+  formatIssues,
+  findIssues,
+  MAX_ISSUE_LENGTH,
+  truncate,
+  type ZodLikeIssue,
+} from "../zod-issues.ts";
 
 /**
  * What an unattended caller is told when a generation stopped because it ran
@@ -22,63 +29,6 @@ export const TRUNCATED_BY_TOKEN_LIMIT =
 export const isTruncatedByTokenLimit = (
   finishReason: string | undefined,
 ): boolean => finishReason === "length";
-
-/** How much of a single validation issue is worth repeating back. */
-const MAX_ISSUE_LENGTH = 160;
-/** Beyond a handful of issues the list stops being diagnostic. */
-const MAX_ISSUES = 5;
-
-/** A Zod issue, structurally — avoids coupling to a specific zod version. */
-type ZodLikeIssue = { path?: unknown[]; message?: string };
-
-const truncate = (text: string, max: number): string =>
-  text.length > max ? `${text.slice(0, max - 1)}…` : text;
-
-/**
- * Walk an error's `cause` chain looking for Zod's `issues` array.
- *
- * The SDK nests these two deep — `InvalidToolInputError` → `TypeValidationError`
- * → `ZodError` — and the depth is an implementation detail we shouldn't encode,
- * so this searches rather than reaching through a fixed path.
- */
-const findIssues = (error: unknown, depth = 0): ZodLikeIssue[] | undefined => {
-  if (depth > 5 || error == null || typeof error !== "object") return undefined;
-  const issues = (error as { issues?: unknown }).issues;
-  if (Array.isArray(issues) && issues.length > 0)
-    return issues as ZodLikeIssue[];
-  return findIssues((error as { cause?: unknown }).cause, depth + 1);
-};
-
-/** `["body"]` → `body`, `["items", 2, "id"]` → `items[2].id`, `[]` → `(root)`. */
-const formatPath = (path: unknown[] | undefined): string => {
-  if (!path || path.length === 0) return "(root)";
-  return path.reduce<string>((acc, segment) => {
-    if (typeof segment === "number") return `${acc}[${segment}]`;
-    return acc ? `${acc}.${String(segment)}` : String(segment);
-  }, "");
-};
-
-/**
- * Describe why a tool's arguments were rejected, in one line per failing field.
- *
- * Deliberately does NOT include the rejected value. The SDK's own message
- * embeds the entire value plus the serialized `ZodError`, which is how a
- * single over-long field became several thousand characters of unreadable
- * output for the user and the model alike (issue #406).
- */
-const formatIssues = (issues: ZodLikeIssue[]): string => {
-  const shown = issues
-    .slice(0, MAX_ISSUES)
-    .map(
-      (issue) =>
-        `${formatPath(issue.path)}: ${truncate(
-          (issue.message ?? "invalid").replace(/\s+/g, " ").trim(),
-          MAX_ISSUE_LENGTH,
-        )}`,
-    );
-  const omitted = issues.length - shown.length;
-  return shown.join("; ") + (omitted > 0 ? ` (+${omitted} more)` : "");
-};
 
 const describeValidationFailure = (error: InvalidToolInputError): string => {
   const issues = findIssues(error.cause);
