@@ -143,10 +143,22 @@ export const createInMemoryChatTurnQueries = (
       return Promise.resolve(m);
     },
 
-    getSubAgentsByIds(ids) {
+    getSubAgentsByIds(ids, orgId, workspaceId) {
       if (ids.length === 0) return Promise.resolve([]);
+      // Same rule as getAgent — a sub-agent resolves in the invoking workspace,
+      // or at org scope where attached (ADR-0007). Enforced here rather than
+      // filtering by id alone, so tests exercise the boundary, not a hole in it.
+      const visible = (fx.agents ?? []).filter(
+        (a) =>
+          a.workspaceId === workspaceId ||
+          (a.organizationId === orgId &&
+            !a.workspaceId &&
+            isAttached("agent", a.id, workspaceId)),
+      );
       return Promise.resolve(
-        (fx.agents ?? []).filter((a) => ids.includes(a.id)),
+        ids
+          .map((id) => visible.find((a) => a.id === id))
+          .filter((a): a is AgentRow => a !== undefined),
       );
     },
 

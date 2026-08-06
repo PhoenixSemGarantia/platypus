@@ -244,7 +244,16 @@ export type ChatTurnQueries = {
     orgId: string,
     workspaceId: string,
   ): Promise<McpRow | null>;
-  getSubAgentsByIds(ids: string[]): Promise<AgentRow[]>;
+  /**
+   * The sub-Agents among `ids` that are visible in the invoking Workspace, in
+   * the order they were assigned. Ids that do not resolve are simply absent —
+   * the caller reports them as unavailable.
+   */
+  getSubAgentsByIds(
+    ids: string[],
+    orgId: string,
+    workspaceId: string,
+  ): Promise<AgentRow[]>;
   getUserContexts(
     userId: string,
     workspaceId: string,
@@ -426,9 +435,48 @@ export const drizzleChatTurnQueries: ChatTurnQueries = {
     return row;
   },
 
-  async getSubAgentsByIds(ids) {
+  async getSubAgentsByIds(ids, orgId, workspaceId) {
     if (ids.length === 0) return [];
-    return db.select().from(agentTable).where(inArray(agentTable.id, ids));
+    // A sub-Agent resolves at the parent's Workspace scope, or at Organization
+    // scope where attached (ADR-0007) — the same rule `getAgent` applies. Looked
+    // up by id alone, an Agent from another Workspace resolved here: its name and
+    // description reached this prompt, and its Provider then failed to resolve.
+    const workspaceAgents = await db
+      .select()
+      .from(agentTable)
+      .where(
+        and(
+          eq(agentTable.workspaceId, workspaceId),
+          inArray(agentTable.id, ids),
+        ),
+      );
+
+    // Org-scoped (Shared) sub-Agents, gated by an Attachment for the invoking
+    // workspace via an inner join.
+    const orgAgents = await db
+      .select()
+      .from(agentTable)
+      .innerJoin(
+        attachmentTable,
+        and(
+          eq(attachmentTable.resourceId, agentTable.id),
+          eq(attachmentTable.resourceType, "agent"),
+          eq(attachmentTable.workspaceId, workspaceId),
+        ),
+      )
+      .where(
+        and(eq(agentTable.organizationId, orgId), inArray(agentTable.id, ids)),
+      );
+
+    // Returned in assignment order so the prompt lists sub-agents the way the
+    // Operator configured them, not in whichever order the two queries ran. A
+    // row is at exactly one scope, so the two sets cannot collide on an id.
+    const byId = new Map<string, AgentRow>();
+    for (const row of workspaceAgents) byId.set(row.id, row);
+    for (const row of orgAgents) byId.set(row.agent.id, row.agent);
+    return ids
+      .map((id) => byId.get(id))
+      .filter((row): row is AgentRow => row !== undefined);
   },
 
   async getUserContexts(userId, workspaceId) {
@@ -1136,6 +1184,14 @@ const loadSkills = async (
   return queries.getSkillsByIds(agent.skillIds, orgId, workspaceId);
 };
 
+/**
+ * Reason reported for an assigned sub-agent id that does not resolve in the
+ * invoking Workspace — deleted, or a Shared Agent detached from (or never
+ * attached to) this Workspace. Deliberately says nothing about the row itself.
+ */
+const UNRESOLVED_SUB_AGENT_REASON =
+  "not available in this workspace — it may have been deleted, or it is a shared agent that is not attached here";
+
 const loadSubAgents = async (
   queries: ChatTurnQueries,
   agent: AgentRow | undefined,
@@ -1158,7 +1214,20 @@ const loadSubAgents = async (
     };
   }
 
-  const subAgentRecords = await queries.getSubAgentsByIds(agent.subAgentIds);
+  const assignedIds = [...new Set(agent.subAgentIds)];
+  const subAgentRecords = await queries.getSubAgentsByIds(
+    assignedIds,
+    orgId,
+    workspaceId,
+  );
+
+  // An assigned id that does not resolve in this Workspace is reported by id
+  // alone: it is either gone, or a Shared Agent that is not attached here, and
+  // reading a name off the row is exactly the boundary crossing being avoided.
+  const resolvedIds = new Set(subAgentRecords.map((sa) => sa.id));
+  const unresolved: SubAgentFailure[] = assignedIds
+    .filter((id) => !resolvedIds.has(id))
+    .map((id) => ({ id, reason: UNRESOLVED_SUB_AGENT_REASON }));
 
   const subAgentMcpClients: MCPClient[] = [];
 
@@ -1220,7 +1289,7 @@ const loadSubAgents = async (
 
   return {
     subAgents,
-    unavailableSubAgents: failures,
+    unavailableSubAgents: [...unresolved, ...failures],
     subAgentTools,
     subAgentMcpClients,
   };

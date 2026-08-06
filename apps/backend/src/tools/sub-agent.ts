@@ -312,8 +312,12 @@ export const createSubAgentTool = (options: SubAgentToolOptions) => {
  * Returned — not just logged — because the caller has to keep the system
  * prompt in step with the toolset: describing a delegation tool that was never
  * registered makes the model call it and take an `AI_NoSuchToolError`.
+ *
+ * `name` is optional because the caller also reports assignments whose row never
+ * resolved in the invoking Workspace; those have only the assigned `id`, which is
+ * the one identifier available without crossing the boundary that dropped them.
  */
-export type SubAgentFailure = { id: string; name: string; reason: string };
+export type SubAgentFailure = { id: string; name?: string; reason: string };
 
 /**
  * Creates sub-agent tools for all sub-agents assigned to a parent agent.

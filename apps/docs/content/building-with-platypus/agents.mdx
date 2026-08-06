@@ -168,20 +168,28 @@ Everything else is absent:
 ### When a sub-agent can't run
 
 Selecting a sub-agent in the form is not a guarantee it will be there at run
-time. Each one is built fresh on every turn, and that build fails if its
-Provider no longer resolves in this Workspace — a Shared Provider that was
-detached, say — or if its pinned model is gone from the Provider's model list.
+time. Each one is resolved and built fresh on every turn, and three things stop
+it:
 
-A sub-agent that fails to build gets **no delegate tool for that turn**. The
-parent Agent is told which ones are unavailable and why, so ask it and it will
-tell you. The switch stays flipped in the form either way: the assignment is
-still saved, it just can't be honoured right now. Fix the sub-agent's Provider
-or model and the tool comes back on the next turn.
+- The sub-agent is **not available in this Workspace** — it was deleted, or it
+  is a Shared Agent that was detached from this Workspace or never attached to
+  it. A Shared Agent is only ever visible where it is attached, so a parent
+  attached to a second Workspace loses a sub-agent that lives only in the first.
+- Its **Provider** no longer resolves in this Workspace — a Shared Provider that
+  was detached, say.
+- Its pinned **model** is gone from the Provider's model list.
+
+Any of these means **no delegate tool for that turn**. The parent Agent is told
+which ones are unavailable and why, so ask it and it will tell you. The switch
+stays flipped in the form either way: the assignment is still saved, it just
+can't be honoured right now. Re-attach the Agent, or fix its Provider or model,
+and the tool comes back on the next turn.
 
 <Callout type="warning">
   "The Agent says it can't reach its sub-agent, but I can see the switch is on"
   is the trap. The **Sub-Agents** card shows what you assigned, not what loaded.
-  Open the sub-agent itself and check its Provider and model still resolve.
+  Check the sub-agent is still attached to this Workspace, then open it and check
+  its Provider and model still resolve.
 </Callout>
 
 If the sub-agent builds but its run then fails part-way, the delegate tool
