@@ -1,4 +1,4 @@
-import { and, eq, or } from "drizzle-orm";
+import { and, eq, or, inArray, isNull } from "drizzle-orm";
 import {
   agent as agentTable,
   skill as skillTable,
@@ -107,9 +107,16 @@ export const resolveScoped = async <T extends ScopedResourceType>(
   const row = rows[0] as RowOf[T] | undefined;
   if (!row) return null;
 
-  const isOrgScoped = !!row.organizationId && !row.workspaceId;
-  if (!isOrgScoped) {
+  // Classified by which scope the row actually carries, not by elimination. The
+  // two columns are mutually exclusive on write but nothing in the database
+  // enforces it, and a row holding both would otherwise fall through to
+  // "workspace" — making another Workspace's row visible here on the strength of
+  // its organizationId alone.
+  if (row.workspaceId === ctx.wsId) {
     return { row, scope: "workspace" };
+  }
+  if (!(row.organizationId === ctx.orgId && !row.workspaceId)) {
+    return null;
   }
 
   // A Shared resource is visible here only through an Attachment (ADR-0007).
@@ -129,24 +136,33 @@ export const resolveScoped = async <T extends ScopedResourceType>(
 };
 
 /**
- * Lists every resource of this type visible in the Workspace: its
- * Workspace-scoped rows plus the Organization-scoped (Shared) rows attached to
- * it. Never throws.
+ * The two queries behind `listScoped` and `listScopedByIds`: the Workspace's own
+ * rows, then the Organization-scoped rows an Attachment exposes here. `ids`
+ * narrows both to a known set of references; omitted, it lists the type.
  */
-export const listScoped = async <T extends ScopedResourceType>(
+const listVisible = async <T extends ScopedResourceType>(
   database: Database,
   type: T,
   ctx: ScopeContext,
+  ids?: string[],
 ): Promise<{ row: RowOf[T]; scope: Scope }[]> => {
   const { table } = REGISTRY[type];
 
   const workspaceRows = await database
     .select()
     .from(table)
-    .where(eq(table.workspaceId, ctx.wsId));
+    .where(
+      and(
+        eq(table.workspaceId, ctx.wsId),
+        ids ? inArray(table.id, ids) : undefined,
+      ),
+    );
 
   // Shared rows appear in a Workspace only where attached (ADR-0007) — gate by
-  // an inner join on the Attachment table.
+  // an inner join on the Attachment table. `isNull(workspaceId)` is what makes
+  // the row org-scoped: the scope columns are mutually exclusive on write, not by
+  // a database constraint, so a row carrying both must not reach another
+  // Workspace through that Workspace's Attachment.
   const attachedRows = await database
     .select()
     .from(table)
@@ -158,7 +174,13 @@ export const listScoped = async <T extends ScopedResourceType>(
         eq(attachmentTable.workspaceId, ctx.wsId),
       ),
     )
-    .where(eq(table.organizationId, ctx.orgId));
+    .where(
+      and(
+        eq(table.organizationId, ctx.orgId),
+        isNull(table.workspaceId),
+        ids ? inArray(table.id, ids) : undefined,
+      ),
+    );
 
   // The inner-join rows are keyed by the table's name, which matches the
   // resource type for every dual-scope table (`agent`, `skill`, `mcp`,
@@ -176,6 +198,35 @@ export const listScoped = async <T extends ScopedResourceType>(
     ...orgRows.map((row) => ({ row, scope: "organization" as const })),
   ];
 };
+
+/**
+ * Lists every resource of this type visible in the Workspace: its
+ * Workspace-scoped rows plus the Organization-scoped (Shared) rows attached to
+ * it. Never throws.
+ */
+export const listScoped = <T extends ScopedResourceType>(
+  database: Database,
+  type: T,
+  ctx: ScopeContext,
+): Promise<{ row: RowOf[T]; scope: Scope }[]> =>
+  listVisible(database, type, ctx);
+
+/**
+ * The subset of `ids` visible in this Workspace, each with its scope — the
+ * single authority for "which of these references may this Workspace use?".
+ * Ids that resolve to nothing are simply absent, so a caller can compare against
+ * what it asked for (a save-time rejection) or carry on without them (a
+ * run-time drop). Never throws; no query runs for an empty `ids`.
+ */
+export const listScopedByIds = <T extends ScopedResourceType>(
+  database: Database,
+  type: T,
+  ids: string[],
+  ctx: ScopeContext,
+): Promise<{ row: RowOf[T]; scope: Scope }[]> =>
+  ids.length === 0
+    ? Promise.resolve([])
+    : listVisible(database, type, ctx, ids);
 
 /**
  * Like `resolveScoped` but throws `NotFoundError` when the resource is not

@@ -3,7 +3,7 @@ import {
   type MCPClient,
 } from "@ai-sdk/mcp";
 import { openProvider, type OpenedProvider } from "./provider.ts";
-import { and, eq, or, inArray, isNull } from "drizzle-orm";
+import { and, eq, or, inArray } from "drizzle-orm";
 import { db } from "../index.ts";
 import {
   agent as agentTable,
@@ -56,6 +56,7 @@ import {
   normalizeFileParts,
 } from "./file-gate.ts";
 import type { PlatypusUIMessage } from "../types.ts";
+import { listScopedByIds } from "./scoped-resource.ts";
 
 /**
  * Default agentic step ceiling for an agent that has no explicit `maxSteps`.
@@ -436,53 +437,19 @@ export const drizzleChatTurnQueries: ChatTurnQueries = {
   },
 
   async getSubAgentsByIds(ids, orgId, workspaceId) {
-    if (ids.length === 0) return [];
     // A sub-Agent resolves at the parent's Workspace scope, or at Organization
-    // scope where attached (ADR-0007) — the same rule `getAgent` applies. Looked
-    // up by id alone, an Agent from another Workspace resolved here: its name and
-    // description reached this prompt, and its Provider then failed to resolve.
-    const workspaceAgents = await db
-      .select()
-      .from(agentTable)
-      .where(
-        and(
-          eq(agentTable.workspaceId, workspaceId),
-          inArray(agentTable.id, ids),
-        ),
-      );
-
-    // Org-scoped (Shared) sub-Agents, gated by an Attachment for the invoking
-    // workspace via an inner join. Written out rather than via `listScoped`
-    // because that lists a whole resource type; this filters to the ids assigned.
-    // `isNull(workspaceId)` is what makes "org-scoped" mean it here: the two
-    // scope columns are mutually exclusive by convention, not by a DB
-    // constraint, so a row carrying both must not borrow another Workspace's
-    // Attachment to resolve.
-    const orgAgents = await db
-      .select()
-      .from(agentTable)
-      .innerJoin(
-        attachmentTable,
-        and(
-          eq(attachmentTable.resourceId, agentTable.id),
-          eq(attachmentTable.resourceType, "agent"),
-          eq(attachmentTable.workspaceId, workspaceId),
-        ),
-      )
-      .where(
-        and(
-          eq(agentTable.organizationId, orgId),
-          isNull(agentTable.workspaceId),
-          inArray(agentTable.id, ids),
-        ),
-      );
+    // scope where attached (ADR-0007) — the same rule `getAgent` applies, and the
+    // same authority the save-time check uses. Looked up by id alone, an Agent
+    // from another Workspace resolved here: its name and description reached this
+    // prompt, and its Provider then failed to resolve.
+    const visible = await listScopedByIds(db, "agent", ids, {
+      orgId,
+      wsId: workspaceId,
+    });
 
     // Returned in assignment order so the prompt lists sub-agents the way the
-    // Operator configured them, not in whichever order the two queries ran. The
-    // two sets cannot collide on an id: each query pins the other scope's column.
-    const byId = new Map<string, AgentRow>();
-    for (const row of workspaceAgents) byId.set(row.id, row);
-    for (const row of orgAgents) byId.set(row.agent.id, row.agent);
+    // Operator configured them, not in whichever order the scope queries ran.
+    const byId = new Map(visible.map(({ row }) => [row.id, row]));
     return ids
       .map((id) => byId.get(id))
       .filter((row): row is AgentRow => row !== undefined);

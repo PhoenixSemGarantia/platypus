@@ -3,6 +3,7 @@ import { mockDb, resetMockDb, asDb } from "../test-utils.ts";
 import {
   resolveScoped,
   listScoped,
+  listScopedByIds,
   requireScoped,
   requireWorkspaceMutable,
   requireSharedDeletable,
@@ -64,6 +65,18 @@ describe("ScopedResource read module", () => {
       const found = await resolveScoped(asDb(mockDb), "agent", "a1", ctx);
       expect(found).toBeNull();
     });
+
+    it("returns null for a row that carries this org and another workspace", async () => {
+      // The scope columns are mutually exclusive on write, not by a database
+      // constraint. Such a row belongs to ws-other, so matching it on
+      // organizationId alone would make it visible in ws-1.
+      mockDb.limit.mockResolvedValueOnce([
+        { id: "a1", organizationId: "org-1", workspaceId: "ws-other" },
+      ]);
+
+      const found = await resolveScoped(asDb(mockDb), "agent", "a1", ctx);
+      expect(found).toBeNull();
+    });
   });
 
   describe("listScoped", () => {
@@ -80,6 +93,37 @@ describe("ScopedResource read module", () => {
         { row: wsRow, scope: "workspace" },
         { row: orgRow, scope: "organization" },
       ]);
+    });
+  });
+
+  describe("listScopedByIds", () => {
+    it("unions workspace rows with attached org rows for the given ids", async () => {
+      const wsRow = { id: "ws-a", workspaceId: "ws-1" };
+      const orgRow = {
+        id: "org-a",
+        organizationId: "org-1",
+        workspaceId: null,
+      };
+      mockDb.where
+        .mockResolvedValueOnce([wsRow])
+        .mockResolvedValueOnce([{ agent: orgRow }]);
+
+      const results = await listScopedByIds(
+        asDb(mockDb),
+        "agent",
+        ["ws-a", "org-a", "invisible"],
+        ctx,
+      );
+      expect(results).toEqual([
+        { row: wsRow, scope: "workspace" },
+        { row: orgRow, scope: "organization" },
+      ]);
+    });
+
+    it("returns an empty list without querying when given no ids", async () => {
+      const results = await listScopedByIds(asDb(mockDb), "agent", [], ctx);
+      expect(results).toEqual([]);
+      expect(mockDb.select).not.toHaveBeenCalled();
     });
   });
 

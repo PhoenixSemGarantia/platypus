@@ -36,10 +36,13 @@ import {
 } from "../middleware/authorization.ts";
 import type { Variables } from "../server.ts";
 import { calculateCardPosition } from "../utils/kanban-positioning.ts";
+import { listScopedByIds } from "../services/scoped-resource.ts";
 
 /**
- * Validates that all assignees reference valid org members (users) or
- * workspace agents. Returns an error message string if invalid, or null if OK.
+ * Validates that all assignees reference valid org members (users) or Agents
+ * visible in this Workspace — its own, plus the Shared Agents attached to it
+ * (ADR-0007), which is the set the assignee picker offers and the set that can
+ * actually run here. Returns an error message string if invalid, or null if OK.
  */
 async function validateAssignees(
   assignees: { type: string; id: string }[],
@@ -67,17 +70,10 @@ async function validateAssignees(
           .from(user)
           .where(and(eq(user.role, "admin"), inArray(user.id, userIds)))
       : Promise.resolve([]),
-    agentIds.length > 0
-      ? db
-          .select({ id: agentTable.id })
-          .from(agentTable)
-          .where(
-            and(
-              eq(agentTable.workspaceId, workspaceId),
-              inArray(agentTable.id, agentIds),
-            ),
-          )
-      : Promise.resolve([]),
+    listScopedByIds(db, "agent", agentIds, {
+      orgId,
+      wsId: workspaceId,
+    }),
   ]);
 
   // Combine org members and super admins (who may not have an org membership record)

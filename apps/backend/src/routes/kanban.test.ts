@@ -660,6 +660,77 @@ describe("Kanban Routes", () => {
         expect(body.assignees).toEqual([{ type: "user", id: "admin-user" }]);
       });
 
+      it("should allow a shared agent attached to this workspace to be assigned", async () => {
+        // The assignee picker offers every Agent visible in the Workspace, which
+        // includes attached Shared Agents — and one can run here, so it can own
+        // a card (ADR-0007).
+        mockSession();
+        mockDb.limit.mockResolvedValueOnce([{ role: "member" }]); // requireOrgAccess
+        mockDb.limit.mockResolvedValueOnce([
+          { ownerId: "user-1", organizationId: "org-1" },
+        ]); // requireWorkspaceAccess
+        mockDb.where.mockReturnValueOnce(mockDb); // requireOrgAccess chain
+        mockDb.where.mockReturnValueOnce(mockDb); // requireWorkspaceAccess chain
+        // No user assignees, so the visibility lookup's two queries come first:
+        // workspace-scoped agents, then org-scoped ones joined to an attachment.
+        mockDb.where.mockResolvedValueOnce([]);
+        mockDb.where.mockResolvedValueOnce([
+          {
+            agent: {
+              id: "shared-agent",
+              organizationId: "org-1",
+              workspaceId: null,
+            },
+            attachment: { id: "att-1" },
+          },
+        ]);
+        mockDb.where.mockReturnValueOnce(mockDb); // update subquery chain
+        mockDb.where.mockReturnValueOnce(mockDb); // update main where chain
+
+        const mockCard = {
+          id: "card-1",
+          title: "Test",
+          assignees: [{ type: "agent", id: "shared-agent" }],
+        };
+        mockDb.returning.mockResolvedValueOnce([mockCard]);
+
+        const res = await app.request(`${baseUrl}/${boardId}/cards/card-1`, {
+          method: "PUT",
+          body: JSON.stringify({
+            assignees: [{ type: "agent", id: "shared-agent" }],
+          }),
+          headers: { "Content-Type": "application/json" },
+        });
+
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as Record<string, unknown>;
+        expect(body.assignees).toEqual([{ type: "agent", id: "shared-agent" }]);
+      });
+
+      it("should return 400 for an agent that is not visible in this workspace", async () => {
+        mockSession();
+        mockDb.limit.mockResolvedValueOnce([{ role: "member" }]); // requireOrgAccess
+        mockDb.limit.mockResolvedValueOnce([
+          { ownerId: "user-1", organizationId: "org-1" },
+        ]); // requireWorkspaceAccess
+        mockDb.where.mockReturnValueOnce(mockDb); // requireOrgAccess chain
+        mockDb.where.mockReturnValueOnce(mockDb); // requireWorkspaceAccess chain
+        mockDb.where.mockResolvedValueOnce([]); // no workspace-scoped match
+        mockDb.where.mockResolvedValueOnce([]); // no attached org-scoped match
+
+        const res = await app.request(`${baseUrl}/${boardId}/cards/card-1`, {
+          method: "PUT",
+          body: JSON.stringify({
+            assignees: [{ type: "agent", id: "someone-elses-agent" }],
+          }),
+          headers: { "Content-Type": "application/json" },
+        });
+
+        expect(res.status).toBe(400);
+        const body = (await res.json()) as Record<string, unknown>;
+        expect(body.error).toBe("Invalid agent assignee");
+      });
+
       it("should allow org member to be assigned", async () => {
         mockSession();
         mockDb.limit.mockResolvedValueOnce([{ role: "member" }]); // requireOrgAccess
