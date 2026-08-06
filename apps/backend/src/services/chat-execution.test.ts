@@ -383,6 +383,45 @@ describe("chat-execution", () => {
       expect(turn.stream.maxSteps).toBe(1);
     });
 
+    // `seed` used to be read straight off the request while the other five came
+    // from `agent || data`, so an Agent's stored Seed never reached the model.
+    it("sends the Agent's own seed, not the request's, on an Agent turn", async () => {
+      const seededAgent = { ...baseAgent, seed: 1234, temperature: 0.4 };
+      const queries = createInMemoryChatTurnQueries({
+        workspaces: [baseWorkspace],
+        agents: [seededAgent],
+        providers: [baseProvider],
+      });
+
+      const turn = await prepareChatTurn(
+        { ...baseInput, request: { agentId: seededAgent.id } },
+        queries,
+      );
+
+      expect(turn.stream.seed).toBe(1234);
+      expect(turn.stream.temperature).toBe(0.4);
+      // Agent-driven turns still don't persist generation params on the row.
+      expect(turn.resolved.seed).toBeUndefined();
+    });
+
+    it("still takes seed from the request on a Direct turn", async () => {
+      const queries = createInMemoryChatTurnQueries({
+        workspaces: [baseWorkspace],
+        providers: [baseProvider],
+      });
+
+      const turn = await prepareChatTurn(
+        {
+          ...baseInput,
+          request: { providerId: baseProvider.id, modelId: "gpt-4", seed: 99 },
+        },
+        queries,
+      );
+
+      expect(turn.stream.seed).toBe(99);
+      expect(turn.resolved.seed).toBe(99);
+    });
+
     it("Agent without an explicit maxSteps falls back to the default (15), not 1", async () => {
       const agentNoMaxSteps = { ...baseAgent, maxSteps: null };
       const queries = createInMemoryChatTurnQueries({

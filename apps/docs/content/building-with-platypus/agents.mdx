@@ -133,9 +133,14 @@ Agent stay focused while specialists do the detailed work.
 ### What a sub-agent run does and doesn't get
 
 A sub-agent run is not a Chat turn, and it gets far less than the same Agent
-would get if you selected it on a Chat. It receives exactly four things: its own
-**model**, its own **Instructions** verbatim, its granted **Tool sets**, and its
-Provider's **security guardrails**. Plus the `task` string the parent wrote.
+would get if you selected it on a Chat. What it does get is everything that
+belongs to the Agent itself: its own **model**, its own **Instructions**
+verbatim, its granted **Tool sets**, its **Max steps** and **sampling
+parameters**, and its Provider's **security guardrails**. Plus the `task` string
+the parent wrote.
+
+An Agent generates the same way wherever it runs. Set Temperature on an Agent
+and a delegated run uses it, exactly as a Chat turn would.
 
 Everything else is absent:
 

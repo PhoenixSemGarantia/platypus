@@ -536,6 +536,60 @@ describe("createSubAgentTool", () => {
   // tool results in `wrapToolsWithBump`, but a sub-agent's own tools go from
   // `loadTools` straight into its ToolLoopAgent. A raw Drizzle `Date` then
   // fails the sub-agent's next-step prompt validation and kills its stream.
+  // An Agent must generate with the parameters assigned to it wherever it
+  // runs. Before this, a delegated run passed only model/instructions/tools/
+  // stopWhen, so an Agent's Temperature was inert the moment it was used as a
+  // sub-agent — on every Provider, including ones that honour it.
+  describe("sampling parameters", () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+    });
+
+    const settingsPassedToAgent = () =>
+      agentConstructorSpy.mock.calls[0][0] as Record<string, unknown>;
+
+    it("passes the sub-agent's own sampling parameters to its agent", () => {
+      createSubAgentTool({
+        ...baseOptions,
+        sampling: { temperature: 0.2, topP: 0.9, seed: 42 },
+      });
+
+      expect(settingsPassedToAgent()).toMatchObject({
+        temperature: 0.2,
+        topP: 0.9,
+        seed: 42,
+      });
+    });
+
+    it("omits parameters that were never set rather than sending undefined", () => {
+      createSubAgentTool({ ...baseOptions, sampling: { temperature: 0.2 } });
+
+      const settings = settingsPassedToAgent();
+      expect(settings).toMatchObject({ temperature: 0.2 });
+      for (const key of [
+        "topP",
+        "topK",
+        "seed",
+        "presencePenalty",
+        "frequencyPenalty",
+      ]) {
+        expect(settings).not.toHaveProperty(key);
+      }
+    });
+
+    it("cannot have sampling override the model, instructions or tools", () => {
+      createSubAgentTool({
+        ...baseOptions,
+        instructions: "Stay on task.",
+        sampling: { temperature: 0.2 },
+      });
+
+      const settings = settingsPassedToAgent();
+      expect(settings.model).toBe("mock-model");
+      expect(settings.instructions).toContain("Stay on task.");
+    });
+  });
+
   describe("sub-agent tool results", () => {
     beforeEach(() => {
       vi.clearAllMocks();
@@ -731,6 +785,36 @@ describe("createSubAgentTools", () => {
     );
 
     expect(Object.keys(result.tools)).toHaveLength(1);
+  });
+
+  it("forwards each sub-agent's stored sampling parameters, treating null as unset", async () => {
+    const subAgents = [
+      {
+        id: "sa-1",
+        name: "Tuned",
+        providerId: "p1",
+        modelId: "m1",
+        temperature: 0.3,
+        seed: 7,
+        // Cleared in the UI writes null, which must mean "use the Provider
+        // default" rather than being sent as an explicit value (#263).
+        topP: null,
+      },
+    ];
+
+    const createModelFn = vi
+      .fn()
+      .mockResolvedValue({ model: {}, securityGuardrails: null });
+    const loadToolsFn = vi.fn().mockResolvedValue({});
+
+    await createSubAgentTools(subAgents, createModelFn, loadToolsFn);
+
+    const settings = agentConstructorSpy.mock.calls[0][0] as Record<
+      string,
+      unknown
+    >;
+    expect(settings).toMatchObject({ temperature: 0.3, seed: 7 });
+    expect(settings).not.toHaveProperty("topP");
   });
 
   it("passes each sub-agent's own provider security text into its instructions", async () => {

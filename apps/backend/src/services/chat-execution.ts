@@ -23,6 +23,7 @@ import {
   type SubAgentFailure,
 } from "../tools/sub-agent.ts";
 import { normalizeToolResult } from "./tool-result.ts";
+import { resolveSamplingSettings } from "./sampling-settings.ts";
 import {
   renderSystemPrompt,
   type SystemPromptContext,
@@ -735,7 +736,7 @@ export const prepareChatTurn = async (
       topK: generation.topK,
       frequencyPenalty: generation.frequencyPenalty,
       presencePenalty: generation.presencePenalty,
-      seed: request.seed,
+      seed: generation.seed,
     },
     resolved: {
       agentId: context.resolvedAgentId,
@@ -758,7 +759,7 @@ export const prepareChatTurn = async (
       topK: agent ? undefined : generation.topK,
       frequencyPenalty: agent ? undefined : generation.frequencyPenalty,
       presencePenalty: agent ? undefined : generation.presencePenalty,
-      seed: agent ? undefined : request.seed,
+      seed: agent ? undefined : generation.seed,
     },
     dispose,
   };
@@ -1116,21 +1117,10 @@ const resolveGenerationConfig = (
   agent: AgentRow | undefined,
   promptCtx: SystemPromptContext,
 ): GenerationConfig => {
-  const config: GenerationConfig = {};
-  const source = agent || data;
-
-  Object.assign(
-    config,
-    source.temperature != null && { temperature: source.temperature },
-    source.topP != null && { topP: source.topP },
-    source.topK != null && { topK: source.topK },
-    source.frequencyPenalty != null && {
-      frequencyPenalty: source.frequencyPenalty,
-    },
-    source.presencePenalty != null && {
-      presencePenalty: source.presencePenalty,
-    },
-  );
+  // `seed` is resolved from the same source as the other five. It used to be
+  // read straight off the request instead, so an Agent's stored Seed was
+  // silently ignored on every Agent-driven turn.
+  const config: GenerationConfig = resolveSamplingSettings(agent || data);
 
   config.systemPrompt = renderSystemPrompt(promptCtx);
   return config;
