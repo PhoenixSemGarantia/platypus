@@ -9,6 +9,11 @@ import { z } from "zod";
 import { logger } from "../logger.ts";
 import { renderSecurityGuardrails } from "../security-prompt.ts";
 import { withNormalizedResults } from "../services/tool-result.ts";
+import {
+  resolveSamplingSettings,
+  type SamplingSettings,
+  type SamplingSource,
+} from "../services/sampling-settings.ts";
 
 /**
  * Single source of truth for the sub-agent delegation tool name.
@@ -91,6 +96,12 @@ interface SubAgentToolOptions {
    * path guardrails reach them.
    */
   securityGuardrails?: string | null;
+  /**
+   * THIS sub-agent's own sampling parameters, already narrowed to the ones set.
+   * An Agent generates with the parameters assigned to it wherever it runs, so
+   * a delegated run is tuned exactly as the same Agent would be on a Chat.
+   */
+  sampling?: SamplingSettings;
   /** Called on each activity update from the sub-agent. Used to reset the parent run's per-step timeout. */
   onProgress?: () => void;
 }
@@ -112,6 +123,7 @@ export const createSubAgentTool = (options: SubAgentToolOptions) => {
     tools,
     maxSteps = 50,
     securityGuardrails,
+    sampling,
     onProgress,
   } = options;
 
@@ -131,6 +143,7 @@ export const createSubAgentTool = (options: SubAgentToolOptions) => {
     : baseInstructions;
 
   const agent = new ToolLoopAgent({
+    ...sampling,
     model,
     instructions: composedInstructions,
     // The sub-agent's own tools never pass through the parent turn's
@@ -315,16 +328,18 @@ export type SubAgentFailure = { id: string; name: string; reason: string };
  * @returns The callable tools keyed by tool name, plus the sub-agents that failed
  */
 export const createSubAgentTools = async (
-  subAgents: Array<{
-    id: string;
-    name: string;
-    description?: string | null;
-    instructions?: string | null;
-    providerId: string;
-    modelId: string;
-    toolSetIds?: string[] | null;
-    maxSteps?: number | null;
-  }>,
+  subAgents: Array<
+    {
+      id: string;
+      name: string;
+      description?: string | null;
+      instructions?: string | null;
+      providerId: string;
+      modelId: string;
+      toolSetIds?: string[] | null;
+      maxSteps?: number | null;
+    } & SamplingSource
+  >,
   createModelFn: (
     providerId: string,
     modelId: string,
@@ -365,6 +380,7 @@ export const createSubAgentTools = async (
         tools: subAgentTools,
         maxSteps: subAgent.maxSteps || 50,
         securityGuardrails,
+        sampling: resolveSamplingSettings(subAgent),
         onProgress,
       });
 
