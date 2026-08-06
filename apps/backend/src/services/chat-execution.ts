@@ -3,18 +3,15 @@ import {
   type MCPClient,
 } from "@ai-sdk/mcp";
 import { openProvider, type OpenedProvider } from "./provider.ts";
-import { and, eq, or, inArray, isNull } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "../index.ts";
 import {
   agent as agentTable,
   context as contextTable,
   mcp as mcpTable,
   organization as organizationTable,
-  provider as providerTable,
   sandbox as sandboxTable,
-  skill as skillTable,
   workspace as workspaceTable,
-  attachment as attachmentTable,
 } from "../db/schema.ts";
 import { getToolSet } from "../tools/index.ts";
 import { createLoadSkillTool } from "../tools/skill.ts";
@@ -56,6 +53,7 @@ import {
   normalizeFileParts,
 } from "./file-gate.ts";
 import type { PlatypusUIMessage } from "../types.ts";
+import { listScopedByIds, resolveScoped } from "./scoped-resource.ts";
 
 /**
  * Default agentic step ceiling for an agent that has no explicit `maxSteps`.
@@ -270,28 +268,14 @@ export type ChatTurnQueries = {
 };
 
 /**
- * Whether an org-scoped Shared resource is attached to the given workspace
- * (ADR-0007). Org-scoped resources resolve at Chat-turn time only where attached.
+ * Every resource a Chat turn resolves goes through the Scoped-resource read
+ * module: Workspace-scoped rows, plus the Organization-scoped (Shared) rows
+ * attached to the invoking Workspace (ADR-0007). Each lookup below used to carry
+ * its own copy of that rule, and the copies drifted — the sub-Agent one had no
+ * scope filter at all, and each treated "has an organizationId, has no
+ * workspaceId" as the definition of Shared, which lets a row carrying both
+ * columns resolve in a Workspace that neither owns nor attached it.
  */
-const isAttached = async (
-  resourceType: "mcp" | "provider" | "skill" | "agent",
-  resourceId: string,
-  workspaceId: string,
-): Promise<boolean> => {
-  const rows = await db
-    .select()
-    .from(attachmentTable)
-    .where(
-      and(
-        eq(attachmentTable.workspaceId, workspaceId),
-        eq(attachmentTable.resourceType, resourceType),
-        eq(attachmentTable.resourceId, resourceId),
-      ),
-    )
-    .limit(1);
-  return rows.length > 0;
-};
-
 export const drizzleChatTurnQueries: ChatTurnQueries = {
   async getWorkspace(id) {
     const rows = await db
@@ -312,177 +296,65 @@ export const drizzleChatTurnQueries: ChatTurnQueries = {
   },
 
   async getAgent(id, orgId, workspaceId) {
-    // Resolve an Agent at either scope: the invoking workspace, or the
-    // organization (a Shared Agent — ADR-0007).
-    const rows = await db
-      .select()
-      .from(agentTable)
-      .where(
-        and(
-          eq(agentTable.id, id),
-          or(
-            eq(agentTable.workspaceId, workspaceId),
-            eq(agentTable.organizationId, orgId),
-          ),
-        ),
-      )
-      .limit(1);
-    const row = rows[0];
-    if (!row) return null;
     // A Shared Agent runs only in a Workspace it is attached to (ADR-0007); its
     // Sandbox/MCP tools still rebind to that invoking Workspace via loadTools.
-    if (
-      row.organizationId &&
-      !row.workspaceId &&
-      !(await isAttached("agent", id, workspaceId))
-    ) {
-      return null;
-    }
-    return row;
+    const found = await resolveScoped(db, "agent", id, {
+      orgId,
+      wsId: workspaceId,
+    });
+    return found?.row ?? null;
   },
 
   async getProvider(id, orgId, workspaceId) {
-    const rows = await db
-      .select()
-      .from(providerTable)
-      .where(
-        and(
-          eq(providerTable.id, id),
-          or(
-            eq(providerTable.workspaceId, workspaceId),
-            eq(providerTable.organizationId, orgId),
-          ),
-        ),
-      )
-      .limit(1);
-    const row = rows[0];
-    if (!row) return null;
-    // An org-scoped (Shared) Provider resolves only where attached (ADR-0007).
-    if (
-      row.organizationId &&
-      !row.workspaceId &&
-      !(await isAttached("provider", id, workspaceId))
-    ) {
-      return null;
-    }
-    return row as Provider;
+    const found = await resolveScoped(db, "provider", id, {
+      orgId,
+      wsId: workspaceId,
+    });
+    return (found?.row as Provider | undefined) ?? null;
   },
 
   async getSkillsByIds(ids, orgId, workspaceId) {
-    if (ids.length === 0) return [];
-    // Workspace-scoped Skills referenced by the Agent.
-    const workspaceSkills = await db
-      .select({ name: skillTable.name, description: skillTable.description })
-      .from(skillTable)
-      .where(
-        and(
-          eq(skillTable.workspaceId, workspaceId),
-          inArray(skillTable.id, ids),
-        ),
-      );
-
-    // Org-scoped (Shared) Skills resolve only where attached (ADR-0007) — gate
-    // by an inner join on the Attachment table for the invoking workspace.
-    const orgSkills = await db
-      .select({ name: skillTable.name, description: skillTable.description })
-      .from(skillTable)
-      .innerJoin(
-        attachmentTable,
-        and(
-          eq(attachmentTable.resourceId, skillTable.id),
-          eq(attachmentTable.resourceType, "skill"),
-          eq(attachmentTable.workspaceId, workspaceId),
-        ),
-      )
-      .where(
-        and(eq(skillTable.organizationId, orgId), inArray(skillTable.id, ids)),
-      );
+    const visible = await listScopedByIds(db, "skill", ids, {
+      orgId,
+      wsId: workspaceId,
+    });
 
     // A workspace-scoped Skill wins a name collision with an attached org-scoped
     // one, matching loadSkill's workspace-first resolution — so the advertised
     // list and the tool agree on which body the model loads, with no duplicate
     // entry in the system prompt.
-    const seen = new Set(workspaceSkills.map((s) => s.name));
-    return [...workspaceSkills, ...orgSkills.filter((s) => !seen.has(s.name))];
+    const workspaceSkills = visible.filter((s) => s.scope === "workspace");
+    const seen = new Set(workspaceSkills.map(({ row }) => row.name));
+    return [
+      ...workspaceSkills,
+      ...visible.filter(
+        (s) => s.scope === "organization" && !seen.has(s.row.name),
+      ),
+    ].map(({ row }) => ({ name: row.name, description: row.description }));
   },
 
   async getMcp(id, orgId, workspaceId) {
-    // Resolve an MCP referenced by an Agent's tool sets at either scope: the
-    // invoking workspace, or the organization (a Shared MCP — ADR-0007).
-    const rows = await db
-      .select()
-      .from(mcpTable)
-      .where(
-        and(
-          eq(mcpTable.id, id),
-          or(
-            eq(mcpTable.workspaceId, workspaceId),
-            eq(mcpTable.organizationId, orgId),
-          ),
-        ),
-      )
-      .limit(1);
-    const row = rows[0];
-    if (!row) return null;
-    // An org-scoped (Shared) MCP resolves only where attached (ADR-0007).
-    if (
-      row.organizationId &&
-      !row.workspaceId &&
-      !(await isAttached("mcp", id, workspaceId))
-    ) {
-      return null;
-    }
-    return row;
+    const found = await resolveScoped(db, "mcp", id, {
+      orgId,
+      wsId: workspaceId,
+    });
+    return found?.row ?? null;
   },
 
   async getSubAgentsByIds(ids, orgId, workspaceId) {
-    if (ids.length === 0) return [];
     // A sub-Agent resolves at the parent's Workspace scope, or at Organization
-    // scope where attached (ADR-0007) — the same rule `getAgent` applies. Looked
-    // up by id alone, an Agent from another Workspace resolved here: its name and
-    // description reached this prompt, and its Provider then failed to resolve.
-    const workspaceAgents = await db
-      .select()
-      .from(agentTable)
-      .where(
-        and(
-          eq(agentTable.workspaceId, workspaceId),
-          inArray(agentTable.id, ids),
-        ),
-      );
-
-    // Org-scoped (Shared) sub-Agents, gated by an Attachment for the invoking
-    // workspace via an inner join. Written out rather than via `listScoped`
-    // because that lists a whole resource type; this filters to the ids assigned.
-    // `isNull(workspaceId)` is what makes "org-scoped" mean it here: the two
-    // scope columns are mutually exclusive by convention, not by a DB
-    // constraint, so a row carrying both must not borrow another Workspace's
-    // Attachment to resolve.
-    const orgAgents = await db
-      .select()
-      .from(agentTable)
-      .innerJoin(
-        attachmentTable,
-        and(
-          eq(attachmentTable.resourceId, agentTable.id),
-          eq(attachmentTable.resourceType, "agent"),
-          eq(attachmentTable.workspaceId, workspaceId),
-        ),
-      )
-      .where(
-        and(
-          eq(agentTable.organizationId, orgId),
-          isNull(agentTable.workspaceId),
-          inArray(agentTable.id, ids),
-        ),
-      );
+    // scope where attached (ADR-0007) — the same rule `getAgent` applies, and the
+    // same authority the save-time check uses. Looked up by id alone, an Agent
+    // from another Workspace resolved here: its name and description reached this
+    // prompt, and its Provider then failed to resolve.
+    const visible = await listScopedByIds(db, "agent", ids, {
+      orgId,
+      wsId: workspaceId,
+    });
 
     // Returned in assignment order so the prompt lists sub-agents the way the
-    // Operator configured them, not in whichever order the two queries ran. The
-    // two sets cannot collide on an id: each query pins the other scope's column.
-    const byId = new Map<string, AgentRow>();
-    for (const row of workspaceAgents) byId.set(row.id, row);
-    for (const row of orgAgents) byId.set(row.agent.id, row.agent);
+    // Operator configured them, not in whichever order the scope queries ran.
+    const byId = new Map(visible.map(({ row }) => [row.id, row]));
     return ids
       .map((id) => byId.get(id))
       .filter((row): row is AgentRow => row !== undefined);

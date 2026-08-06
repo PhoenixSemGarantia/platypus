@@ -1,5 +1,14 @@
 import { db } from "../index.ts";
-import { listScoped, type ScopeContext } from "./scoped-resource.ts";
+import { listScopedByIds, type ScopeContext } from "./scoped-resource.ts";
+
+/**
+ * Rejection message for an Agent listed among its own sub-agents. Shared with
+ * the Organization surface, which applies this same rule while resolving
+ * sub-Agents differently (a Shared Agent's sub-Agents must themselves be
+ * Shared), so the two surfaces cannot drift on the wording an Operator sees.
+ */
+export const SUB_AGENT_SELF_ASSIGNMENT_ERROR =
+  "An agent cannot assign itself as a sub-agent";
 
 /**
  * Save-time guard on an Agent's `subAgentIds`, applied wherever a Workspace
@@ -21,16 +30,13 @@ export const validateSubAgentAssignment = async (
 ): Promise<{ valid: boolean; error?: string }> => {
   // 1. Check self-assignment
   if (subAgentIds.includes(agentId)) {
-    return {
-      valid: false,
-      error: "An agent cannot assign itself as a sub-agent",
-    };
+    return { valid: false, error: SUB_AGENT_SELF_ASSIGNMENT_ERROR };
   }
 
-  if (subAgentIds.length === 0) return { valid: true };
-
-  // 2. Every proposed sub-agent must be visible in this workspace at either scope
-  const visible = await listScoped(db, "agent", ctx);
+  // 2. Every proposed sub-agent must be visible in this workspace at either
+  // scope — resolved through the same authority the Chat turn uses, so a save
+  // cannot accept a reference the run would then drop.
+  const visible = await listScopedByIds(db, "agent", subAgentIds, ctx);
   const visibleIds = new Set(visible.map(({ row }) => row.id));
 
   if (subAgentIds.some((id) => !visibleIds.has(id))) {
