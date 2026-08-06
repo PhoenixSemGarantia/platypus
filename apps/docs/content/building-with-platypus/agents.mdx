@@ -93,9 +93,14 @@ Two levels of control over how the model generates:
 | **Presence penalty**  | `-2`–`2` | Discourages repeating topics already present  |
 | **Frequency penalty** | `-2`–`2` | Discourages repeating the same tokens         |
 
-<Callout type="info">
-  Not every Provider or model honours every parameter — unsupported values are
-  ignored by the vendor.
+<Callout type="warning">
+  Not every Provider or model honours every parameter. Setting **Temperature**
+  and assuming the model used it is the trap: some Providers drop a parameter
+  they don't support, and some clamp it into a narrower range, and the run
+  succeeds either way with no sign in the UI. The backend log records each one at
+  `warn` level, naming the parameter, the Provider and the model. Ask your
+  Operator to search the log for the parameter — `temperature`, `seed` — after a
+  run to find out whether it reached the model.
 </Callout>
 
 ## Grant tools and Skills
