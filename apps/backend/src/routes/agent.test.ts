@@ -421,6 +421,9 @@ describe("Agent Routes", () => {
       });
 
       expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({
+        error: "One or more sub-agents are not available in this workspace",
+      });
       expect(mockDb.update).not.toHaveBeenCalled();
     });
 

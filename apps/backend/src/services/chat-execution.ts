@@ -3,7 +3,7 @@ import {
   type MCPClient,
 } from "@ai-sdk/mcp";
 import { openProvider, type OpenedProvider } from "./provider.ts";
-import { and, eq, or, inArray } from "drizzle-orm";
+import { and, eq, or, inArray, isNull } from "drizzle-orm";
 import { db } from "../index.ts";
 import {
   agent as agentTable,
@@ -452,7 +452,12 @@ export const drizzleChatTurnQueries: ChatTurnQueries = {
       );
 
     // Org-scoped (Shared) sub-Agents, gated by an Attachment for the invoking
-    // workspace via an inner join.
+    // workspace via an inner join. Written out rather than via `listScoped`
+    // because that lists a whole resource type; this filters to the ids assigned.
+    // `isNull(workspaceId)` is what makes "org-scoped" mean it here: the two
+    // scope columns are mutually exclusive by convention, not by a DB
+    // constraint, so a row carrying both must not borrow another Workspace's
+    // Attachment to resolve.
     const orgAgents = await db
       .select()
       .from(agentTable)
@@ -465,12 +470,16 @@ export const drizzleChatTurnQueries: ChatTurnQueries = {
         ),
       )
       .where(
-        and(eq(agentTable.organizationId, orgId), inArray(agentTable.id, ids)),
+        and(
+          eq(agentTable.organizationId, orgId),
+          isNull(agentTable.workspaceId),
+          inArray(agentTable.id, ids),
+        ),
       );
 
     // Returned in assignment order so the prompt lists sub-agents the way the
-    // Operator configured them, not in whichever order the two queries ran. A
-    // row is at exactly one scope, so the two sets cannot collide on an id.
+    // Operator configured them, not in whichever order the two queries ran. The
+    // two sets cannot collide on an id: each query pins the other scope's column.
     const byId = new Map<string, AgentRow>();
     for (const row of workspaceAgents) byId.set(row.id, row);
     for (const row of orgAgents) byId.set(row.agent.id, row.agent);
