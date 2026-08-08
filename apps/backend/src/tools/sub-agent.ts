@@ -117,6 +117,7 @@ interface SubAgentToolOptions {
  */
 export const createSubAgentTool = (options: SubAgentToolOptions) => {
   const {
+    id,
     name,
     description,
     instructions,
@@ -226,8 +227,12 @@ export const createSubAgentTool = (options: SubAgentToolOptions) => {
               // record is worth the most (issue #421). `debug`, because tool
               // arguments are model and user data.
               logger.debug(
-                { subAgentName: name, ...describeToolInput(part) },
-                "Sub-agent tool call failed",
+                {
+                  subAgentId: id,
+                  subAgentName: name,
+                  ...describeToolInput(part),
+                },
+                "Tool call failed",
               );
               break;
             }

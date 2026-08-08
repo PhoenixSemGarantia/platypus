@@ -51,7 +51,9 @@ const HANDLED = new Set(["name", "message", "stack", "cause", "issues"]);
  */
 const VALIDATOR_DETAIL = /\s*(?:Value:|Error message:)[\s\S]*$/;
 
-const safeStringify = (value: unknown): string | undefined => {
+/** JSON, or nothing — a value that can't be rendered must not take the log
+ *  call down with it. */
+export const safeStringify = (value: unknown): string | undefined => {
   try {
     return JSON.stringify(value);
   } catch {

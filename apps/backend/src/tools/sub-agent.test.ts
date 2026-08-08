@@ -514,10 +514,13 @@ describe("createSubAgentTool", () => {
         ) as AsyncGenerator<SubAgentActivity>,
       );
 
+      // The same message the run driver logs, so an Operator greps once and
+      // the sub-agent fields say which run it came from.
       const logged = vi
         .mocked(logger.debug)
-        .mock.calls.find((call) => call[1] === "Sub-agent tool call failed");
+        .mock.calls.find((call) => call[1] === "Tool call failed");
       expect(logged?.[0]).toMatchObject({
+        subAgentId: "agent-1",
         subAgentName: "Research Agent",
         toolCallId: "tc1",
         toolName: "web-fetch",

@@ -19,7 +19,7 @@
  * arguments are model and user data that may carry secrets (issue #414).
  */
 
-import { omitted } from "./log-serializers.ts";
+import { omitted, safeStringify } from "./log-serializers.ts";
 import { truncate } from "./zod-issues.ts";
 
 /**
@@ -59,7 +59,13 @@ export type ToolInputRecord = {
   /** The runtime type as seen, including `null` and `array`. */
   inputType: string;
   inputKind: ToolInputKind;
-  /** Characters, so the number and the cap share a unit. */
+  /**
+   * Characters, so the number and the cap share a unit.
+   *
+   * On a `parsed` value this measures the re-serialized JSON, not the text the
+   * model emitted — the SDK keeps no copy of that once it has parsed it. Only
+   * an `unparseable` length can be held against a suspected output ceiling.
+   */
   inputLength?: number;
   inputPrefix?: string;
   /** Present only when the prefix was cut; a cut is never silent. */
@@ -73,16 +79,22 @@ const runtimeType = (value: unknown): string => {
   return typeof value;
 };
 
-const asText = (value: unknown): string | undefined => {
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return undefined;
-  }
-};
-
 const asString = (value: unknown): string | undefined =>
   typeof value === "string" ? value : undefined;
+
+/** The length, a capped prefix, and what the cap removed. */
+const payload = (text: string): Partial<ToolInputRecord> => {
+  const prefix = truncate(text, MAX_TOOL_INPUT_PREFIX);
+  if (prefix === text) return { inputLength: text.length, inputPrefix: prefix };
+  return {
+    inputLength: text.length,
+    inputPrefix: prefix,
+    // Counted off the prefix rather than the cap so the two can't drift apart.
+    // `truncate` ends on an ellipsis, which stands in for one character more
+    // than the tail it replaced.
+    omitted: omitted(text.length - (prefix.length - 1)),
+  };
+};
 
 /**
  * Describe one failed tool call's arguments.
@@ -104,35 +116,24 @@ export const describeToolInput = (part: ToolErrorLike): ToolInputRecord => {
   if (part.input === undefined) return record;
 
   if (typeof part.input === "string") {
-    record.inputKind = part.input.length === 0 ? "empty" : "unparseable";
-    return withPayload(record, part.input);
+    return {
+      ...record,
+      inputKind: part.input.length === 0 ? "empty" : "unparseable",
+      ...payload(part.input),
+    };
   }
 
   // Anything else came back from `JSON.parse`, including a bare number or null:
   // valid JSON the schema went on to reject.
-  const text = asText(part.input);
+  const text = safeStringify(part.input);
   if (text === undefined) {
-    record.inputKind = "unserializable";
-    record.inputPrefix = "[unserializable]";
-    return record;
+    return {
+      ...record,
+      inputKind: "unserializable",
+      inputPrefix: "[unserializable]",
+    };
   }
-  record.inputKind = "parsed";
-  return withPayload(record, text);
-};
-
-/** Attach the length and a capped prefix, marking the cut when there is one. */
-const withPayload = (
-  record: ToolInputRecord,
-  text: string,
-): ToolInputRecord => {
-  record.inputLength = text.length;
-  record.inputPrefix = truncate(text, MAX_TOOL_INPUT_PREFIX);
-  if (text.length > MAX_TOOL_INPUT_PREFIX) {
-    // `truncate` keeps `max - 1` characters and ends on an ellipsis, so the
-    // ellipsis stands in for one character more than the tail it replaced.
-    record.omitted = omitted(text.length - (MAX_TOOL_INPUT_PREFIX - 1));
-  }
-  return record;
+  return { ...record, inputKind: "parsed", ...payload(text) };
 };
 
 /**
