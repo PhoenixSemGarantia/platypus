@@ -36,7 +36,8 @@ const MAX_CAUSE_DEPTH = 5;
  * and an operator comparing the number against a cap should see the same unit
  * the cap is expressed in.
  */
-const omitted = (characters: number) => `[omitted: ${characters} characters]`;
+export const omitted = (characters: number) =>
+  `[omitted: ${characters} characters]`;
 
 /** Fields this serializer renders itself; anything else is an extra. */
 const HANDLED = new Set(["name", "message", "stack", "cause", "issues"]);
@@ -50,7 +51,9 @@ const HANDLED = new Set(["name", "message", "stack", "cause", "issues"]);
  */
 const VALIDATOR_DETAIL = /\s*(?:Value:|Error message:)[\s\S]*$/;
 
-const safeStringify = (value: unknown): string | undefined => {
+/** JSON, or nothing — a value that can't be rendered must not take the log
+ *  call down with it. */
+export const safeStringify = (value: unknown): string | undefined => {
   try {
     return JSON.stringify(value);
   } catch {
