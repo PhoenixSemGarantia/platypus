@@ -4,13 +4,22 @@ import { createLoadSkillTool } from "./tools/skill.ts";
 /**
  * Metadata the run pipeline attaches to a streamed assistant message.
  *
- * Omitted entirely for runs that resolved no agent (a direct provider/model
- * chat), which is why `UIMessage["metadata"]` stays optional rather than the
- * fields inside it.
+ * Every field is optional and each is emitted on its own stream chunk: the
+ * client merges metadata chunks into the message rather than replacing it, so
+ * a run that resolves no agent but ends truncated still carries the truncation
+ * flag, and a truncated agent run keeps its attribution.
+ *
+ * A key that does not apply is absent rather than `false`, so a message's
+ * metadata says only what is true of it.
  */
 export type ChatMessageMetadata = {
   /** Agent the run resolved; the chat UI renders its name and avatar. */
-  agentId: string;
+  agentId?: string;
+  /**
+   * The turn's terminal finish hit the model's output token ceiling, so the
+   * answer stops mid-thought. The chat marks the message as cut short.
+   */
+  truncatedByTokenLimit?: true;
 };
 
 /**

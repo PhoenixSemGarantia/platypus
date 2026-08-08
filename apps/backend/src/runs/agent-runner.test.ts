@@ -52,6 +52,11 @@ const {
       onStepFinish: undefined as ((step: unknown) => void) | undefined,
       onFinish: undefined as
         ((ctx: { messages: unknown[] }) => Promise<void> | void) | undefined,
+      // `toUIMessageStream`'s metadata extractor. The SDK calls it per stream
+      // part; the tests call it by hand with the part they care about.
+      messageMetadata: undefined as
+        | ((opts: { part: { type: string; finishReason?: string } }) => unknown)
+        | undefined,
       responseSentinel: { __isResponse: true },
     },
   };
@@ -633,35 +638,45 @@ describe("AgentRunner.cancel", () => {
   });
 });
 
+const tick = () => new Promise((r) => setTimeout(r, 0));
+
+const resetStreamHarness = (): void => {
+  streamHarness.queue = null;
+  streamHarness.onStepFinish = undefined;
+  streamHarness.onFinish = undefined;
+  streamHarness.messageMetadata = undefined;
+};
+
+// Make streamText return a fake result whose UI-stream callbacks the test can
+// drive by hand: `onStepFinish` (per step), `onFinish` (completion), and
+// `messageMetadata` (per stream part).
+const primeStreamText = () => {
+  mockStreamText.mockImplementation(
+    (opts: { onStepFinish?: (step: unknown) => void }) => {
+      streamHarness.onStepFinish = opts.onStepFinish;
+      return {
+        toUIMessageStream: (uiOpts: {
+          onFinish: (ctx: { messages: unknown[] }) => Promise<void> | void;
+          messageMetadata: (opts: {
+            part: { type: string; finishReason?: string };
+          }) => unknown;
+        }) => {
+          streamHarness.onFinish = uiOpts.onFinish;
+          streamHarness.messageMetadata = uiOpts.messageMetadata;
+          return { tee: () => [{}, {}] };
+        },
+      };
+    },
+  );
+};
+
 describe("AgentRunner.stream — success & interruption", () => {
   let runner: AgentRunner;
   beforeEach(() => {
     runner = new AgentRunner();
     vi.clearAllMocks();
-    streamHarness.queue = null;
-    streamHarness.onStepFinish = undefined;
-    streamHarness.onFinish = undefined;
+    resetStreamHarness();
   });
-
-  const tick = () => new Promise((r) => setTimeout(r, 0));
-
-  // Make streamText return a fake result whose UI-stream callbacks the test
-  // can drive by hand: `onStepFinish` (per step) and `onFinish` (completion).
-  const primeStreamText = () => {
-    mockStreamText.mockImplementation(
-      (opts: { onStepFinish: (step: unknown) => void }) => {
-        streamHarness.onStepFinish = opts.onStepFinish;
-        return {
-          toUIMessageStream: (uiOpts: {
-            onFinish: (ctx: { messages: unknown[] }) => Promise<void> | void;
-          }) => {
-            streamHarness.onFinish = uiOpts.onFinish;
-            return { tee: () => [{}, {}] };
-          },
-        };
-      },
-    );
-  };
 
   it("runs the full lifecycle on success and persists the final messages", async () => {
     const dispose = vi.fn().mockResolvedValue(undefined);
@@ -825,6 +840,116 @@ describe("AgentRunner.stream — success & interruption", () => {
     // The snapshot accumulated before the timeout is what gets persisted.
     expect(finish.messages).toEqual([partial]);
     expect(runRegistry.has("s-timeout")).toBe(false);
+  });
+});
+
+// Issue #420: the operator sees a truncated stream in the log, the reader saw
+// nothing. The metadata callback is the only seam for saying so on a stream
+// that has already been flushed to the client.
+describe("AgentRunner.stream — truncation metadata", () => {
+  let runner: AgentRunner;
+  beforeEach(() => {
+    runner = new AgentRunner();
+    vi.clearAllMocks();
+    resetStreamHarness();
+  });
+
+  const startStream = async (turn: ReturnType<typeof fakeTurn>) => {
+    mockPrepareChatTurn.mockResolvedValueOnce(turn);
+    const queue = new streamHarness.AsyncQueue();
+    streamHarness.queue = queue;
+    primeStreamText();
+
+    await runner.stream({
+      scope,
+      input: { ...baseInput, runId: `s-meta-${Math.random()}` },
+      sink: new RecordingSink(),
+      options: { origin: "http://test" },
+    });
+
+    return {
+      metadataFor: (part: { type: string; finishReason?: string }) =>
+        streamHarness.messageMetadata!({ part }),
+      end: async () => {
+        await streamHarness.onFinish!({ messages: [] });
+        queue.end();
+        await tick();
+      },
+    };
+  };
+
+  it("attributes the message to the resolved agent at the start of the stream", async () => {
+    const stream = await startStream(fakeTurn());
+
+    expect(stream.metadataFor({ type: "start" })).toEqual({
+      agentId: "agent-1",
+    });
+
+    await stream.end();
+  });
+
+  // A direct provider/model chat resolves no agent, so its start carries no
+  // metadata at all — which is exactly the case that had no way to be flagged
+  // while `agentId` was a required field.
+  it("still flags a truncated direct provider/model stream that has no attribution", async () => {
+    const turn = fakeTurn();
+    turn.resolved = {
+      ...turn.resolved,
+      agentId: undefined as unknown as string,
+    };
+    const stream = await startStream(turn);
+
+    expect(stream.metadataFor({ type: "start" })).toBeUndefined();
+    expect(
+      stream.metadataFor({ type: "finish", finishReason: "length" }),
+    ).toEqual({ truncatedByTokenLimit: true });
+
+    await stream.end();
+  });
+
+  it("flags the message as truncated when the terminal finish hit the output limit", async () => {
+    const stream = await startStream(fakeTurn());
+
+    expect(
+      stream.metadataFor({ type: "finish", finishReason: "length" }),
+    ).toEqual({ truncatedByTokenLimit: true });
+
+    await stream.end();
+  });
+
+  // Each event contributes only the key it owns, so the merge that produces
+  // the final metadata does not depend on how the SDK treats an `undefined`
+  // value — the `agentId` emitted at `start` is simply never overwritten.
+  it("does not restate the agent attribution on the truncation chunk", async () => {
+    const stream = await startStream(fakeTurn());
+
+    expect(
+      stream.metadataFor({ type: "finish", finishReason: "length" }),
+    ).not.toHaveProperty("agentId");
+
+    await stream.end();
+  });
+
+  it("leaves a cleanly finished stream with no truncation key", async () => {
+    const stream = await startStream(fakeTurn());
+
+    expect(
+      stream.metadataFor({ type: "finish", finishReason: "stop" }),
+    ).toBeUndefined();
+
+    await stream.end();
+  });
+
+  // A step inside a tool loop can end at the ceiling and the run still recover
+  // and finish normally. Marking those flags runs that were never truncated.
+  it("ignores a step that ended at the limit mid tool-loop", async () => {
+    const stream = await startStream(fakeTurn());
+
+    expect(
+      stream.metadataFor({ type: "finish-step", finishReason: "length" }),
+    ).toBeUndefined();
+
+    await stream.end();
   });
 });
 

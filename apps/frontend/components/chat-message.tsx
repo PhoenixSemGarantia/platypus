@@ -43,11 +43,20 @@ import {
   CopyIcon,
   TrashIcon,
   RefreshCwIcon,
+  TriangleAlertIcon,
   XIcon,
 } from "lucide-react";
 import { Textarea } from "./ui/textarea";
 import { LoadSkillTool } from "./load-skill-tool";
 import { SubAgentTool } from "./sub-agent-tool";
+
+/**
+ * What the person reading a reply is told when it stopped at the model's
+ * output ceiling rather than because the model was finished. A constant so
+ * tests assert the wording without restating the prose.
+ */
+export const CUT_SHORT_NOTICE =
+  "Response cut short at the model's output limit.";
 
 interface ChatMessageProps {
   /** The message object to render */
@@ -275,6 +284,13 @@ export const ChatMessage = memo(function ChatMessage({
           return null;
         }
       })}
+      {message.role === "assistant" &&
+        message.metadata?.truncatedByTokenLimit && (
+          <div className="flex items-center gap-1.5 pl-8 text-xs text-muted-foreground">
+            <TriangleAlertIcon className="size-3.5 shrink-0" />
+            <span>{CUT_SHORT_NOTICE}</span>
+          </div>
+        )}
       {!(isLastMessage && status === "streaming") &&
         (isEditing ? (
           <MessageActions className="justify-end">
