@@ -85,6 +85,23 @@ specific pages instead wants the **Web Fetch** Tool set — see
 A microphone button next to it transcribes speech into the input box. The text
 lands in the box rather than sending, so you can edit before pressing **Enter**.
 
+## When a reply stops early
+
+Every model has a ceiling on how much it can write in one reply. Reach it and
+the answer stops wherever it got to — mid-sentence, mid-list, mid-word. A muted
+line appears under the message reading **Response cut short at the model's
+output limit.**
+
+Everything above the marker is a real answer; there is no more of it. The marker
+is stored with the message, so it is still there when you reload the Chat.
+
+<Callout type="warning">
+  **Nothing resumes a cut-short reply.** **Regenerate** re-runs the whole turn
+  from the beginning against the same ceiling; it does not carry on from where
+  the reply stopped. Ask for the remainder in a follow-up message, or ask for
+  the work in smaller pieces to begin with.
+</Callout>
+
 ## Fixing a conversation instead of restarting it
 
 Hover a message for its actions:

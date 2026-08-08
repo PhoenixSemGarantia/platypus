@@ -18,9 +18,10 @@ import {
  * out of output budget rather than because it was finished.
  *
  * A constant so the wording is asserted in tests without restating the prose.
- * Currently appended only by the unattended (`generate`) path — the streaming
- * path reports truncation to the operator via `logger.warn` and has no seam for
- * injecting text into an already-flushed stream.
+ * Appended only by the unattended (`generate`) path, whose one channel back to
+ * the caller is the returned text. A streamed turn says the same thing to the
+ * person reading it through the message metadata instead, in its own wording —
+ * this notice is addressed to a model consuming the output, not to a reader.
  */
 export const TRUNCATED_BY_TOKEN_LIMIT =
   "The response was truncated because it reached the maximum output token limit. Retry with a shorter response, or split the work across several steps.";

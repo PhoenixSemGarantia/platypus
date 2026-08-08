@@ -11,7 +11,7 @@ vi.mock("streamdown", () => ({
   ),
 }));
 
-import { ChatMessage } from "./chat-message";
+import { ChatMessage, CUT_SHORT_NOTICE } from "./chat-message";
 
 const makeAgent = (overrides: Partial<Agent>): Agent =>
   ({
@@ -74,5 +74,35 @@ describe("ChatMessage agent attribution", () => {
     // The fallback is our own `bg-muted` circle wrapping an icon — asserted
     // via markup we own rather than a lucide-generated class name.
     expect(container.querySelector("div.bg-muted > svg")).not.toBeNull();
+  });
+});
+
+// Issue #420: a reply that stopped at the model's output ceiling used to just
+// stop mid-sentence, with the only record of it in the operator's log.
+describe("ChatMessage truncation marker", () => {
+  it("marks a message the run flagged as cut short at the output limit", () => {
+    renderMessage(assistantMessage({ truncatedByTokenLimit: true }));
+
+    expect(screen.getByText(CUT_SHORT_NOTICE)).toBeInTheDocument();
+  });
+
+  it.each([
+    ["a message that finished cleanly", { agentId: "agent-1" }],
+    ["a message with no metadata at all", undefined],
+  ] as const)("renders no marker for %s", (_, metadata) => {
+    renderMessage(assistantMessage(metadata));
+
+    expect(screen.queryByText(CUT_SHORT_NOTICE)).toBeNull();
+  });
+
+  // The two keys arrive on separate metadata chunks that merge into one
+  // message, so a truncated agent turn is the one case where both are set.
+  it("keeps the agent avatar on a truncated agent turn", () => {
+    renderMessage(
+      assistantMessage({ agentId: "agent-1", truncatedByTokenLimit: true }),
+    );
+
+    expect(screen.getByAltText("Research Agent")).toBeInTheDocument();
+    expect(screen.getByText(CUT_SHORT_NOTICE)).toBeInTheDocument();
   });
 });
