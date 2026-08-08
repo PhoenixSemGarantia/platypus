@@ -19,6 +19,7 @@ import {
   type ToolActivityEvent,
 } from "../services/chat-execution.ts";
 import { logger } from "../logger.ts";
+import { rejectedToolInputs } from "../rejected-tool-input.ts";
 import { actorUserId, type WorkspaceScope } from "../scope.ts";
 import type { PlatypusUIMessage } from "../types.ts";
 import {
@@ -328,6 +329,12 @@ export class AgentRunner {
       // provider actually said (issue #406).
       finishReason?: string;
       rawFinishReason?: string;
+      /**
+       * The step's parts, read only for the tool calls that failed. Both the
+       * streaming and the unattended path record a `tool-error` here, so one
+       * callback covers both — `onChunk` would cover only streaming.
+       */
+      content?: unknown;
     }): void => {
       handle.bumpStep();
       accumulateStepStats(state.stats, step);
@@ -350,6 +357,16 @@ export class AgentRunner {
             rawFinishReason: step.rawFinishReason,
           },
           "Step truncated at the output token limit",
+        );
+      }
+      // What the model actually emitted for a tool call that failed. At `debug`
+      // because tool arguments are model and user data: at the default
+      // `LOG_LEVEL=info` nothing is written, and an Operator diagnosing a
+      // recurrence raises the level (issue #421).
+      for (const rejected of rejectedToolInputs(step.content)) {
+        logger.debug(
+          { runId: input.runId, step: state.stats.steps, ...rejected },
+          "Tool call failed",
         );
       }
       // Sink decides write cadence (FlushScheduler in ChatSink).

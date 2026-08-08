@@ -68,8 +68,10 @@ vi.mock("ai", async () => {
 });
 
 vi.mock("../logger.ts", () => ({
-  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
+
+import { logger } from "../logger.ts";
 
 describe("createSubAgentTool", () => {
   const baseOptions = {
@@ -483,6 +485,73 @@ describe("createSubAgentTool", () => {
         status: "error",
         error: "Connection refused",
       });
+    });
+
+    // Issue #421: the activity entry keeps only the error text, so a sub-agent
+    // run — the least observable surface there is — recorded nothing about the
+    // arguments the model actually emitted.
+    it("logs what the model emitted for a rejected tool call", async () => {
+      const raw = '{"url":"https://example.com/a-page","selecto';
+      mockStream.mockResolvedValue({
+        fullStream: createMockFullStream([
+          { type: "tool-input-start", toolName: "web-fetch", id: "tc1" },
+          {
+            type: "tool-error",
+            toolCallId: "tc1",
+            toolName: "web-fetch",
+            input: raw,
+            error: "AI_InvalidToolInputError: Invalid input for tool web-fetch",
+          },
+        ]),
+        text: Promise.resolve(""),
+      });
+
+      const { tool } = createSubAgentTool(baseOptions);
+      await consumeGenerator(
+        tool.execute(
+          { task: "Do something" },
+          {} as ToolExecutionOptions<Record<string, unknown>>,
+        ) as AsyncGenerator<SubAgentActivity>,
+      );
+
+      const logged = vi
+        .mocked(logger.debug)
+        .mock.calls.find((call) => call[1] === "Sub-agent tool call failed");
+      expect(logged?.[0]).toMatchObject({
+        subAgentName: "Research Agent",
+        toolCallId: "tc1",
+        toolName: "web-fetch",
+        inputType: "string",
+        inputKind: "unparseable",
+        inputLength: raw.length,
+        inputPrefix: raw,
+      });
+    });
+
+    it("says nothing about a sub-agent tool call that succeeded", async () => {
+      mockStream.mockResolvedValue({
+        fullStream: createMockFullStream([
+          { type: "tool-input-start", toolName: "web-fetch", id: "tc1" },
+          {
+            type: "tool-result",
+            toolCallId: "tc1",
+            toolName: "web-fetch",
+            input: { url: "https://example.com" },
+            output: "page text",
+          },
+        ]),
+        text: Promise.resolve(""),
+      });
+
+      const { tool } = createSubAgentTool(baseOptions);
+      await consumeGenerator(
+        tool.execute(
+          { task: "Do something" },
+          {} as ToolExecutionOptions<Record<string, unknown>>,
+        ) as AsyncGenerator<SubAgentActivity>,
+      );
+
+      expect(vi.mocked(logger.debug)).not.toHaveBeenCalled();
     });
 
     it("passes abortSignal to agent.stream", async () => {

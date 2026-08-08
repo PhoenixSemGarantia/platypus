@@ -36,7 +36,8 @@ const MAX_CAUSE_DEPTH = 5;
  * and an operator comparing the number against a cap should see the same unit
  * the cap is expressed in.
  */
-const omitted = (characters: number) => `[omitted: ${characters} characters]`;
+export const omitted = (characters: number) =>
+  `[omitted: ${characters} characters]`;
 
 /** Fields this serializer renders itself; anything else is an extra. */
 const HANDLED = new Set(["name", "message", "stack", "cause", "issues"]);

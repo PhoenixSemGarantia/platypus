@@ -342,6 +342,153 @@ describe("finish reason instrumentation", () => {
   });
 });
 
+// Issue #421: the finish reason says a tool call was rejected, not what the
+// model emitted. Both run paths record `tool-error` parts into step content,
+// so both are covered from the one step-finished callback.
+describe("rejected tool input instrumentation", () => {
+  let runner: AgentRunner;
+  beforeEach(() => {
+    runner = new AgentRunner();
+    vi.clearAllMocks();
+    streamHarness.queue = null;
+    streamHarness.onStepFinish = undefined;
+    streamHarness.onFinish = undefined;
+  });
+
+  const failureLogs = () =>
+    vi
+      .mocked(logger.debug)
+      .mock.calls.filter((call) => call[1] === "Tool call failed")
+      .map((call) => call[0] as Record<string, unknown>);
+
+  const stepWith = (content: unknown[]) => ({
+    toolCalls: [{ toolName: "writeFile" }],
+    usage: { inputTokens: 1, outputTokens: 1 },
+    finishReason: "tool-calls",
+    rawFinishReason: "tool_use",
+    content,
+  });
+
+  const generateWithStep = async (content: unknown[]) => {
+    mockPrepareChatTurn.mockResolvedValueOnce(fakeTurn());
+    mockGenerateText.mockImplementationOnce(
+      (args: { onStepFinish: (s: unknown) => void }) => {
+        args.onStepFinish(stepWith(content));
+        return fakeGenerateResult;
+      },
+    );
+    await runner.generate({
+      scope,
+      input: baseInput,
+      sink: new RecordingSink(),
+    });
+  };
+
+  it("records a truncated payload on the unattended path", async () => {
+    const raw = '{"path":"notes.md","body":"the first half of a very l';
+    await generateWithStep([
+      {
+        type: "tool-error",
+        toolCallId: "call_1",
+        toolName: "writeFile",
+        input: raw,
+        error: "AI_InvalidToolInputError: Invalid input for tool writeFile",
+      },
+    ]);
+
+    expect(failureLogs()[0]).toMatchObject({
+      runId: "run-1",
+      step: 1,
+      toolCallId: "call_1",
+      toolName: "writeFile",
+      inputType: "string",
+      inputKind: "unparseable",
+      inputLength: raw.length,
+      inputPrefix: raw,
+    });
+  });
+
+  it("tells a payload the model never sent from one it sent empty", async () => {
+    await generateWithStep([
+      { type: "tool-error", toolCallId: "call_1", input: "" },
+      { type: "tool-error", toolCallId: "call_2", input: {} },
+    ]);
+
+    expect(failureLogs().map((r) => r.inputKind)).toEqual(["empty", "parsed"]);
+  });
+
+  it("says nothing about a step whose tool calls all succeeded", async () => {
+    await generateWithStep([
+      { type: "text", text: "done" },
+      {
+        type: "tool-result",
+        toolCallId: "call_1",
+        toolName: "writeFile",
+        input: { path: "notes.md", body: "secret" },
+        output: { ok: true },
+      },
+    ]);
+
+    expect(failureLogs()).toEqual([]);
+  });
+
+  it("records the same payload on the streaming path", async () => {
+    mockPrepareChatTurn.mockResolvedValueOnce(fakeTurn());
+    streamHarness.queue = new streamHarness.AsyncQueue();
+    mockStreamText.mockImplementation(
+      (opts: { onStepFinish: (step: unknown) => void }) => {
+        streamHarness.onStepFinish = opts.onStepFinish;
+        return {
+          toUIMessageStream: () => ({ tee: () => [{}, {}] }),
+        };
+      },
+    );
+
+    await runner.stream({
+      scope,
+      input: { ...baseInput, runId: "s-rejected" },
+      sink: new RecordingSink(),
+      options: { origin: "http://test" },
+    });
+    streamHarness.onStepFinish!(
+      stepWith([
+        {
+          type: "tool-error",
+          toolCallId: "call_1",
+          toolName: "updateNotification",
+          input: { message: "far too long" },
+          error: "AI_InvalidToolInputError",
+        },
+      ]),
+    );
+
+    expect(failureLogs()[0]).toMatchObject({
+      runId: "s-rejected",
+      toolName: "updateNotification",
+      inputKind: "parsed",
+      inputPrefix: '{"message":"far too long"}',
+    });
+    runRegistry.cancel("s-rejected");
+  });
+
+  it("keeps the argument text out of the entry an Operator sees by default", async () => {
+    await generateWithStep([
+      { type: "tool-error", toolCallId: "call_1", input: '{"body":"cut' },
+    ]);
+
+    // Emitted at `debug` alone: at the default LOG_LEVEL=info the payload is
+    // never written at all.
+    const higher = [
+      ...vi.mocked(logger.info).mock.calls,
+      ...vi.mocked(logger.warn).mock.calls,
+      ...vi.mocked(logger.error).mock.calls,
+    ];
+    expect(higher.some((call) => JSON.stringify(call[0]).includes("cut"))).toBe(
+      false,
+    );
+  });
+});
+
 describe("AgentRunner.generate", () => {
   let runner: AgentRunner;
   beforeEach(() => {

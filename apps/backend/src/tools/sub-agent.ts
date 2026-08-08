@@ -7,6 +7,7 @@ import {
 } from "ai";
 import { z } from "zod";
 import { logger } from "../logger.ts";
+import { describeToolInput } from "../rejected-tool-input.ts";
 import { renderSecurityGuardrails } from "../security-prompt.ts";
 import { withNormalizedResults } from "../services/tool-result.ts";
 import {
@@ -219,6 +220,15 @@ export const createSubAgentTool = (options: SubAgentToolOptions) => {
                 entry.status = "error";
                 entry.error = String(part.error);
               }
+              // The activity entry keeps only the error text, so without this
+              // the arguments the sub-agent emitted are gone. A sub-agent run
+              // is the least observable surface there is, which is where the
+              // record is worth the most (issue #421). `debug`, because tool
+              // arguments are model and user data.
+              logger.debug(
+                { subAgentName: name, ...describeToolInput(part) },
+                "Sub-agent tool call failed",
+              );
               break;
             }
             case "reasoning-start":
