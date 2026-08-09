@@ -209,5 +209,70 @@ describe("TriggerSink", () => {
       const setArg = mockDb.set.mock.calls[0][0] as Record<string, unknown>;
       expect(setArg.stats).toBeNull();
     });
+
+    // Without this the run lands as a plain 'success' and nothing anywhere says
+    // the answer was cut off at the model's ceiling.
+    it("persists the truncation marker on a run that hit the output limit", async () => {
+      const sink = new TriggerSink({ triggerId: "trigger-1" });
+
+      await sink.onFinish({
+        runId: "run-1",
+        status: "succeeded",
+        messages: [],
+        stats: {
+          steps: 1,
+          toolCalls: [],
+          inputTokens: 100,
+          outputTokens: 4096,
+          truncatedByTokenLimit: true,
+        },
+      });
+
+      const setArg = mockDb.set.mock.calls[0][0] as Record<string, unknown>;
+      expect(setArg.status).toBe("success");
+      expect(setArg.stats).toEqual({
+        steps: 1,
+        toolCalls: [],
+        inputTokens: 100,
+        outputTokens: 4096,
+        truncatedByTokenLimit: true,
+      });
+    });
+
+    // The steps==null guard would otherwise drop the row, and with it the only
+    // record that the run was truncated.
+    it("still writes the truncation marker when no step was ever observed", async () => {
+      const sink = new TriggerSink({ triggerId: "trigger-1" });
+
+      await sink.onFinish({
+        runId: "run-1",
+        status: "succeeded",
+        messages: [],
+        stats: { truncatedByTokenLimit: true },
+      });
+
+      const setArg = mockDb.set.mock.calls[0][0] as Record<string, unknown>;
+      expect(setArg.stats).toEqual({
+        steps: 0,
+        toolCalls: [],
+        inputTokens: 0,
+        outputTokens: 0,
+        truncatedByTokenLimit: true,
+      });
+    });
+
+    it("omits the marker entirely for a run that finished cleanly", async () => {
+      const sink = new TriggerSink({ triggerId: "trigger-1" });
+
+      await sink.onFinish({
+        runId: "run-1",
+        status: "succeeded",
+        messages: [],
+        stats: { steps: 1, toolCalls: [], inputTokens: 1, outputTokens: 1 },
+      });
+
+      const setArg = mockDb.set.mock.calls[0][0] as Record<string, unknown>;
+      expect(setArg.stats).not.toHaveProperty("truncatedByTokenLimit");
+    });
   });
 });

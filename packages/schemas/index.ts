@@ -1520,6 +1520,12 @@ export const triggerRunStatsSchema = z.object({
   toolCalls: z.array(z.object({ name: z.string(), count: z.number() })),
   inputTokens: z.number(),
   outputTokens: z.number(),
+  /**
+   * Set only when the run stopped because it hit the model's output ceiling.
+   * Absent rather than `false` so an untruncated run stores nothing, matching
+   * the equivalent marker on a Chat message.
+   */
+  truncatedByTokenLimit: z.literal(true).optional(),
 });
 
 export type TriggerRunStats = z.infer<typeof triggerRunStatsSchema>;

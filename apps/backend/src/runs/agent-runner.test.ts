@@ -91,10 +91,9 @@ vi.mock("../logger.ts", () => ({
 }));
 
 import { AgentRunner } from "./agent-runner.ts";
-import { TRUNCATED_BY_TOKEN_LIMIT } from "./stream-error.ts";
 import { logger } from "../logger.ts";
 import { runRegistry, TimeoutError } from "./run-registry.ts";
-import type { ResolvedRunPlan, RunInput, RunSink } from "./types.ts";
+import type { ResolvedRunPlan, RunInput, RunSink, RunStats } from "./types.ts";
 import type { WorkspaceScope } from "../scope.ts";
 
 type LifecycleEvent =
@@ -107,6 +106,7 @@ type LifecycleEvent =
       status: string;
       error?: string;
       messages?: unknown[];
+      stats?: RunStats;
     };
 
 class RecordingSink implements RunSink {
@@ -129,6 +129,7 @@ class RecordingSink implements RunSink {
     status: string;
     error?: Error;
     messages?: unknown[];
+    stats?: RunStats;
   }): Promise<void> {
     this.events.push({
       name: "onFinish",
@@ -136,12 +137,19 @@ class RecordingSink implements RunSink {
       status: ctx.status,
       error: ctx.error?.message,
       messages: ctx.messages,
+      stats: ctx.stats,
     });
     return Promise.resolve();
   }
 
   names(): string[] {
     return this.events.map((e) => e.name);
+  }
+
+  /** The stats the run handed the sink at termination. */
+  finalStats(): RunStats | undefined {
+    const finish = this.events.find((e) => e.name === "onFinish");
+    return finish?.name === "onFinish" ? finish.stats : undefined;
   }
 }
 
@@ -280,7 +288,9 @@ describe("finish reason instrumentation", () => {
     expect(warned).toBe(true);
   });
 
-  it("tells the caller when an unattended run was cut off at the token limit", async () => {
+  // The unattended path returns its text to a caller that discards it, so the
+  // stats the sink persists are the only place a cut-short run can be recorded.
+  it("flags the stats when an unattended run stopped at the output limit", async () => {
     mockPrepareChatTurn.mockResolvedValueOnce(fakeTurn());
     mockGenerateText.mockResolvedValueOnce({
       ...fakeGenerateResult,
@@ -288,33 +298,28 @@ describe("finish reason instrumentation", () => {
       finishReason: "length",
       rawFinishReason: "max_tokens",
     });
+    const sink = new RecordingSink();
 
-    const result = await runner.generate({
-      scope,
-      input: baseInput,
-      sink: new RecordingSink(),
-    });
+    const result = await runner.generate({ scope, input: baseInput, sink });
 
-    // The model that receives this text can adapt; previously it could not
-    // tell a truncated answer from a complete one.
-    expect(result.text).toContain("half an ans");
-    expect(result.text).toContain(TRUNCATED_BY_TOKEN_LIMIT);
+    expect(sink.finalStats()?.truncatedByTokenLimit).toBe(true);
+    expect(result.stats.truncatedByTokenLimit).toBe(true);
+    // The answer itself is returned as the model wrote it — no appended notice.
+    expect(result.text).toBe("half an ans");
   });
 
-  it("leaves a cleanly finished unattended run's text untouched", async () => {
+  it("leaves a cleanly finished unattended run's stats unflagged", async () => {
     mockPrepareChatTurn.mockResolvedValueOnce(fakeTurn());
     mockGenerateText.mockResolvedValueOnce({
       ...fakeGenerateResult,
       finishReason: "stop",
       rawFinishReason: "end_turn",
     });
+    const sink = new RecordingSink();
 
-    const result = await runner.generate({
-      scope,
-      input: baseInput,
-      sink: new RecordingSink(),
-    });
+    const result = await runner.generate({ scope, input: baseInput, sink });
 
+    expect(sink.finalStats()).not.toHaveProperty("truncatedByTokenLimit");
     expect(result.text).toBe("ok");
   });
 

@@ -7,11 +7,7 @@ import {
   stepCountIs,
   streamText,
 } from "ai";
-import {
-  formatStreamError,
-  isTruncatedByTokenLimit,
-  TRUNCATED_BY_TOKEN_LIMIT,
-} from "./stream-error.ts";
+import { formatStreamError, isTruncatedByTokenLimit } from "./stream-error.ts";
 import {
   prepareChatTurn,
   validateTurnAttachments,
@@ -547,6 +543,13 @@ export class AgentRunner {
       });
 
       const stats = computeStats(result as Parameters<typeof computeStats>[0]);
+      // The terminal finish only, as on the streamed path: a step inside a tool
+      // loop can end at the ceiling and the run still recover. Set before
+      // `finalize`, which is what carries `state.stats` to `sink.onFinish` —
+      // the sink's record is the only channel an unattended run has.
+      if (isTruncatedByTokenLimit(result.finishReason)) {
+        stats.truncatedByTokenLimit = true;
+      }
       state.stats = stats;
 
       // The no-progress stop condition halts the loop cleanly (the SDK
@@ -588,14 +591,7 @@ export class AgentRunner {
       );
 
       await finalize("succeeded");
-      // A truncated answer is worse than a failed one when it's indistinguishable
-      // from a complete one: the caller stores it, and whatever reads it later
-      // has no way to know the tail is missing. Say so in the text itself, which
-      // is the only channel an unattended caller has.
-      const text = isTruncatedByTokenLimit(result.finishReason)
-        ? `${result.text}\n\n${TRUNCATED_BY_TOKEN_LIMIT}`
-        : result.text;
-      return { text, stats };
+      return { text: result.text, stats };
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       logger.error(
