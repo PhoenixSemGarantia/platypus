@@ -46,7 +46,7 @@ translating gateway in front of it.
 | `providerType`       | The vendor (`OpenAI`, `OpenRouter`, `Bedrock`, `Google`, `Anthropic`).                                                                                          |
 | `apiKey`             | The vendor credential.                                                                                                                                          |
 | `baseUrl`            | Optional override for OpenAI-compatible / self-hosted endpoints.                                                                                                |
-| `headers`            | Optional extra HTTP headers, as a JSON object, sent with every request to this Provider. On OpenRouter these also override the [app attribution](#openrouter-app-attribution) headers. |
+| `headers`            | Optional extra HTTP headers, as a JSON object, sent with every request to this Provider. On OpenRouter, setting any [app attribution](#openrouter-app-attribution) header here replaces all three defaults. |
 | `region`             | Required for Bedrock (AWS region).                                                                                                                              |
 | `modelIds`           | The models this Provider exposes for selection (at least one). Each entry carries its own config: file capability — see [File handling](#file-handling-what-each-model-accepts) — and an optional [Model alias](/concepts/providers#model-aliases). |
 | `taskModelId`        | The model used for one-shot internal tasks (e.g. generating a chat title), not chat turns. Must be a real model id — a Model alias is rejected.                  |
@@ -79,20 +79,30 @@ So out of the box, your usage counts toward the Platypus project's public
 ranking. Nothing else changes: requests go to the same endpoint, on your own API
 key and your own OpenRouter account, at the same cost.
 
-To claim it for your own deployment instead, set the headers you want in the
-Provider's **Headers** field. A header you set there replaces the default of the
-same name, matched case-insensitively, so `http-referer` replaces `HTTP-Referer`
-rather than sending a second one:
+To claim it for your own deployment instead, set the attribution headers you want
+in the Provider's **Headers** field. It is all or nothing: set any one of the
+three and every Platypus default steps aside, so the request carries exactly what
+you wrote and nothing else. Names are matched case-insensitively, so
+`http-referer` counts as setting the referer. Write the whole set:
 
 ```json
 {
   "HTTP-Referer": "https://acme.example",
-  "X-OpenRouter-Title": "Acme Assistant"
+  "X-OpenRouter-Title": "Acme Assistant",
+  "X-OpenRouter-Categories": "personal-agent,general-chat"
 }
 ```
 
-`HTTP-Referer` is the one that matters — it's what OpenRouter identifies an app
-by. A title on its own creates no app page and tracks nothing.
+<Callout type="warning">
+  Setting a title and expecting the Platypus referer to carry it gets you
+  neither. `HTTP-Referer` is what OpenRouter identifies an app by, and once you
+  set any attribution header the defaults are gone — so a set that omits the
+  referer creates no app page and tracks nothing. Include `HTTP-Referer` in
+  every set you write.
+</Callout>
+
+Attribution is per Provider, not per deployment, so two OpenRouter Providers in
+the same Organization can attribute differently.
 
 <Callout type="warning">
   Leaving **Headers** empty does not opt out — that's what gives you the Platypus
@@ -101,9 +111,6 @@ by. A title on its own creates no app page and tracks nothing.
   yourself, since OpenRouter cannot attribute those without a referer. Your
   other custom headers are still sent.
 </Callout>
-
-Attribution is per Provider, not per deployment, so two OpenRouter Providers in
-the same Organization can attribute differently.
 
 ### File handling: what each model accepts
 
