@@ -25,10 +25,11 @@ export interface OpenedProvider {
  * identifier — without it OpenRouter creates no app page and does not track the
  * request; title and categories do nothing on their own.
  *
- * These are defaults, not policy: a Provider's own `headers` win, so an operator
- * can re-attribute usage to their own deployment or opt out per Provider. There
- * is deliberately no environment variable for this — every other per-Provider
- * knob lives on the Provider row, and env vars here are deploy-time infra.
+ * These are defaults, not policy: a Provider that sets its own attribution wins
+ * outright, so an operator can re-attribute usage to their own deployment or opt
+ * out per Provider. There is deliberately no environment variable for this —
+ * every other per-Provider knob lives on the Provider row, and env vars here are
+ * deploy-time infra.
  */
 const OPENROUTER_ATTRIBUTION_HEADERS: Record<string, string> = {
   "HTTP-Referer": "https://github.com/willdady/platypus",
@@ -36,10 +37,20 @@ const OPENROUTER_ATTRIBUTION_HEADERS: Record<string, string> = {
   "X-OpenRouter-Categories": "personal-agent,general-chat",
 };
 
+const ATTRIBUTION_NAMES = Object.keys(OPENROUTER_ATTRIBUTION_HEADERS).map(
+  (name) => name.toLowerCase(),
+);
+
 /**
- * Merge the attribution defaults beneath a Provider's own headers. Collisions
- * are matched case-insensitively because HTTP header names are — otherwise an
- * operator's `http-referer` would sit alongside our `HTTP-Referer` and send two.
+ * Apply the attribution defaults to a Provider's own headers, all or nothing.
+ * The three headers describe one app, so mixing them across two apps names
+ * neither: the Platypus title on an operator's referer titles *their* app page
+ * "Platypus", and an operator's title on the Platypus referer puts their name on
+ * the project's page. So a Provider that sets any of the three supplies all of
+ * them, and one that sets none gets all three defaults.
+ *
+ * Names are matched case-insensitively because HTTP header names are — otherwise
+ * an operator's `http-referer` would sit alongside our `HTTP-Referer`.
  *
  * An empty (or whitespace-only) referer is an explicit opt-out: all three
  * attribution headers are dropped, rather than sending a blank referer OpenRouter
@@ -49,38 +60,30 @@ const withOpenRouterAttribution = (
   headers: Record<string, string> | undefined,
 ): Record<string, string> => {
   const own = headers ?? {};
+  const isAttribution = (key: string) =>
+    ATTRIBUTION_NAMES.includes(key.toLowerCase());
 
-  // Nothing stops an operator writing the same header under two casings, so
-  // group every key under its lowercase name rather than resolving to one.
-  // Resolving would let a later `HTTP-Referer` hide an earlier blank
-  // `http-referer` and silently defeat the opt-out.
-  const ownKeysByName = new Map<string, string[]>();
-  for (const key of Object.keys(own)) {
-    const name = key.toLowerCase();
-    ownKeysByName.set(name, [...(ownKeysByName.get(name) ?? []), key]);
-  }
-
+  // Every casing is checked, not just one: nothing stops an operator writing the
+  // same header twice, and resolving to a single key would let a later
+  // `HTTP-Referer` hide an earlier blank `http-referer` and defeat the opt-out.
+  //
   // `headers` is stored as jsonb and cast, not parsed, on read — a value can be
   // a non-string at runtime despite the type. Only a real blank string opts out;
-  // anything else is passed through as before rather than crashing the call.
-  const isBlank = (key: string) =>
-    typeof own[key] === "string" && own[key].trim() === "";
-
-  if ((ownKeysByName.get("http-referer") ?? []).some(isBlank)) {
-    const withoutAttribution = { ...own };
-    for (const name of Object.keys(OPENROUTER_ATTRIBUTION_HEADERS)) {
-      for (const key of ownKeysByName.get(name.toLowerCase()) ?? []) {
-        delete withoutAttribution[key];
-      }
-    }
-    return withoutAttribution;
+  // anything else is passed through rather than crashing the call.
+  const optedOut = Object.entries(own).some(
+    ([key, value]) =>
+      key.toLowerCase() === "http-referer" &&
+      typeof value === "string" &&
+      value.trim() === "",
+  );
+  if (optedOut) {
+    return Object.fromEntries(
+      Object.entries(own).filter(([key]) => !isAttribution(key)),
+    );
   }
 
-  const defaults: Record<string, string> = {};
-  for (const [name, value] of Object.entries(OPENROUTER_ATTRIBUTION_HEADERS)) {
-    if (!ownKeysByName.has(name.toLowerCase())) defaults[name] = value;
-  }
-  return { ...defaults, ...own };
+  if (Object.keys(own).some(isAttribution)) return { ...own };
+  return { ...OPENROUTER_ATTRIBUTION_HEADERS, ...own };
 };
 
 export const openProvider = (provider: Provider): OpenedProvider => {
