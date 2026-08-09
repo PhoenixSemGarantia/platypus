@@ -52,6 +52,14 @@ const {
       onStepFinish: undefined as ((step: unknown) => void) | undefined,
       onFinish: undefined as
         ((ctx: { messages: unknown[] }) => Promise<void> | void) | undefined,
+      // Fires once per completed tool execution; the runner folds these into
+      // the finished messages.
+      onToolExecutionEnd: undefined as
+        | ((ctx: {
+            toolCall: { toolCallId: string };
+            toolExecutionMs: number;
+          }) => void)
+        | undefined,
       // `toUIMessageStream`'s metadata extractor. The SDK calls it per stream
       // part; the tests call it by hand with the part they care about.
       messageMetadata: undefined as
@@ -796,6 +804,7 @@ const resetStreamHarness = (): void => {
   streamHarness.queue = null;
   streamHarness.onStepFinish = undefined;
   streamHarness.onFinish = undefined;
+  streamHarness.onToolExecutionEnd = undefined;
   streamHarness.messageMetadata = undefined;
 };
 
@@ -804,8 +813,15 @@ const resetStreamHarness = (): void => {
 // `messageMetadata` (per stream part).
 const primeStreamText = () => {
   mockStreamText.mockImplementation(
-    (opts: { onStepFinish?: (step: unknown) => void }) => {
+    (opts: {
+      onStepFinish?: (step: unknown) => void;
+      onToolExecutionEnd?: (ctx: {
+        toolCall: { toolCallId: string };
+        toolExecutionMs: number;
+      }) => void;
+    }) => {
       streamHarness.onStepFinish = opts.onStepFinish;
+      streamHarness.onToolExecutionEnd = opts.onToolExecutionEnd;
       return {
         toUIMessageStream: (uiOpts: {
           onFinish: (ctx: { messages: unknown[] }) => Promise<void> | void;
@@ -877,6 +893,123 @@ describe("AgentRunner.stream — success & interruption", () => {
     expect(finish.messages).toEqual(finalMessages);
     expect(dispose).toHaveBeenCalledTimes(1);
     expect(runRegistry.has("s-ok")).toBe(false);
+  });
+
+  it("persists each tool call's execution time on the finished messages", async () => {
+    mockPrepareChatTurn.mockResolvedValueOnce(fakeTurn());
+    const queue = new streamHarness.AsyncQueue();
+    streamHarness.queue = queue;
+    primeStreamText();
+
+    const sink = new RecordingSink();
+    await runner.stream({
+      scope,
+      input: { ...baseInput, runId: "s-durations" },
+      sink,
+      options: { origin: "http://test" },
+    });
+
+    streamHarness.onToolExecutionEnd!({
+      toolCall: { toolCallId: "call-1" },
+      toolExecutionMs: 1234,
+    });
+    await streamHarness.onFinish!({
+      messages: [
+        {
+          id: "m1",
+          role: "assistant",
+          parts: [
+            {
+              type: "tool-getCard",
+              toolCallId: "call-1",
+              state: "output-available",
+              input: {},
+              output: {},
+            },
+          ],
+        },
+      ],
+    });
+    queue.end();
+    await tick();
+
+    const finish = sink.events.at(-1) as Extract<
+      LifecycleEvent,
+      { name: "onFinish" }
+    >;
+    const message = finish.messages![0] as { parts: unknown[] };
+    expect(message.parts[0]).toMatchObject({
+      toolMetadata: { durationMs: 1234 },
+    });
+  });
+
+  // The two branches of the teed UI stream race: `onFinish` fires on the source
+  // while the server-side snapshot branch may still have buffered chunks, and
+  // disposing the turn is real I/O that gives that branch time to drain. A
+  // snapshot landing in that window used to overwrite the finished messages —
+  // silently costing them their durations, since a snapshot carries none.
+  it("keeps the final messages when a snapshot lands during teardown", async () => {
+    const queue = new streamHarness.AsyncQueue();
+    streamHarness.queue = queue;
+    const dispose = vi.fn().mockImplementation(async () => {
+      queue.push({
+        id: "m1",
+        role: "assistant",
+        parts: [
+          {
+            type: "tool-getCard",
+            toolCallId: "call-1",
+            state: "output-available",
+            input: {},
+            output: {},
+          },
+        ],
+      });
+      await tick();
+    });
+    mockPrepareChatTurn.mockResolvedValueOnce(fakeTurn({ dispose }));
+    primeStreamText();
+
+    const sink = new RecordingSink();
+    await runner.stream({
+      scope,
+      input: { ...baseInput, runId: "s-late-snapshot" },
+      sink,
+      options: { origin: "http://test" },
+    });
+
+    streamHarness.onToolExecutionEnd!({
+      toolCall: { toolCallId: "call-1" },
+      toolExecutionMs: 1234,
+    });
+    await streamHarness.onFinish!({
+      messages: [
+        {
+          id: "m1",
+          role: "assistant",
+          parts: [
+            {
+              type: "tool-getCard",
+              toolCallId: "call-1",
+              state: "output-available",
+              input: {},
+              output: {},
+            },
+          ],
+        },
+      ],
+    });
+    queue.end();
+    await tick();
+
+    const finish = sink.events.at(-1) as Extract<
+      LifecycleEvent,
+      { name: "onFinish" }
+    >;
+    const message = finish.messages![0] as { parts: unknown[] };
+    expect(message.parts[0]).toMatchObject({
+      toolMetadata: { durationMs: 1234 },
+    });
   });
 
   it("interactive stream runs are NOT subject to no-progress detection", async () => {

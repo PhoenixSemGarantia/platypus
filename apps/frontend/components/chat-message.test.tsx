@@ -106,3 +106,54 @@ describe("ChatMessage truncation marker", () => {
     expect(screen.getByText(CUT_SHORT_NOTICE)).toBeInTheDocument();
   });
 });
+
+// Issue #353: the header carries the tool's execution time so a slow reply can
+// be pinned on a specific tool rather than the model.
+describe("ChatMessage tool duration", () => {
+  const withToolPart = (part: unknown): PlatypusUIMessage =>
+    ({
+      id: "m1",
+      role: "assistant",
+      parts: [part],
+    }) as PlatypusUIMessage;
+
+  const staticToolPart = (toolMetadata?: Record<string, unknown>) => ({
+    type: "tool-getCard",
+    toolCallId: "call-1",
+    state: "output-available",
+    input: {},
+    output: {},
+    toolMetadata,
+  });
+
+  const dynamicToolPart = (toolMetadata?: Record<string, unknown>) => ({
+    type: "dynamic-tool",
+    toolName: "search",
+    toolCallId: "call-1",
+    state: "output-available",
+    input: {},
+    output: {},
+    toolMetadata,
+  });
+
+  it.each([
+    ["a static tool", staticToolPart({ durationMs: 1234 })],
+    ["a dynamic tool", dynamicToolPart({ durationMs: 1234 })],
+  ])("renders the persisted duration for %s", (_, part) => {
+    renderMessage(withToolPart(part));
+
+    expect(screen.getByText(/1\.2s/)).toBeInTheDocument();
+  });
+
+  // Tool calls recorded before this shipped carry no timing; they render the
+  // header exactly as before rather than a placeholder.
+  it.each([
+    ["a static tool", staticToolPart()],
+    ["a dynamic tool", dynamicToolPart()],
+  ])("renders no duration for %s recorded before timing existed", (_, part) => {
+    renderMessage(withToolPart(part));
+
+    expect(screen.getByText("Completed")).toBeInTheDocument();
+    expect(screen.queryByText(/\d+ms|\d+\.\d+s/)).toBeNull();
+  });
+});
