@@ -47,6 +47,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { Textarea } from "./ui/textarea";
+import { toolDurationMs } from "@/lib/tool-duration";
 import { LoadSkillTool } from "./load-skill-tool";
 import { SubAgentTool } from "./sub-agent-tool";
 
@@ -220,6 +221,7 @@ export const ChatMessage = memo(function ChatMessage({
               <DynamicToolHeader
                 state={toolPart.state}
                 title={toolPart.toolName}
+                durationMs={toolDurationMs(toolPart.toolMetadata)}
               />
               <ToolContent>
                 <ToolInput input={toolPart.input} />
@@ -250,6 +252,7 @@ export const ChatMessage = memo(function ChatMessage({
                 state={part.state}
                 type={part.type}
                 label={toolLabel}
+                durationMs={toolDurationMs(part.toolMetadata)}
               />
               <ToolContent>
                 <ToolInput input={part.input} />

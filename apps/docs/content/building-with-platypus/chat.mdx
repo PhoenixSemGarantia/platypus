@@ -85,6 +85,35 @@ specific pages instead wants the **Web Fetch** Tool set — see
 A microphone button next to it transcribes speech into the input box. The text
 lands in the box rather than sending, so you can edit before pressing **Enter**.
 
+## How long a Tool took
+
+When a reply uses a Tool, the Tool appears in the conversation as a collapsible
+card. Its header shows the Tool's name, a status — **Pending**, **Running**,
+**Completed**, **Error** — and how long the Tool took: `<1ms`, `842ms`, `1.2s`,
+or `1m 03s` past a minute.
+
+The time is the Tool's own work, measured on the server, so it appears a moment
+after the reply finishes rather than while the Tool is running. It is stored
+with the message and does not change afterwards. A Tool that failed still shows
+the time it spent before failing.
+
+Read it against the reply as a whole: most Tools land in single milliseconds, so
+a turn that felt slow and shows nothing above `1.2s` spent its time in the
+model, not the Tools.
+
+A Sub-agent card carries a time too, covering the whole delegated run — every
+step that Sub-agent took, not just the handover. It is usually the largest
+number on the page and the first one to look at on a slow turn.
+
+<Callout type="warning">
+  **A card with no time is not a Tool that took no time.** A Tool that really
+  was instant reads `<1ms`; a blank means there is no measurement at all. Three
+  cards are blank by nature: a search the Provider ran inside its own service,
+  the **Loading skill** card, which draws its own header, and Chats from before
+  your deployment was upgraded. A blank never means "still running" — the status
+  badge is what tells you that.
+</Callout>
+
 ## When a reply stops early
 
 Every model has a ceiling on how much it can write in one reply. Reach it and

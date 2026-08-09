@@ -8,6 +8,7 @@ import {
   streamText,
 } from "ai";
 import { formatStreamError, isTruncatedByTokenLimit } from "./stream-error.ts";
+import { applyToolDurations } from "./tool-durations.ts";
 import {
   prepareChatTurn,
   validateTurnAttachments,
@@ -427,9 +428,26 @@ export class AgentRunner {
 
     logger.debug({ systemPrompt: modelArgs.system }, "System prompt for chat");
 
+    // How long each locally-executed tool took, keyed by `toolCallId`. The SDK
+    // has already measured it; we only hold onto it until the finished messages
+    // exist to stamp it onto (see `applyToolDurations`). Provider-executed tools
+    // never reach this callback and so carry no duration.
+    const toolDurations = new Map<string, number>();
+
+    // Whether `onFinish` has handed over the finished messages. The two branches
+    // of the tee below race: the source can finish while the snapshot branch
+    // still has chunks buffered, and disposing the turn is real I/O that gives
+    // that branch time to drain. A snapshot arriving after the handover is
+    // strictly worse than what it would overwrite — same content, minus the
+    // tool durations — so the snapshot stops writing once this is set.
+    let finalMessagesReceived = false;
+
     const result = streamText({
       ...modelArgs,
       onStepFinish: (step) => onStep(step),
+      onToolExecutionEnd: ({ toolCall, toolExecutionMs }) => {
+        toolDurations.set(toolCall.toolCallId, toolExecutionMs);
+      },
     });
 
     // Build the UI message stream and tee it. The response body consumes
@@ -465,7 +483,11 @@ export class AgentRunner {
       },
       onError: (error) => formatStreamError(error),
       onFinish: async ({ messages: finalMessages }) => {
-        state.messages = finalMessages;
+        // Stamped here rather than on the snapshot branch below, which sees no
+        // durations at all. Setting the flag first closes that branch's window
+        // to overwrite this, so the sink's terminal write observes the patch.
+        finalMessagesReceived = true;
+        state.messages = applyToolDurations(finalMessages, toolDurations);
         let status: RunStatus = "succeeded";
         let err: Error | undefined;
         if (handle.signal.aborted) {
@@ -498,6 +520,9 @@ export class AgentRunner {
               "Snapshot stream parse error",
             ),
         })) {
+          // Keep draining after the handover — the branch is still teed to a
+          // live source — but stop writing; `onFinish` has the better copy.
+          if (finalMessagesReceived) continue;
           state.messages = [...input.messages, message];
         }
       } catch (err) {

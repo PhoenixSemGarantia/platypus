@@ -25,6 +25,8 @@ import {
   MessageResponse,
 } from "./ai-elements/message";
 import { Shimmer } from "./ai-elements/shimmer";
+import { ToolDuration } from "./tool-duration";
+import { toolDurationMs } from "@/lib/tool-duration";
 import { useMemo, type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 
@@ -236,6 +238,7 @@ export const SubAgentTool = ({ toolPart }: SubAgentToolProps) => {
         <div className="flex items-center gap-2">
           <BotIcon className="size-4 text-muted-foreground" />
           <span className="font-medium text-sm">{subAgentName}</span>
+          <ToolDuration durationMs={toolDurationMs(toolPart.toolMetadata)} />
           {getStatusBadge(effectiveState)}
         </div>
         <ChevronDownIcon className="size-4 text-muted-foreground transition-transform group-data-[state=open]/subagent:rotate-180" />
