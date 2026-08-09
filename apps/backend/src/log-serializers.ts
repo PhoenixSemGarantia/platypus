@@ -1,6 +1,5 @@
 import {
   findIssues,
-  flattenIssues,
   formatIssues,
   truncate,
   type ZodLikeIssue,
@@ -98,9 +97,7 @@ const serializeLink = (
   // empty. Suppressing the message on the mere *presence* of issues would let a
   // tree that summarises to nothing take the only readable line with it.
   const summary =
-    ownIssues && ownIssues.length > 0
-      ? formatIssues(flattenIssues(ownIssues))
-      : "";
+    ownIssues && ownIssues.length > 0 ? formatIssues(ownIssues) : "";
 
   if (typeof source.message === "string") {
     const message = wrapsZod

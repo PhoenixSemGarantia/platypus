@@ -193,18 +193,25 @@ export const flattenIssues = (issues: ZodLikeIssue[]): FlatIssue[] =>
 /**
  * Render issues as one capped line per failing field.
  *
+ * Flattens first, so a union renders as the absolute path of the field that
+ * actually failed rather than the useless `payload: Invalid input` the union
+ * node carries. Doing it here rather than at the call sites is what keeps the
+ * two surfaces — the log entry and the text the user and the model read — from
+ * disagreeing about the same failure.
+ *
  * Deliberately does NOT include the rejected value. The SDK's own message
  * embeds the entire value plus the serialized `ZodError`, which is how a
  * single over-long field became several thousand characters of unreadable
  * output for the user and the model alike (issue #406).
  */
 export const formatIssues = (issues: ZodLikeIssue[]): string => {
-  const shown = issues
+  const flat = flattenIssues(issues);
+  const shown = flat
     .slice(0, MAX_ISSUES)
     .map(
       (issue) =>
         `${formatPath(issue.path)}: ${truncate(issueText(issue), MAX_ISSUE_LENGTH)}`,
     );
-  const omitted = issues.length - shown.length;
+  const omitted = flat.length - shown.length;
   return shown.join("; ") + (omitted > 0 ? ` (+${omitted} more)` : "");
 };
