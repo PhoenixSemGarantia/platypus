@@ -10,6 +10,11 @@ export type RunStats = {
   toolCalls?: Array<{ name: string; count: number }>;
   inputTokens?: number;
   outputTokens?: number;
+  /**
+   * Set only when the run stopped at the model's output ceiling. Absent rather
+   * than `false`, mirroring the Chat message metadata marker.
+   */
+  truncatedByTokenLimit?: true;
 };
 
 /**

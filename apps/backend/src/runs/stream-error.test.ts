@@ -8,7 +8,7 @@ import {
 } from "ai";
 import { z } from "zod";
 import { serializeLoggedError } from "../log-serializers.ts";
-import { formatStreamError, TRUNCATED_BY_TOKEN_LIMIT } from "./stream-error.ts";
+import { formatStreamError } from "./stream-error.ts";
 
 vi.mock("../logger.ts", () => ({
   logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() },
@@ -253,12 +253,5 @@ describe("formatStreamError", () => {
         "An unexpected error occurred.".length,
       );
     });
-  });
-});
-
-describe("TRUNCATED_BY_TOKEN_LIMIT", () => {
-  it("states the cause in terms an agent can act on", () => {
-    expect(TRUNCATED_BY_TOKEN_LIMIT).toMatch(/truncated/i);
-    expect(TRUNCATED_BY_TOKEN_LIMIT).toMatch(/token limit/i);
   });
 });

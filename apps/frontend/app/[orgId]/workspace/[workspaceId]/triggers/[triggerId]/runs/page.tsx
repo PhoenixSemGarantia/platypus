@@ -20,6 +20,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Loader2, Footprints, Wrench, MessageSquare } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { RunCutShortNotice } from "@/components/run-cut-short-notice";
 
 const TriggerRunsPage = ({
   params,
@@ -195,6 +196,9 @@ const TriggerRunsPage = ({
                                 out
                               </span>
                             </div>
+                          )}
+                          {stats?.truncatedByTokenLimit && (
+                            <RunCutShortNotice />
                           )}
                           {run.errorMessage && (
                             <p className="text-sm text-destructive mt-1">
