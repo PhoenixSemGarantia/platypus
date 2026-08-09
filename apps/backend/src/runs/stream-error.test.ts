@@ -7,6 +7,7 @@ import {
   TypeValidationError,
 } from "ai";
 import { z } from "zod";
+import { serializeLoggedError } from "../log-serializers.ts";
 import { formatStreamError } from "./stream-error.ts";
 
 vi.mock("../logger.ts", () => ({
@@ -128,6 +129,48 @@ describe("formatStreamError", () => {
       const formatted = formatStreamError(error);
       expect(formatted).toContain("mysteryTool");
       expect(formatted).toContain("unparseable");
+    });
+  });
+
+  // Where the two surfaces used to disagree. A union reports why every branch
+  // failed, and only a descent that concatenates the union's path with the
+  // branch's produces the one path worth reading. The log serializer flattened
+  // and this did not, so the log named the field while the user — and, on a
+  // failed step, the model asked to correct itself — got `payload: Invalid
+  // input`.
+  describe("invalid tool input rejected by a union", () => {
+    const schema = z.object({
+      payload: z.union([
+        z.object({
+          kind: z.literal("a"),
+          items: z.array(z.object({ id: z.string() })),
+        }),
+        z.object({ kind: z.literal("b"), value: z.number() }),
+      ]),
+    });
+    const value = { payload: { kind: "a", items: [{ id: 42 }] } };
+    const rejected = () =>
+      invalidToolInput({ toolName: "recordPayload", schema, value });
+
+    it("names the field the union rejected rather than the union", () => {
+      const formatted = formatStreamError(rejected());
+
+      expect(formatted).toContain("recordPayload");
+      expect(formatted).toContain("payload.items[0].id");
+      expect(formatted).not.toContain("payload: Invalid input");
+      expect(formatted).not.toContain("invalid_union");
+    });
+
+    it("tells the log exactly what it tells the user", () => {
+      const error = rejected();
+
+      const streamed = formatStreamError(error);
+      const logged = JSON.stringify(serializeLoggedError(error));
+
+      const line =
+        "payload.items[0].id: Invalid input: expected string, received number";
+      expect(streamed).toContain(line);
+      expect(logged).toContain(line);
     });
   });
 

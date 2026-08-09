@@ -178,27 +178,37 @@ describe("openProvider", () => {
       });
     });
 
-    it("lets a provider header override a default", () => {
+    it("drops every default once a provider sets any attribution header", () => {
+      // The three headers name one app. Keeping the Platypus title next to an
+      // operator's referer would title the operator's app page "Platypus".
+      expect(
+        openRouter({
+          "X-OpenRouter-Title": "Acme Corp",
+          "HTTP-Referer": "https://acme.example",
+        }).headers,
+      ).toEqual({
+        "X-OpenRouter-Title": "Acme Corp",
+        "HTTP-Referer": "https://acme.example",
+      });
+    });
+
+    it("sends no Platypus referer when a provider sets only a title", () => {
+      // A title alone attributes nothing on OpenRouter, but pairing it with the
+      // Platypus referer would put the operator's name on the project's page.
       expect(openRouter({ "X-OpenRouter-Title": "Acme Corp" }).headers).toEqual(
         {
-          "HTTP-Referer": "https://github.com/willdady/platypus",
           "X-OpenRouter-Title": "Acme Corp",
-          "X-OpenRouter-Categories": "personal-agent,general-chat",
         },
       );
     });
 
     it("matches overrides case-insensitively, leaving one entry per header", () => {
       // HTTP header names are case-insensitive, so a differently-cased key must
-      // replace the default rather than sit alongside it as a duplicate.
+      // stand the defaults down rather than sit alongside one as a duplicate.
       const headers = openRouter({
         "http-referer": "https://acme.example",
       }).headers;
-      expect(headers).toEqual({
-        "http-referer": "https://acme.example",
-        "X-OpenRouter-Title": "Platypus",
-        "X-OpenRouter-Categories": "personal-agent,general-chat",
-      });
+      expect(headers).toEqual({ "http-referer": "https://acme.example" });
       expect(
         Object.keys(headers).filter((k) => k.toLowerCase() === "http-referer"),
       ).toHaveLength(1);
@@ -251,12 +261,9 @@ describe("openProvider", () => {
         string,
         string
       >;
-      // Not an opt-out — only a blank string is — so the other defaults stand.
-      expect(openRouter(headers).headers).toEqual({
-        "HTTP-Referer": null,
-        "X-OpenRouter-Title": "Platypus",
-        "X-OpenRouter-Categories": "personal-agent,general-chat",
-      });
+      // Not an opt-out — only a blank string is — so the row still counts as
+      // setting a referer and no Platypus default joins it.
+      expect(openRouter(headers).headers).toEqual({ "HTTP-Referer": null });
     });
   });
 
