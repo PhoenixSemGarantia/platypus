@@ -24,15 +24,12 @@ export type TriggerSinkParams = {
 export const DEFAULT_FLUSH_INTERVAL_MS = 5_000;
 
 /**
- * `steps == null` means no step was ever observed, and counting a run that
- * never started as "0 steps, 0 tokens" reads as a real measurement — hence the
- * null. The truncation marker is the exception: it is the only record that the
- * answer was cut short, and dropping it leaves the run indistinguishable from a
- * clean success. So a flagged run is written out even with nothing else to
- * report, rather than making the guard weaker for every other field.
+ * `steps == null` means no step was ever observed, and writing "0 steps, 0
+ * tokens" for a run that never started reads as a real measurement — hence the
+ * null.
  */
 const toTriggerRunStats = (stats: RunStats): TriggerRunStats | null => {
-  if (stats.steps == null && !stats.truncatedByTokenLimit) return null;
+  if (stats.steps == null) return null;
   return {
     steps: stats.steps ?? 0,
     toolCalls: stats.toolCalls ?? [],

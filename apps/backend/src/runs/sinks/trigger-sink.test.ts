@@ -239,28 +239,6 @@ describe("TriggerSink", () => {
       });
     });
 
-    // The steps==null guard would otherwise drop the row, and with it the only
-    // record that the run was truncated.
-    it("still writes the truncation marker when no step was ever observed", async () => {
-      const sink = new TriggerSink({ triggerId: "trigger-1" });
-
-      await sink.onFinish({
-        runId: "run-1",
-        status: "succeeded",
-        messages: [],
-        stats: { truncatedByTokenLimit: true },
-      });
-
-      const setArg = mockDb.set.mock.calls[0][0] as Record<string, unknown>;
-      expect(setArg.stats).toEqual({
-        steps: 0,
-        toolCalls: [],
-        inputTokens: 0,
-        outputTokens: 0,
-        truncatedByTokenLimit: true,
-      });
-    });
-
     it("omits the marker entirely for a run that finished cleanly", async () => {
       const sink = new TriggerSink({ triggerId: "trigger-1" });
 
