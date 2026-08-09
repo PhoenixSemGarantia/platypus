@@ -178,6 +178,38 @@ describe("flattenIssues", () => {
 });
 
 describe("formatIssues", () => {
+  it("descends a union so the line names the field that failed", () => {
+    // Rendering the raw tree gives `payload: Invalid input`, which names the
+    // union node and nothing a caller can act on. Every surface wants the
+    // descent, so it belongs here rather than at each call site.
+    const schema = z.object({
+      payload: z.union([
+        z.object({
+          kind: z.literal("a"),
+          items: z.array(z.object({ id: z.string() })),
+        }),
+        z.object({ kind: z.literal("b"), value: z.number() }),
+      ]),
+    });
+
+    expect(
+      formatIssues(
+        issuesFor(schema, { payload: { kind: "a", items: [{ id: 42 }] } }),
+      ),
+    ).toBe(
+      "payload.items[0].id: Invalid input: expected string, received number",
+    );
+  });
+
+  it("renders an already-flattened list the same way", () => {
+    // The log serializer flattened before calling this. Flattening twice has
+    // to be identity, or moving the descent inside would have changed it.
+    const schema = z.object({ rows: z.array(z.object({ at: z.string() })) });
+    const issues = issuesFor(schema, { rows: [{ at: 1 }] });
+
+    expect(formatIssues(flattenIssues(issues))).toBe(formatIssues(issues));
+  });
+
   it("marks the issues it dropped rather than trimming silently", () => {
     const many = Array.from({ length: 9 }, (_, index) => ({
       path: ["rows", index, "at"],
