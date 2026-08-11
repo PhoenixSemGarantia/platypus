@@ -8,6 +8,7 @@ import {
   streamText,
 } from "ai";
 import { formatStreamError, isTruncatedByTokenLimit } from "./stream-error.ts";
+import { createMessageMetadata } from "./message-metadata.ts";
 import { applyToolDurations } from "./tool-durations.ts";
 import {
   prepareChatTurn,
@@ -459,28 +460,7 @@ export class AgentRunner {
     const uiStream = result.toUIMessageStream<PlatypusUIMessage>({
       originalMessages: input.messages,
       generateMessageId: createIdGenerator({ prefix: "msg", size: 16 }),
-      // The only seam for saying anything about a stream that has already been
-      // flushed to the client. The SDK calls this per stream part and merges
-      // what it returns into the message, so each event contributes only the
-      // key it owns and the finish chunk leaves the `agentId` from `start`
-      // standing. Returning the whole object every time would work too, but
-      // only because the SDK happens to skip `undefined` values while merging.
-      messageMetadata: ({ part }) => {
-        if (part.type === "start") {
-          const agentId = state.turn?.resolved.agentId;
-          return agentId ? { agentId } : undefined;
-        }
-        // The terminal finish only. A step inside a tool loop can end at the
-        // ceiling and the run still recover and complete normally; flagging
-        // those marks answers that were never cut short.
-        if (
-          part.type === "finish" &&
-          isTruncatedByTokenLimit(part.finishReason)
-        ) {
-          return { truncatedByTokenLimit: true };
-        }
-        return undefined;
-      },
+      messageMetadata: createMessageMetadata(state.turn?.resolved.agentId),
       onError: (error) => formatStreamError(error),
       onFinish: async ({ messages: finalMessages }) => {
         // Stamped here rather than on the snapshot branch below, which sees no
