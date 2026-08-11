@@ -53,6 +53,8 @@ import { ConfirmDialog } from "@/components/confirm-dialog";
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
+  CONTEXT_WINDOW_MAX,
+  CONTEXT_WINDOW_MIN,
   DEFAULT_MAX_EXTRACTED_TEXT_CHARS,
   type AliasRepoint,
   type Provider,
@@ -70,12 +72,20 @@ import {
   defaultPassthroughFileTypes,
   type ModelConfigView,
 } from "@/lib/model-config";
+import {
+  CONTEXT_WINDOW_CUSTOM,
+  CONTEXT_WINDOW_PRESETS,
+  CONTEXT_WINDOW_UNSET,
+  contextWindowForOption,
+  optionForContextWindow,
+  parseContextWindowInput,
+} from "@/lib/context-window";
 import { toast } from "sonner";
 import { useBackendUrl } from "@/app/client-context";
 import { useAuth } from "@/components/auth-provider";
 
 /**
- * Per-field help for a model row. The four fields each need a paragraph of
+ * Per-field help for a model row. The fields each need a paragraph of
  * explanation, which as one block under the list was a wall nobody read and
  * left the reader matching sentences to fields by hand.
  */
@@ -157,6 +167,27 @@ const ModelRow = ({
       model.maxExtractedTextChars !== undefined,
   );
 
+  // Whether the Context window is being typed rather than picked. State as well
+  // as derivation, because neither alone is enough: Custom chosen on a row with
+  // no window declared leaves the value undefined, so a purely derived control
+  // would snap back to "Not set" and the input the reader just asked for would
+  // vanish the moment they cleared it.
+  const [customContextWindow, setCustomContextWindow] = useState(
+    optionForContextWindow(model.contextWindow) === CONTEXT_WINDOW_CUSTOM,
+  );
+
+  // The trigger and the number input read one value, so they cannot disagree.
+  // Model rows are keyed by index, so removing a row shifts the state above
+  // onto its neighbour; folding the stored value back in means a shifted row
+  // holding an unlisted size still renders the input holding it, rather than a
+  // "Custom" trigger beside no input at all — which would leave a declared
+  // window invisible and uneditable until reload.
+  const storedContextWindowOption = optionForContextWindow(model.contextWindow);
+  const contextWindowOption =
+    customContextWindow || storedContextWindowOption === CONTEXT_WINDOW_CUSTOM
+      ? CONTEXT_WINDOW_CUSTOM
+      : storedContextWindowOption;
+
   // A rejected row is no use collapsed: the reader has to see the field the
   // server is complaining about.
   const hasAdvancedError =
@@ -220,6 +251,76 @@ const ModelRow = ({
             }
             disabled={disabled}
           />
+        </ModelField>
+
+        {/*
+          Above Advanced, unlike the other optional per-model fields: this one
+          is the only thing that can tell Platypus a capacity it has no way to
+          discover, so a reader adding a model has to see that it exists.
+        */}
+        <ModelField
+          htmlFor={`context-window-${index}`}
+          label="Context window"
+          hint={
+            <>
+              The vendor&apos;s published <strong>total</strong> token capacity
+              for this model — the whole window, not a cap on the reply. Sizes
+              in the list are decimal, so <code>128k</code> is 128,000.
+              Optional: nothing reads it yet, and leaving it unset breaks
+              nothing — it records a capacity Platypus has no way to look up.
+            </>
+          }
+          error={errors.fields.contextWindow}
+        >
+          <div className="flex items-center gap-2">
+            <Select
+              value={contextWindowOption}
+              onValueChange={(value) => {
+                setCustomContextWindow(value === CONTEXT_WINDOW_CUSTOM);
+                onChange({
+                  contextWindow: contextWindowForOption(
+                    value,
+                    model.contextWindow,
+                  ),
+                });
+              }}
+              disabled={disabled}
+            >
+              <SelectTrigger
+                id={`context-window-${index}`}
+                aria-invalid={!!errors.fields.contextWindow}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={CONTEXT_WINDOW_UNSET}>Not set</SelectItem>
+                {CONTEXT_WINDOW_PRESETS.map((preset) => (
+                  <SelectItem key={preset.tokens} value={String(preset.tokens)}>
+                    {preset.label}
+                  </SelectItem>
+                ))}
+                <SelectItem value={CONTEXT_WINDOW_CUSTOM}>Custom</SelectItem>
+              </SelectContent>
+            </Select>
+            {contextWindowOption === CONTEXT_WINDOW_CUSTOM && (
+              <Input
+                aria-label="Context window in tokens"
+                type="number"
+                min={CONTEXT_WINDOW_MIN}
+                max={CONTEXT_WINDOW_MAX}
+                placeholder="e.g. 131072"
+                className="flex-1"
+                value={model.contextWindow ?? ""}
+                aria-invalid={!!errors.fields.contextWindow}
+                onChange={(e) =>
+                  onChange({
+                    contextWindow: parseContextWindowInput(e.target.value),
+                  })
+                }
+                disabled={disabled}
+              />
+            )}
+          </div>
         </ModelField>
 
         <Collapsible open={advancedOpen} onOpenChange={setShowAdvanced}>

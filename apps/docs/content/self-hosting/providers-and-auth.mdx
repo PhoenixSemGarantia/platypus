@@ -48,7 +48,7 @@ translating gateway in front of it.
 | `baseUrl`            | Optional override for OpenAI-compatible / self-hosted endpoints.                                                                                                |
 | `headers`            | Optional extra HTTP headers, as a JSON object, sent with every request to this Provider. On OpenRouter, setting any [app attribution](#openrouter-app-attribution) header here replaces all three defaults. |
 | `region`             | Required for Bedrock (AWS region).                                                                                                                              |
-| `modelIds`           | The models this Provider exposes for selection (at least one). Each entry carries its own config: file capability — see [File handling](#file-handling-what-each-model-accepts) — and an optional [Model alias](/concepts/providers#model-aliases). |
+| `modelIds`           | The models this Provider exposes for selection (at least one). Each entry is an object carrying that model's own settings — see [What each model entry holds](#what-each-model-entry-holds). |
 | `taskModelId`        | The model used for one-shot internal tasks (e.g. generating a chat title), not chat turns. Must be a real model id — a Model alias is rejected.                  |
 | `securityGuardrails` | Optional free-text security directives appended last in the system prompt for every run on this Provider.                                                       |
 
@@ -112,23 +112,54 @@ the same Organization can attribute differently.
   other custom headers are still sent.
 </Callout>
 
+### What each model entry holds
+
+A model is more than its id. What a model can read, how big its window is, and
+what an Agent selects it by are all properties of the `(Provider, model)` pair,
+and behind a proxy Platypus has no way to infer any of them — model names there
+are whatever the operator chose. So each entry in `modelIds` is an object, and
+everything on it beyond the id is **declared, not guessed**:
+
+| Per-model field         | Meaning                                                                                                                                                                        |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                    | The model id sent to the vendor.                                                                                                                                               |
+| `alias`                 | Optional stable name an Agent or Chat selects this model by, so repointing it upgrades them all at once. See [Model aliases](/concepts/providers#model-aliases).                |
+| `contextWindow`         | The vendor's published **total** token capacity for this model — the whole window, not a cap on the reply. 1,000–10,000,000 tokens. Empty means undeclared, which is normal.    |
+| `passthroughFileTypes`  | The media types this model ingests **natively**. Comma-separated in the UI; wildcards like `image/*` allowed. Empty inherits the [provider-type default](#file-handling-what-each-model-accepts). |
+| `maxExtractedTextChars` | Cap on the text a single extracted document may add to a turn. Empty uses the default (50,000 characters).                                                                     |
+
+Every field is optional except the id, and a Provider set up before any of them
+existed keeps working with none of them set.
+
+In the form, **Context window** sits on the model row itself; the last two sit
+behind **Advanced** on each row — collapsed unless that model already has one of
+them set. Every field carries an **i** you can hover or focus for the same
+explanation.
+
+#### Declaring a Context window
+
+Pick a size from the list, or choose **Custom** and type an exact number for a
+model behind a proxy whose capacity isn't one of the common ones. The listed
+sizes are decimal, so **128k** stores 128,000 — a model whose real window is
+131,072 forfeits 3k and nothing else.
+
+Declaring less than the vendor's real capacity is safe; declaring more is not,
+because the vendor rejects the turn outright. So when you aren't sure, round
+down.
+
+<Callout type="warning">
+  A Context window is a **statement**, not a budget. Platypus does not enforce
+  it: nothing warns, trims a conversation to fit, or blocks a turn for
+  approaching it, and a turn is assembled and sent exactly as it was before. All
+  the field does is tell Platypus a capacity it has no way to look up. Leaving
+  it empty breaks nothing.
+</Callout>
+
 ### File handling: what each model accepts
 
 Whether a model can read an attached file is a property of the
-`(Provider, model)` pair, and behind a proxy Platypus has no way to infer it —
-model names there are whatever the operator chose. So capability is **declared,
-not guessed**: each entry in `modelIds` is a per-model object.
-
-| Per-model field         | Meaning                                                                                                                                                       |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`                    | The model id sent to the vendor.                                                                                                                              |
-| `alias`                 | Optional stable name an Agent or Chat selects this model by, so repointing it upgrades them all at once. See [Model aliases](/concepts/providers#model-aliases). |
-| `passthroughFileTypes`  | The media types this model ingests **natively**. Comma-separated in the UI; wildcards like `image/*` allowed. Empty inherits the provider-type default below. |
-| `maxExtractedTextChars` | Cap on the text a single extracted document may add to a turn. Empty uses the default (50,000 characters).                                                    |
-
-In the form, the last two sit behind **Advanced** on each model row — collapsed
-unless that model already has one of them set. Every field carries an **i** you
-can hover or focus for the same explanation.
+`(Provider, model)` pair — `passthroughFileTypes` and `maxExtractedTextChars`
+above are how you declare it.
 
 On every chat turn, each attached file takes exactly one of these routes:
 
