@@ -156,6 +156,25 @@ describe("ProviderForm model rows", () => {
     );
   });
 
+  // Rows are keyed by index, so removing one shifts the row above's local state
+  // onto its neighbour. The control has to survive that: a trigger reading
+  // "Custom" beside no input would leave a declared window invisible and
+  // uneditable until the page was reloaded.
+  it("keeps a Custom value editable after the row above it is removed", () => {
+    renderEditForm([
+      { id: "gpt-4o", passthroughFileTypes: [] },
+      { id: "qwen", passthroughFileTypes: [], contextWindow: 131072 },
+    ]);
+
+    fireEvent.click(screen.getByLabelText("Remove model 1"));
+
+    expect(screen.getByLabelText("Model ID")).toHaveValue("qwen");
+    expect(screen.getByLabelText("Context window")).toHaveTextContent("Custom");
+    expect(screen.getByLabelText("Context window in tokens")).toHaveValue(
+      131072,
+    );
+  });
+
   it("leaves a legacy string model row loadable with no window declared", () => {
     renderEditForm(["gpt-4o"] as unknown as Provider["modelIds"]);
 

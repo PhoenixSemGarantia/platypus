@@ -167,14 +167,26 @@ const ModelRow = ({
       model.maxExtractedTextChars !== undefined,
   );
 
-  // Whether the Context window is being typed rather than picked. Local state
-  // rather than derived from the value, because choosing Custom on a row with
-  // no window declared leaves the value undefined — deriving it would snap the
-  // control straight back to "Not set" and the input the reader just asked for
-  // would never appear.
+  // Whether the Context window is being typed rather than picked. State as well
+  // as derivation, because neither alone is enough: Custom chosen on a row with
+  // no window declared leaves the value undefined, so a purely derived control
+  // would snap back to "Not set" and the input the reader just asked for would
+  // vanish the moment they cleared it.
   const [customContextWindow, setCustomContextWindow] = useState(
     optionForContextWindow(model.contextWindow) === CONTEXT_WINDOW_CUSTOM,
   );
+
+  // The trigger and the number input read one value, so they cannot disagree.
+  // Model rows are keyed by index, so removing a row shifts the state above
+  // onto its neighbour; folding the stored value back in means a shifted row
+  // holding an unlisted size still renders the input holding it, rather than a
+  // "Custom" trigger beside no input at all — which would leave a declared
+  // window invisible and uneditable until reload.
+  const storedContextWindowOption = optionForContextWindow(model.contextWindow);
+  const contextWindowOption =
+    customContextWindow || storedContextWindowOption === CONTEXT_WINDOW_CUSTOM
+      ? CONTEXT_WINDOW_CUSTOM
+      : storedContextWindowOption;
 
   // A rejected row is no use collapsed: the reader has to see the field the
   // server is complaining about.
@@ -254,19 +266,15 @@ const ModelRow = ({
               The vendor&apos;s published <strong>total</strong> token capacity
               for this model — the whole window, not a cap on the reply. Sizes
               in the list are decimal, so <code>128k</code> is 128,000.
-              Optional: without it, the context meter in a Chat is hidden for
-              this model.
+              Optional: nothing reads it yet, and leaving it unset breaks
+              nothing — it records a capacity Platypus has no way to look up.
             </>
           }
           error={errors.fields.contextWindow}
         >
           <div className="flex items-center gap-2">
             <Select
-              value={
-                customContextWindow
-                  ? CONTEXT_WINDOW_CUSTOM
-                  : optionForContextWindow(model.contextWindow)
-              }
+              value={contextWindowOption}
               onValueChange={(value) => {
                 setCustomContextWindow(value === CONTEXT_WINDOW_CUSTOM);
                 onChange({
@@ -294,7 +302,7 @@ const ModelRow = ({
                 <SelectItem value={CONTEXT_WINDOW_CUSTOM}>Custom</SelectItem>
               </SelectContent>
             </Select>
-            {customContextWindow && (
+            {contextWindowOption === CONTEXT_WINDOW_CUSTOM && (
               <Input
                 aria-label="Context window in tokens"
                 type="number"
