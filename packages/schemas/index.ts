@@ -1632,11 +1632,17 @@ export const kanbanBoardCreateSchema = kanbanBoardSchema.pick({
   labels: true,
 });
 
-export const kanbanBoardUpdateSchema = kanbanBoardSchema.pick({
-  name: true,
-  description: true,
-  labels: true,
-});
+// `labels` is optional on update (rather than defaulting to `[]`) so an update
+// that only touches the name or description leaves the board's labels — and the
+// cards referencing them — alone.
+export const kanbanBoardUpdateSchema = kanbanBoardSchema
+  .pick({
+    name: true,
+    description: true,
+  })
+  .extend({
+    labels: z.array(kanbanLabelSchema).optional(),
+  });
 
 // Kanban Column
 

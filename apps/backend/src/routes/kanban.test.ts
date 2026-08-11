@@ -177,6 +177,109 @@ describe("Kanban Routes", () => {
 
       expect(res.status).toBe(404);
     });
+
+    describe("label cleanup", () => {
+      /**
+       * Queues the `where` calls made before the board's cards are read:
+       * the two authorization lookups, the board update, and the subquery that
+       * resolves the board's columns. The next `where` is the card read.
+       */
+      const queueWheresBeforeCardRead = () => {
+        mockDb.where.mockReturnValueOnce(mockDb); // requireOrgAccess
+        mockDb.where.mockReturnValueOnce(mockDb); // requireWorkspaceAccess
+        mockDb.where.mockReturnValueOnce(mockDb); // board update
+        mockDb.where.mockReturnValueOnce(mockDb); // board columns subquery
+      };
+
+      const authorizeOwner = () => {
+        mockSession();
+        mockDb.limit.mockResolvedValueOnce([{ role: "member" }]); // requireOrgAccess
+        mockDb.limit.mockResolvedValueOnce([
+          { ownerId: "user-1", organizationId: "org-1" },
+        ]); // requireWorkspaceAccess
+      };
+
+      it("should remove a deleted label from the cards using it", async () => {
+        authorizeOwner();
+        mockDb.returning.mockResolvedValueOnce([
+          { id: boardId, name: "Board 1" },
+        ]);
+        queueWheresBeforeCardRead();
+        mockDb.where.mockResolvedValueOnce([
+          { id: "card-1", labelIds: ["lbl-old", "lbl-new"] },
+          { id: "card-2", labelIds: ["lbl-new"] },
+        ]);
+
+        const res = await app.request(`${baseUrl}/${boardId}`, {
+          method: "PUT",
+          body: JSON.stringify({
+            name: "Board 1",
+            labels: [{ id: "lbl-new", name: "New", color: "#ef4444" }],
+          }),
+          headers: { "Content-Type": "application/json" },
+        });
+
+        expect(res.status).toBe(200);
+        // Only the card holding the deleted label is rewritten.
+        const labelWrites = mockDb.set.mock.calls.filter(
+          (call) =>
+            typeof call[0] === "object" &&
+            call[0] !== null &&
+            "labelIds" in call[0],
+        );
+        expect(labelWrites).toHaveLength(1);
+        expect(labelWrites[0][0]).toMatchObject({ labelIds: ["lbl-new"] });
+      });
+
+      it("should empty every card's labels when all board labels are removed", async () => {
+        authorizeOwner();
+        mockDb.returning.mockResolvedValueOnce([
+          { id: boardId, name: "Board 1" },
+        ]);
+        queueWheresBeforeCardRead();
+        mockDb.where.mockResolvedValueOnce([
+          { id: "card-1", labelIds: ["lbl-a"] },
+          { id: "card-2", labelIds: ["lbl-a", "lbl-b"] },
+        ]);
+
+        const res = await app.request(`${baseUrl}/${boardId}`, {
+          method: "PUT",
+          body: JSON.stringify({ name: "Board 1", labels: [] }),
+          headers: { "Content-Type": "application/json" },
+        });
+
+        expect(res.status).toBe(200);
+        const labelWrites = mockDb.set.mock.calls.filter(
+          (call) =>
+            typeof call[0] === "object" &&
+            call[0] !== null &&
+            "labelIds" in call[0],
+        );
+        expect(labelWrites).toHaveLength(2);
+        expect(labelWrites[0][0]).toMatchObject({ labelIds: [] });
+        expect(labelWrites[1][0]).toMatchObject({ labelIds: [] });
+      });
+
+      it("should leave card labels alone when the update omits labels", async () => {
+        authorizeOwner();
+        mockDb.returning.mockResolvedValueOnce([
+          { id: boardId, name: "Renamed" },
+        ]);
+
+        const res = await app.request(`${baseUrl}/${boardId}`, {
+          method: "PUT",
+          body: JSON.stringify({ name: "Renamed", description: "New blurb" }),
+          headers: { "Content-Type": "application/json" },
+        });
+
+        expect(res.status).toBe(200);
+        // The board's own labels are left out of the update, and no card is
+        // rewritten.
+        expect(mockDb.set).toHaveBeenCalledTimes(1);
+        expect(mockDb.set.mock.calls[0][0]).not.toHaveProperty("labels");
+        expect(mockDb.set.mock.calls[0][0]).not.toHaveProperty("labelIds");
+      });
+    });
   });
 
   describe("DELETE /:boardId", () => {
@@ -595,6 +698,83 @@ describe("Kanban Routes", () => {
       });
 
       expect(res.status).toBe(404);
+    });
+
+    describe("Label validation", () => {
+      const mockBoardLabels = (labels: { id: string }[]) => {
+        mockDb.limit.mockResolvedValueOnce([{ labels }]); // board labels lookup
+      };
+
+      it("should persist valid label IDs unchanged", async () => {
+        mockSession();
+        mockDb.limit.mockResolvedValueOnce([{ role: "member" }]); // requireOrgAccess
+        mockDb.limit.mockResolvedValueOnce([
+          { ownerId: "user-1", organizationId: "org-1" },
+        ]); // requireWorkspaceAccess
+        mockBoardLabels([{ id: "lbl-a" }, { id: "lbl-b" }]);
+        mockDb.returning.mockResolvedValueOnce([{ id: "card-1" }]);
+
+        const res = await app.request(`${baseUrl}/${boardId}/cards/card-1`, {
+          method: "PUT",
+          body: JSON.stringify({ labelIds: ["lbl-b", "lbl-a"] }),
+          headers: { "Content-Type": "application/json" },
+        });
+
+        expect(res.status).toBe(200);
+        expect(mockDb.set).toHaveBeenCalledWith(
+          expect.objectContaining({ labelIds: ["lbl-b", "lbl-a"] }),
+        );
+      });
+
+      it("should drop unknown label IDs and apply the rest of the update", async () => {
+        mockSession();
+        mockDb.limit.mockResolvedValueOnce([{ role: "member" }]); // requireOrgAccess
+        mockDb.limit.mockResolvedValueOnce([
+          { ownerId: "user-1", organizationId: "org-1" },
+        ]); // requireWorkspaceAccess
+        mockBoardLabels([{ id: "lbl-new" }]);
+        mockDb.returning.mockResolvedValueOnce([{ id: "card-1" }]);
+
+        const res = await app.request(`${baseUrl}/${boardId}/cards/card-1`, {
+          method: "PUT",
+          body: JSON.stringify({
+            title: "Retitled",
+            priority: "high",
+            labelIds: ["lbl-deleted", "lbl-new"],
+          }),
+          headers: { "Content-Type": "application/json" },
+        });
+
+        expect(res.status).toBe(200);
+        expect(mockDb.set).toHaveBeenCalledWith(
+          expect.objectContaining({
+            title: "Retitled",
+            priority: "high",
+            labelIds: ["lbl-new"],
+          }),
+        );
+      });
+
+      it("should end with an empty label list when every submitted ID is unknown", async () => {
+        mockSession();
+        mockDb.limit.mockResolvedValueOnce([{ role: "member" }]); // requireOrgAccess
+        mockDb.limit.mockResolvedValueOnce([
+          { ownerId: "user-1", organizationId: "org-1" },
+        ]); // requireWorkspaceAccess
+        mockBoardLabels([]);
+        mockDb.returning.mockResolvedValueOnce([{ id: "card-1" }]);
+
+        const res = await app.request(`${baseUrl}/${boardId}/cards/card-1`, {
+          method: "PUT",
+          body: JSON.stringify({ labelIds: ["lbl-deleted"] }),
+          headers: { "Content-Type": "application/json" },
+        });
+
+        expect(res.status).toBe(200);
+        expect(mockDb.set).toHaveBeenCalledWith(
+          expect.objectContaining({ labelIds: [] }),
+        );
+      });
     });
 
     describe("Assignee validation", () => {
