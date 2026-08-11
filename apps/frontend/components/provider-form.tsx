@@ -537,7 +537,11 @@ const ProviderForm = ({
       setFormData({
         providerType: provider.providerType,
         name: provider.name,
-        apiKey: provider.apiKey,
+        // The API is free to withhold the stored key: it is returned only to a
+        // caller who may manage this Provider (ADR-0006). Anyone else lands here
+        // read-only, so an empty field is the honest rendering — and keeps the
+        // input controlled either way.
+        apiKey: provider.apiKey ?? "",
         region: provider.region || "",
         baseUrl: provider.baseUrl || "",
         headers: provider.headers || {},
