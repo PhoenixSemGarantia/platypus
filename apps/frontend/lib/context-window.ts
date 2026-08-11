@@ -1,5 +1,3 @@
-import { CONTEXT_WINDOW_MAX, CONTEXT_WINDOW_MIN } from "@platypus/schemas";
-
 /**
  * The Context window control's preset list and the mapping between what it
  * shows and the integer that gets stored (ADR-0018).
@@ -45,27 +43,26 @@ export const CONTEXT_WINDOW_UNSET = "unset";
 export const CONTEXT_WINDOW_CUSTOM = "custom";
 
 /**
- * Which option a stored window selects. Anything that is not one of the presets
- * reads as Custom, including a value the schema would reject: a row showing a
- * number the server refused has to keep showing it, or the reader cannot see
- * what to fix.
+ * Window → option. Which option a stored window selects; anything that is not
+ * one of the presets reads as Custom, including a value the schema would
+ * reject, because a row showing a number the server refused has to keep showing
+ * it or the reader cannot see what to fix.
  */
-export const contextWindowSelectValue = (
-  window: number | undefined,
-): string => {
+export const optionForContextWindow = (window: number | undefined): string => {
   if (window === undefined) return CONTEXT_WINDOW_UNSET;
   const preset = CONTEXT_WINDOW_PRESETS.find((p) => p.tokens === window);
   return preset ? String(preset.tokens) : CONTEXT_WINDOW_CUSTOM;
 };
 
 /**
- * The window a chosen option means, given what the row currently holds.
+ * Option → window. What a chosen option means, given what the row currently
+ * holds.
  *
  * Custom keeps the current value rather than clearing it — choosing it is the
  * reader opening a text box to edit 128,000 into 131,072, not discarding what
  * they had.
  */
-export const selectedContextWindow = (
+export const contextWindowForOption = (
   selection: string,
   current: number | undefined,
 ): number | undefined => {
@@ -86,6 +83,3 @@ export const parseContextWindowInput = (value: string): number | undefined => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
 };
-
-/** The bounds the field enforces, for the control's hint and input attributes. */
-export { CONTEXT_WINDOW_MIN, CONTEXT_WINDOW_MAX };

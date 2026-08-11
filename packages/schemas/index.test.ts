@@ -541,14 +541,20 @@ describe("Provider modelIds (per-model config)", () => {
     }
   });
 
-  it("leaves contextWindow undefined when not declared", () => {
-    const result = providerCreateSchema.safeParse({
-      ...base,
-      modelIds: [{ id: "qwen" }],
-    });
+  // Optional on BOTH paths, and deliberately so: a Provider configured before
+  // the field existed is edited through the update schema, and a
+  // create-vs-update divergence would make saving it untouched a 400.
+  it.each([
+    ["create", providerCreateSchema],
+    ["update", providerUpdateSchema],
+  ])("leaves contextWindow undefined on %s when not declared", (_, schema) => {
+    const result = schema.safeParse({ ...base, modelIds: [{ id: "qwen" }] });
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.modelIds[0].contextWindow).toBeUndefined();
+      // Asserted, not optional-chained: a schema that dropped `modelIds`
+      // entirely would satisfy an `undefined` expectation vacuously.
+      expect(result.data.modelIds).toHaveLength(1);
+      expect(result.data.modelIds![0].contextWindow).toBeUndefined();
     }
   });
 

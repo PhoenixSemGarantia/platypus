@@ -53,6 +53,8 @@ import { ConfirmDialog } from "@/components/confirm-dialog";
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
+  CONTEXT_WINDOW_MAX,
+  CONTEXT_WINDOW_MIN,
   DEFAULT_MAX_EXTRACTED_TEXT_CHARS,
   type AliasRepoint,
   type Provider,
@@ -72,13 +74,11 @@ import {
 } from "@/lib/model-config";
 import {
   CONTEXT_WINDOW_CUSTOM,
-  CONTEXT_WINDOW_MAX,
-  CONTEXT_WINDOW_MIN,
   CONTEXT_WINDOW_PRESETS,
   CONTEXT_WINDOW_UNSET,
-  contextWindowSelectValue,
+  contextWindowForOption,
+  optionForContextWindow,
   parseContextWindowInput,
-  selectedContextWindow,
 } from "@/lib/context-window";
 import { toast } from "sonner";
 import { useBackendUrl } from "@/app/client-context";
@@ -173,7 +173,7 @@ const ModelRow = ({
   // control straight back to "Not set" and the input the reader just asked for
   // would never appear.
   const [customContextWindow, setCustomContextWindow] = useState(
-    contextWindowSelectValue(model.contextWindow) === CONTEXT_WINDOW_CUSTOM,
+    optionForContextWindow(model.contextWindow) === CONTEXT_WINDOW_CUSTOM,
   );
 
   // A rejected row is no use collapsed: the reader has to see the field the
@@ -265,12 +265,12 @@ const ModelRow = ({
               value={
                 customContextWindow
                   ? CONTEXT_WINDOW_CUSTOM
-                  : contextWindowSelectValue(model.contextWindow)
+                  : optionForContextWindow(model.contextWindow)
               }
               onValueChange={(value) => {
                 setCustomContextWindow(value === CONTEXT_WINDOW_CUSTOM);
                 onChange({
-                  contextWindow: selectedContextWindow(
+                  contextWindow: contextWindowForOption(
                     value,
                     model.contextWindow,
                   ),
