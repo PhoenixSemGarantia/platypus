@@ -573,13 +573,20 @@ export type ProviderApiMode = z.infer<typeof providerApiModeSchema>;
 // security allow-list: an attached file whose type is absent is converted to
 // text where possible (extracted for PDF/DOCX, see issue #342) — it is never
 // blocked for safety. Absent / legacy rows fall back to a provider-type default
-// at resolve time on the backend. This object is also the intended home for
-// future per-model metadata (e.g. max input/output tokens) — out of scope here.
+// at resolve time on the backend. This object is the home for per-model
+// metadata generally, which is why `contextWindow` lands here too.
 //
 // `maxExtractedTextChars` caps how much text a converted document may inject,
 // protecting small local contexts; omitted means the shared
-// `DEFAULT_MAX_EXTRACTED_TEXT_CHARS` default. A char budget rather than tokens
-// for v1 — it becomes derivable once per-model `maxInputTokens` lands.
+// `DEFAULT_MAX_EXTRACTED_TEXT_CHARS` default. It stays a character budget and
+// is deliberately NOT derived from `contextWindow`: the derivation needs a
+// chars-per-token ratio, which is exactly the estimate ADR-0018 rejects, and it
+// would silently change file handling for every Provider that declares a
+// window.
+//
+// `contextWindow` is the vendor's published TOTAL token capacity for this
+// model, declared by an Org Admin because nothing can discover it — see
+// ADR-0018. Optional always, and nothing reads it yet.
 //
 // The universal wildcard (`*/*` or `*`) is an advanced escape hatch: it sends
 // EVERY attached file to the model raw. Values are deliberately NOT validated
@@ -710,6 +717,20 @@ const pointerModelIdSchema = z
     message: "Must be a concrete model id, not a Model alias",
   });
 
+/**
+ * Bounds on a declared Context window (ADR-0018). The floor rejects the number
+ * of *thousands* — a `128` meaning 128k — because an under-declaration by three
+ * orders of magnitude is indistinguishable from a deliberate one at read time
+ * and would cripple every reading taken against it. The ceiling sits well above
+ * today's largest published window without leaving the field unbounded.
+ *
+ * Exported because the documentation contract test pins the numbers the
+ * Operator-facing docs quote to these, and the provider form's preset list has
+ * to stay inside them.
+ */
+export const CONTEXT_WINDOW_MIN = 1_000;
+export const CONTEXT_WINDOW_MAX = 10_000_000;
+
 export const modelConfigSchema = z.object({
   id: z.string().min(1),
   // The bare alias name. Absent means the model is referenced by its id.
@@ -725,6 +746,12 @@ export const modelConfigSchema = z.object({
     .optional(),
   passthroughFileTypes: z.array(z.string()).default([]),
   maxExtractedTextChars: z.number().int().positive().optional(),
+  contextWindow: z
+    .number()
+    .int()
+    .min(CONTEXT_WINDOW_MIN)
+    .max(CONTEXT_WINDOW_MAX)
+    .optional(),
 });
 
 export type ModelConfig = z.infer<typeof modelConfigSchema>;

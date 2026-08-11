@@ -26,6 +26,11 @@ export type ModelConfigView = {
   passthroughFileTypes: string[];
   /** Cap on injected extracted-document text; undefined uses the shared default. */
   maxExtractedTextChars?: number;
+  /**
+   * The vendor's published total token capacity, declared by an Org Admin
+   * (ADR-0018). Undefined means undeclared, which is the normal state.
+   */
+  contextWindow?: number;
 };
 
 /** Normalize a provider's models to objects, tolerating the legacy `string[]`. */
@@ -44,6 +49,7 @@ export const getModelConfigs = (
           alias: m.alias,
           passthroughFileTypes: m.passthroughFileTypes ?? [],
           maxExtractedTextChars: m.maxExtractedTextChars,
+          contextWindow: m.contextWindow,
         },
   );
 

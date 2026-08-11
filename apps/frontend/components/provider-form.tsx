@@ -70,12 +70,22 @@ import {
   defaultPassthroughFileTypes,
   type ModelConfigView,
 } from "@/lib/model-config";
+import {
+  CONTEXT_WINDOW_CUSTOM,
+  CONTEXT_WINDOW_MAX,
+  CONTEXT_WINDOW_MIN,
+  CONTEXT_WINDOW_PRESETS,
+  CONTEXT_WINDOW_UNSET,
+  contextWindowSelectValue,
+  parseContextWindowInput,
+  selectedContextWindow,
+} from "@/lib/context-window";
 import { toast } from "sonner";
 import { useBackendUrl } from "@/app/client-context";
 import { useAuth } from "@/components/auth-provider";
 
 /**
- * Per-field help for a model row. The four fields each need a paragraph of
+ * Per-field help for a model row. The fields each need a paragraph of
  * explanation, which as one block under the list was a wall nobody read and
  * left the reader matching sentences to fields by hand.
  */
@@ -157,6 +167,15 @@ const ModelRow = ({
       model.maxExtractedTextChars !== undefined,
   );
 
+  // Whether the Context window is being typed rather than picked. Local state
+  // rather than derived from the value, because choosing Custom on a row with
+  // no window declared leaves the value undefined — deriving it would snap the
+  // control straight back to "Not set" and the input the reader just asked for
+  // would never appear.
+  const [customContextWindow, setCustomContextWindow] = useState(
+    contextWindowSelectValue(model.contextWindow) === CONTEXT_WINDOW_CUSTOM,
+  );
+
   // A rejected row is no use collapsed: the reader has to see the field the
   // server is complaining about.
   const hasAdvancedError =
@@ -220,6 +239,80 @@ const ModelRow = ({
             }
             disabled={disabled}
           />
+        </ModelField>
+
+        {/*
+          Above Advanced, unlike the other optional per-model fields: this one
+          is the only thing that can tell Platypus a capacity it has no way to
+          discover, so a reader adding a model has to see that it exists.
+        */}
+        <ModelField
+          htmlFor={`context-window-${index}`}
+          label="Context window"
+          hint={
+            <>
+              The vendor&apos;s published <strong>total</strong> token capacity
+              for this model — the whole window, not a cap on the reply. Sizes
+              in the list are decimal, so <code>128k</code> is 128,000.
+              Optional: without it, the context meter in a Chat is hidden for
+              this model.
+            </>
+          }
+          error={errors.fields.contextWindow}
+        >
+          <div className="flex items-center gap-2">
+            <Select
+              value={
+                customContextWindow
+                  ? CONTEXT_WINDOW_CUSTOM
+                  : contextWindowSelectValue(model.contextWindow)
+              }
+              onValueChange={(value) => {
+                setCustomContextWindow(value === CONTEXT_WINDOW_CUSTOM);
+                onChange({
+                  contextWindow: selectedContextWindow(
+                    value,
+                    model.contextWindow,
+                  ),
+                });
+              }}
+              disabled={disabled}
+            >
+              <SelectTrigger
+                id={`context-window-${index}`}
+                aria-invalid={!!errors.fields.contextWindow}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={CONTEXT_WINDOW_UNSET}>Not set</SelectItem>
+                {CONTEXT_WINDOW_PRESETS.map((preset) => (
+                  <SelectItem key={preset.tokens} value={String(preset.tokens)}>
+                    {preset.label}
+                  </SelectItem>
+                ))}
+                <SelectItem value={CONTEXT_WINDOW_CUSTOM}>Custom</SelectItem>
+              </SelectContent>
+            </Select>
+            {customContextWindow && (
+              <Input
+                aria-label="Context window in tokens"
+                type="number"
+                min={CONTEXT_WINDOW_MIN}
+                max={CONTEXT_WINDOW_MAX}
+                placeholder="e.g. 131072"
+                className="flex-1"
+                value={model.contextWindow ?? ""}
+                aria-invalid={!!errors.fields.contextWindow}
+                onChange={(e) =>
+                  onChange({
+                    contextWindow: parseContextWindowInput(e.target.value),
+                  })
+                }
+                disabled={disabled}
+              />
+            )}
+          </div>
         </ModelField>
 
         <Collapsible open={advancedOpen} onOpenChange={setShowAdvanced}>

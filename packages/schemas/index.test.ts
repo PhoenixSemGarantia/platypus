@@ -22,6 +22,8 @@ import {
   extractableDocumentFormat,
   resolveExtractedTextCap,
   DEFAULT_MAX_EXTRACTED_TEXT_CHARS,
+  CONTEXT_WINDOW_MIN,
+  CONTEXT_WINDOW_MAX,
   MODEL_ALIAS_PREFIX,
   isAliasReference,
   aliasNameFromReference,
@@ -526,6 +528,81 @@ describe("Provider modelIds (per-model config)", () => {
         }).success,
       ).toBe(false);
     }
+  });
+
+  it("accepts a declared contextWindow", () => {
+    const result = providerCreateSchema.safeParse({
+      ...base,
+      modelIds: [{ id: "qwen", contextWindow: 128000 }],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.modelIds[0].contextWindow).toBe(128000);
+    }
+  });
+
+  it("leaves contextWindow undefined when not declared", () => {
+    const result = providerCreateSchema.safeParse({
+      ...base,
+      modelIds: [{ id: "qwen" }],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.modelIds[0].contextWindow).toBeUndefined();
+    }
+  });
+
+  it("rejects a contextWindow that is zero, negative, fractional or out of bounds", () => {
+    // 128 is the case the floor exists for: an Org Admin typing the number of
+    // thousands. Silently accepting it would cripple every reading taken
+    // against it rather than fail where the mistake was made.
+    for (const value of [0, -1, 1.5, 128, 999, 10_000_001]) {
+      expect(
+        providerCreateSchema.safeParse({
+          ...base,
+          modelIds: [{ id: "qwen", contextWindow: value }],
+        }).success,
+        `contextWindow ${value} should be rejected`,
+      ).toBe(false);
+    }
+  });
+
+  it("accepts the exact bounds", () => {
+    for (const value of [CONTEXT_WINDOW_MIN, CONTEXT_WINDOW_MAX]) {
+      expect(
+        providerCreateSchema.safeParse({
+          ...base,
+          modelIds: [{ id: "qwen", contextWindow: value }],
+        }).success,
+        `contextWindow ${value} should be accepted`,
+      ).toBe(true);
+    }
+  });
+
+  it("keeps the alias namespace rule unaffected by a declared contextWindow", () => {
+    // The window rides on the same entry as the alias (ADR-0017), so a repoint
+    // moves it — but it is not part of what makes two entries clash.
+    const aliased = providerCreateSchema.safeParse({
+      ...base,
+      modelIds: [{ id: "qwen", alias: "flagship", contextWindow: 200000 }],
+    });
+    expect(aliased.success).toBe(true);
+    if (aliased.success) {
+      expect(aliased.data.modelIds[0]).toMatchObject({
+        alias: "flagship",
+        contextWindow: 200000,
+      });
+    }
+
+    expect(
+      providerCreateSchema.safeParse({
+        ...base,
+        modelIds: [
+          { id: "qwen", alias: "flagship", contextWindow: 200000 },
+          { id: "qwen-2", alias: "FLAGSHIP", contextWindow: 8000 },
+        ],
+      }).success,
+    ).toBe(false);
   });
 });
 
