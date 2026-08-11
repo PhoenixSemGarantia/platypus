@@ -1,5 +1,16 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
+/**
+ * As much of a stream part as the metadata extractor reads. The SDK hands it
+ * the full `TextStreamPart` union; these tests hand it the fields the part
+ * they are standing in for would carry.
+ */
+type MetadataPart = {
+  type: string;
+  finishReason?: string;
+  usage?: { inputTokens?: number; outputTokens?: number };
+};
+
 const {
   mockPrepareChatTurn,
   mockValidateTurnAttachments,
@@ -63,8 +74,7 @@ const {
       // `toUIMessageStream`'s metadata extractor. The SDK calls it per stream
       // part; the tests call it by hand with the part they care about.
       messageMetadata: undefined as
-        | ((opts: { part: { type: string; finishReason?: string } }) => unknown)
-        | undefined,
+        ((opts: { part: MetadataPart }) => unknown) | undefined,
       responseSentinel: { __isResponse: true },
     },
   };
@@ -825,9 +835,7 @@ const primeStreamText = () => {
       return {
         toUIMessageStream: (uiOpts: {
           onFinish: (ctx: { messages: unknown[] }) => Promise<void> | void;
-          messageMetadata: (opts: {
-            part: { type: string; finishReason?: string };
-          }) => unknown;
+          messageMetadata: (opts: { part: MetadataPart }) => unknown;
         }) => {
           streamHarness.onFinish = uiOpts.onFinish;
           streamHarness.messageMetadata = uiOpts.messageMetadata;
@@ -1128,10 +1136,10 @@ describe("AgentRunner.stream — success & interruption", () => {
   });
 });
 
-// Issue #420: the operator sees a truncated stream in the log, the reader saw
-// nothing. The metadata callback is the only seam for saying so on a stream
-// that has already been flushed to the client.
-describe("AgentRunner.stream — truncation metadata", () => {
+// The metadata callback is the only seam for saying anything about a stream
+// that has already been flushed to the client — issue #420's truncation flag
+// and issue #448's Context occupancy both ride on it.
+describe("AgentRunner.stream — message metadata", () => {
   let runner: AgentRunner;
   beforeEach(() => {
     runner = new AgentRunner();
@@ -1153,7 +1161,7 @@ describe("AgentRunner.stream — truncation metadata", () => {
     });
 
     return {
-      metadataFor: (part: { type: string; finishReason?: string }) =>
+      metadataFor: (part: MetadataPart) =>
         streamHarness.messageMetadata!({ part }),
       end: async () => {
         await streamHarness.onFinish!({ messages: [] });
@@ -1231,8 +1239,129 @@ describe("AgentRunner.stream — truncation metadata", () => {
     const stream = await startStream(fakeTurn());
 
     expect(
-      stream.metadataFor({ type: "finish-step", finishReason: "length" }),
+      stream.metadataFor({
+        type: "finish-step",
+        finishReason: "length",
+        usage: { inputTokens: 100, outputTokens: 20 },
+      }),
+    ).not.toHaveProperty("truncatedByTokenLimit");
+
+    await stream.end();
+  });
+
+  // Issue #448. Occupancy rides on the step-finish part, not the terminal
+  // finish: a cancelled turn never gets a terminal finish, and cancelling a
+  // long turn is exactly when the context had grown most.
+  it("records the model call's token counts on a finished step", async () => {
+    const stream = await startStream(fakeTurn());
+
+    expect(
+      stream.metadataFor({
+        type: "finish-step",
+        finishReason: "stop",
+        usage: { inputTokens: 12_400, outputTokens: 180 },
+      }),
+    ).toEqual({ contextOccupancy: { inputTokens: 12_400, outputTokens: 180 } });
+
+    await stream.end();
+  });
+
+  // The reading each step returns is that step's own context size. The merge
+  // leaves the last one standing, so a tool-using turn reports its real size
+  // rather than a multiple of it.
+  it("reports each step's own size rather than a running total", async () => {
+    const stream = await startStream(fakeTurn());
+
+    const first = stream.metadataFor({
+      type: "finish-step",
+      finishReason: "tool-calls",
+      usage: { inputTokens: 1_000, outputTokens: 30 },
+    });
+    const second = stream.metadataFor({
+      type: "finish-step",
+      finishReason: "stop",
+      usage: { inputTokens: 4_000, outputTokens: 60 },
+    });
+
+    expect(first).toEqual({
+      contextOccupancy: { inputTokens: 1_000, outputTokens: 30 },
+    });
+    expect(second).toEqual({
+      contextOccupancy: { inputTokens: 4_000, outputTokens: 60 },
+    });
+
+    await stream.end();
+  });
+
+  it("records nothing when the Provider reports no token usage", async () => {
+    const stream = await startStream(fakeTurn());
+
+    expect(
+      stream.metadataFor({
+        type: "finish-step",
+        finishReason: "stop",
+        usage: { inputTokens: undefined, outputTokens: undefined },
+      }),
     ).toBeUndefined();
+
+    await stream.end();
+  });
+
+  // The merge skips `undefined` overrides, so returning nothing here would
+  // leave the first step's figures on the message, read as this turn's size.
+  it("erases an earlier reading when a later step reports no usage", async () => {
+    const stream = await startStream(fakeTurn());
+
+    stream.metadataFor({
+      type: "finish-step",
+      finishReason: "tool-calls",
+      usage: { inputTokens: 1_000, outputTokens: 30 },
+    });
+
+    expect(
+      stream.metadataFor({
+        type: "finish-step",
+        finishReason: "stop",
+        usage: { inputTokens: undefined, outputTokens: undefined },
+      }),
+    ).toEqual({ contextOccupancy: null });
+
+    await stream.end();
+  });
+
+  // The merge skips `undefined` overrides, so an omitted output count would
+  // pair this step's input count with an earlier step's output count.
+  it("writes an absent output count as a concrete null", async () => {
+    const stream = await startStream(fakeTurn());
+
+    expect(
+      stream.metadataFor({
+        type: "finish-step",
+        finishReason: "stop",
+        usage: { inputTokens: 4_000, outputTokens: undefined },
+      }),
+    ).toEqual({ contextOccupancy: { inputTokens: 4_000, outputTokens: null } });
+
+    await stream.end();
+  });
+
+  // Each part still contributes only the key it owns, so a truncated agent
+  // turn ends up carrying all three.
+  it("keeps the agent attribution and the truncation flag alongside occupancy", async () => {
+    const stream = await startStream(fakeTurn());
+
+    const occupancy = stream.metadataFor({
+      type: "finish-step",
+      finishReason: "length",
+      usage: { inputTokens: 4_000, outputTokens: 60 },
+    });
+    expect(occupancy).not.toHaveProperty("agentId");
+    expect(stream.metadataFor({ type: "start" })).toEqual({
+      agentId: "agent-1",
+    });
+    expect(
+      stream.metadataFor({ type: "finish", finishReason: "length" }),
+    ).toEqual({ truncatedByTokenLimit: true });
 
     await stream.end();
   });
