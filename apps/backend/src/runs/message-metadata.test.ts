@@ -34,6 +34,17 @@ const usage = (inputTotal: number, outputTotal: number) => ({
   outputTokens: { total: outputTotal, text: outputTotal, reasoning: undefined },
 });
 
+/** A Provider that reports an input count and no output one. */
+const inputOnlyUsage = (inputTotal: number) => ({
+  inputTokens: {
+    total: inputTotal,
+    noCache: inputTotal,
+    cacheRead: undefined,
+    cacheWrite: undefined,
+  },
+  outputTokens: { total: undefined, text: undefined, reasoning: undefined },
+});
+
 /** A Provider that reports no token usage — occupancy is then unknowable. */
 const NO_USAGE = {
   inputTokens: {
@@ -234,5 +245,26 @@ describe("Context occupancy over a real multi-step stream", () => {
     const message = await lastSnapshot(uiStreamOf(result));
 
     expect(message?.metadata?.contextOccupancy).toBeNull();
+  });
+
+  // The same hazard one level down, and the merge is deep: an omitted output
+  // count would pair the last step's 4,200 with the first step's 30.
+  it("does not leave an earlier step's output count standing beside a fresh input count", async () => {
+    const result = streamText({
+      model: mockModel([
+        toolCallStep(usage(1_000, 30)),
+        answerStep(inputOnlyUsage(4_200)),
+      ]),
+      prompt: "Ping the service and tell me what it said.",
+      tools: { ping },
+      stopWhen: [stepCountIs(5)],
+    });
+
+    const message = await lastSnapshot(uiStreamOf(result));
+
+    expect(message?.metadata?.contextOccupancy).toEqual({
+      inputTokens: 4_200,
+      outputTokens: null,
+    });
   });
 });

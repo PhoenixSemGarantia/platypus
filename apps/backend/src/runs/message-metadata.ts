@@ -16,6 +16,10 @@ import type { ChatMessageMetadata } from "../types.ts";
  * through a real multi-step stream in a test — the run-lifecycle suite mocks
  * the SDK wholesale, so the usage numbers there are whatever a test author
  * typed and an implementation reading the cumulative sum passes it happily.
+ *
+ * `agentId` is read once, here, rather than off the run state when the `start`
+ * part arrives: the turn resolves during setup, before the stream is built, and
+ * nothing reassigns the resolved agent mid-run.
  */
 export const createMessageMetadata = (agentId: string | undefined) => {
   // Whether any step of this turn has reported an input-token count. Only

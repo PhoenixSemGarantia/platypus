@@ -10,7 +10,9 @@ import { createLoadSkillTool } from "./tools/skill.ts";
  * flag, and a truncated agent run keeps its attribution.
  *
  * A key that does not apply is absent rather than `false`, so a message's
- * metadata says only what is true of it.
+ * metadata says only what is true of it. `contextOccupancy` is the one
+ * departure: it is written as a concrete `null` where an earlier reading has to
+ * be erased, because the merge that makes the above work skips `undefined`.
  */
 export type ChatMessageMetadata = {
   /** Agent the run resolved; the chat UI renders its name and avatar. */
@@ -33,6 +35,10 @@ export type ChatMessageMetadata = {
    * estimated. `null` where a Provider reported a count for an earlier call of
    * the turn but not for the last one, which makes the earlier figure stale
    * rather than current.
+   *
+   * Absent and `null` say the same thing to a reader — occupancy is unknown,
+   * show nothing — and differ only in why. Normalise with `?? null` at the read
+   * site rather than branching on both.
    */
   contextOccupancy?: {
     /** The occupancy figure itself. */
