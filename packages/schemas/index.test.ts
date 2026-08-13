@@ -530,6 +530,69 @@ describe("Provider modelIds (per-model config)", () => {
     }
   });
 
+  it("accepts a per-model maxOutputTokens override", () => {
+    const result = providerCreateSchema.safeParse({
+      ...base,
+      modelIds: [{ id: "qwen", maxOutputTokens: 64000 }],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.modelIds[0].maxOutputTokens).toBe(64000);
+    }
+  });
+
+  // Optional on BOTH paths for the same reason the window is: a Provider saved
+  // untouched through the update schema must not become a 400.
+  it.each([
+    ["create", providerCreateSchema],
+    ["update", providerUpdateSchema],
+  ])(
+    "leaves maxOutputTokens undefined on %s when not declared",
+    (_, schema) => {
+      const result = schema.safeParse({ ...base, modelIds: [{ id: "qwen" }] });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.modelIds).toHaveLength(1);
+        expect(result.data.modelIds![0].maxOutputTokens).toBeUndefined();
+      }
+    },
+  );
+
+  it("rejects a non-positive or fractional maxOutputTokens", () => {
+    for (const value of [0, -1, 1.5]) {
+      expect(
+        providerCreateSchema.safeParse({
+          ...base,
+          modelIds: [{ id: "qwen", maxOutputTokens: value }],
+        }).success,
+        `maxOutputTokens ${value} should be rejected`,
+      ).toBe(false);
+    }
+  });
+
+  // No upper bound, unlike the Context window: the ceiling that matters is the
+  // model's own, Platypus cannot know it, and a value above it is the vendor's
+  // to reject.
+  it("accepts a maxOutputTokens far above any published ceiling", () => {
+    expect(
+      providerCreateSchema.safeParse({
+        ...base,
+        modelIds: [{ id: "qwen", maxOutputTokens: 10_000_000 }],
+      }).success,
+    ).toBe(true);
+  });
+
+  it("survives the legacy string[] coercion as undefined", () => {
+    const result = providerCreateSchema.safeParse({
+      ...base,
+      modelIds: ["gpt-4"],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.modelIds[0].maxOutputTokens).toBeUndefined();
+    }
+  });
+
   it("accepts a declared contextWindow", () => {
     const result = providerCreateSchema.safeParse({
       ...base,

@@ -27,6 +27,11 @@ export type ModelConfigView = {
   /** Cap on injected extracted-document text; undefined uses the shared default. */
   maxExtractedTextChars?: number;
   /**
+   * Ceiling on a single reply from this model. Undefined sends nothing and
+   * leaves the provider's own default in place (issue #454).
+   */
+  maxOutputTokens?: number;
+  /**
    * The vendor's published total token capacity, declared by an Org Admin
    * (ADR-0018). Undefined means undeclared, which is the normal state.
    */
@@ -49,6 +54,7 @@ export const getModelConfigs = (
           alias: m.alias,
           passthroughFileTypes: m.passthroughFileTypes ?? [],
           maxExtractedTextChars: m.maxExtractedTextChars,
+          maxOutputTokens: m.maxOutputTokens,
           contextWindow: m.contextWindow,
         },
   );

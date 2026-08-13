@@ -44,6 +44,7 @@ import { buildMcpTransportConfig } from "./mcp-oauth-provider.ts";
 import { inlineFileUrls } from "../storage/utils.ts";
 import {
   maxExtractedTextCharsForModel,
+  maxOutputTokensForModel,
   passthroughFileTypesForModel,
   resolveModelId,
 } from "./model-capability.ts";
@@ -149,6 +150,14 @@ export type ChatTurn = {
     system: string;
     messages: PlatypusUIMessage[];
     maxSteps: number;
+    /**
+     * The Provider's declared output ceiling for the model in use, or undefined
+     * when it declares none (issue #454). A property of the (Provider, model)
+     * pair rather than of the Agent or the request, unlike the sampling params
+     * below — which is why it is never mirrored into `resolved` and never
+     * persisted onto the Chat row.
+     */
+    maxOutputTokens?: number;
     temperature?: number;
     topP?: number;
     topK?: number;
@@ -660,6 +669,7 @@ export const prepareChatTurn = async (
       system: systemPrompt,
       messages: inlinedMessages,
       maxSteps: resolvedMaxSteps,
+      maxOutputTokens: maxOutputTokensForModel(provider, resolvedModelId),
       temperature: generation.temperature,
       topP: generation.topP,
       topK: generation.topK,
@@ -1142,6 +1152,9 @@ const loadSubAgents = async (
       return {
         model: openProvider(subProvider).languageModel(subModelId),
         securityGuardrails: subProvider.securityGuardrails ?? null,
+        // Read off the sub-agent's OWN Provider, not the parent's: a delegated
+        // run is a run on that model and truncates at its ceiling (issue #454).
+        maxOutputTokens: maxOutputTokensForModel(subProvider, subModelId),
       };
     },
     async (subAgentId: string, toolSetIds: string[]) => {

@@ -41,6 +41,25 @@ describe("getModelConfigs", () => {
       passthroughFileTypes: [],
     });
   });
+
+  it("carries a declared maxOutputTokens through", () => {
+    const configs = getModelConfigs(
+      provider([
+        { id: "gpt-4", passthroughFileTypes: [], maxOutputTokens: 64000 },
+      ]),
+    );
+    expect(configs[0].maxOutputTokens).toBe(64000);
+  });
+
+  it("leaves maxOutputTokens undefined for an undeclared or legacy entry", () => {
+    expect(
+      getModelConfigs(provider([{ id: "gpt-4", passthroughFileTypes: [] }]))[0]
+        .maxOutputTokens,
+    ).toBeUndefined();
+    expect(
+      getModelConfigs(provider(["gpt-4"]))[0].maxOutputTokens,
+    ).toBeUndefined();
+  });
 });
 
 describe("getModelOptions", () => {

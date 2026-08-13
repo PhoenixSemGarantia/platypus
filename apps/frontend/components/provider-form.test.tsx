@@ -101,6 +101,7 @@ describe("ProviderForm model rows", () => {
       "Context window",
       "Native file types",
       "Max extracted text characters",
+      "Max output tokens",
     ]) {
       expect(
         screen.getByRole("button", { name: `About ${label}` }),
@@ -113,6 +114,7 @@ describe("ProviderForm model rows", () => {
 
     expect(screen.queryByLabelText("Native file types")).toBeNull();
     expect(screen.queryByLabelText("Max extracted text characters")).toBeNull();
+    expect(screen.queryByLabelText("Max output tokens")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
 
@@ -120,6 +122,7 @@ describe("ProviderForm model rows", () => {
     expect(
       screen.getByLabelText("Max extracted text characters"),
     ).toBeInTheDocument();
+    expect(screen.getByLabelText("Max output tokens")).toBeInTheDocument();
   });
 
   // Unlike the file-handling pair, this one is visible on a collapsed row: an
@@ -245,6 +248,59 @@ describe("ProviderForm model rows", () => {
     expect(screen.getByLabelText("Max extracted text characters")).toHaveValue(
       1000,
     );
+  });
+
+  // Same rule as the file-handling pair: a ceiling someone declared must not be
+  // hidden behind a collapsed section where the next reader won't find it.
+  it("opens a row whose only Advanced setting is a declared output ceiling", () => {
+    renderEditForm([
+      { id: "gpt-4o", passthroughFileTypes: [], maxOutputTokens: 64000 },
+    ]);
+
+    expect(screen.getByLabelText("Max output tokens")).toHaveValue(64000);
+  });
+
+  it("sends a declared output ceiling back unchanged, so it survives a save", async () => {
+    const fetchMock = mockAcceptedSave();
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderEditForm([
+      { id: "gpt-4o", passthroughFileTypes: [], maxOutputTokens: 64000 },
+    ]);
+    save();
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(savedModelIds(fetchMock)[0].maxOutputTokens).toBe(64000);
+  });
+
+  // Emptying the input has to actually clear the stored value. The whole
+  // `modelIds` array is replaced on save, so an absent key is a real removal —
+  // but only if the form stops sending the old number.
+  it("clears a declared output ceiling when the input is emptied", async () => {
+    const fetchMock = mockAcceptedSave();
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderEditForm([
+      { id: "gpt-4o", passthroughFileTypes: [], maxOutputTokens: 64000 },
+    ]);
+    fireEvent.change(screen.getByLabelText("Max output tokens"), {
+      target: { value: "" },
+    });
+    save();
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(savedModelIds(fetchMock)[0]).not.toHaveProperty("maxOutputTokens");
+  });
+
+  it("declares no output ceiling for a row that was left alone", async () => {
+    const fetchMock = mockAcceptedSave();
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderEditForm([{ id: "gpt-4o", passthroughFileTypes: [] }]);
+    save();
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(savedModelIds(fetchMock)[0].maxOutputTokens).toBeUndefined();
   });
 
   it("expands only the row that has config, leaving its neighbours collapsed", () => {
@@ -398,6 +454,30 @@ describe("ProviderForm validation errors on model rows", () => {
       ).toBeInTheDocument(),
     );
     expect(screen.getByText("Too small")).toBeInTheDocument();
+  });
+
+  it("opens a collapsed row when the server rejects its output ceiling", async () => {
+    vi.stubGlobal(
+      "fetch",
+      mockRejectedSave([
+        {
+          path: ["modelIds", 0, "maxOutputTokens"],
+          message: "Too small: expected number to be >0",
+        },
+      ]),
+    );
+
+    renderEditForm([{ id: "a", passthroughFileTypes: [] }]);
+    expect(screen.queryByLabelText("Max output tokens")).toBeNull();
+
+    save();
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("Max output tokens")).toBeInTheDocument(),
+    );
+    expect(
+      screen.getByText("Too small: expected number to be >0"),
+    ).toBeInTheDocument();
   });
 
   // The window sits outside Advanced, so its rejection needs no disclosure

@@ -511,6 +511,76 @@ describe("chat-execution", () => {
       expect(turn.resolved.seed).toBe(99);
     });
 
+    // The output ceiling comes off the PROVIDER's model entry, not the Agent or
+    // the request — it is a property of the (Provider, model) pair (issue #454).
+    it("streams the model's declared maxOutputTokens", async () => {
+      const cappedProvider = {
+        ...baseProvider,
+        modelIds: [
+          { id: "gpt-4", passthroughFileTypes: [], maxOutputTokens: 64000 },
+        ],
+      };
+      const queries = createInMemoryChatTurnQueries({
+        workspaces: [baseWorkspace],
+        agents: [baseAgent],
+        providers: [cappedProvider],
+      });
+
+      const turn = await prepareChatTurn(
+        { ...baseInput, request: { agentId: baseAgent.id } },
+        queries,
+      );
+
+      expect(turn.stream.maxOutputTokens).toBe(64000);
+    });
+
+    // Undeclared must stay undefined all the way to the SDK: any default of
+    // ours would change generation for every existing Provider.
+    it("leaves maxOutputTokens undefined when the model declares none", async () => {
+      const queries = createInMemoryChatTurnQueries({
+        workspaces: [baseWorkspace],
+        providers: [baseProvider],
+      });
+
+      const turn = await prepareChatTurn(
+        {
+          ...baseInput,
+          request: { providerId: baseProvider.id, modelId: "gpt-4" },
+        },
+        queries,
+      );
+
+      expect(turn.stream.maxOutputTokens).toBeUndefined();
+    });
+
+    // An alias reference resolves to the entry, so the ceiling follows a
+    // repoint rather than being looked up by the stored string.
+    it("takes maxOutputTokens from the entry an alias reference resolves to", async () => {
+      const aliasProvider = {
+        ...baseProvider,
+        modelIds: [
+          {
+            id: "gpt-4",
+            alias: "flagship",
+            passthroughFileTypes: [],
+            maxOutputTokens: 32000,
+          },
+        ],
+      };
+      const queries = createInMemoryChatTurnQueries({
+        workspaces: [baseWorkspace],
+        agents: [{ ...baseAgent, modelId: "alias:flagship" }],
+        providers: [aliasProvider],
+      });
+
+      const turn = await prepareChatTurn(
+        { ...baseInput, request: { agentId: baseAgent.id } },
+        queries,
+      );
+
+      expect(turn.stream.maxOutputTokens).toBe(32000);
+    });
+
     it("Agent without an explicit maxSteps falls back to the default (15), not 1", async () => {
       const agentNoMaxSteps = { ...baseAgent, maxSteps: null };
       const queries = createInMemoryChatTurnQueries({
