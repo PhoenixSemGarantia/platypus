@@ -167,3 +167,18 @@ export const maxOutputTokensForModel = (
   provider: Provider,
   modelId: ConcreteModelId,
 ): number | undefined => modelEntry(provider, modelId)?.maxOutputTokens;
+
+/**
+ * The total token capacity an Org Admin declared for this model, or `undefined`
+ * where none was declared (ADR-0018).
+ *
+ * No default either, for a different reason from the ceiling above: nothing can
+ * discover a context window, so an undeclared one stays unknown and every reader
+ * hides rather than guesses. Keyed on `(provider, model)` because the same model
+ * reached directly and through a proxy can honestly differ, and because the
+ * declaration lives on the model entry a Model alias carries its window with it.
+ */
+export const contextWindowForModel = (
+  provider: Provider,
+  modelId: ConcreteModelId,
+): number | undefined => modelEntry(provider, modelId)?.contextWindow;

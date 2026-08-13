@@ -586,7 +586,8 @@ export type ProviderApiMode = z.infer<typeof providerApiModeSchema>;
 //
 // `contextWindow` is the vendor's published TOTAL token capacity for this
 // model, declared by an Org Admin because nothing can discover it — see
-// ADR-0018. Optional always, and nothing reads it yet.
+// ADR-0018. Optional always: where it is absent, the Chat's context meter is
+// hidden and nothing else changes.
 //
 // `maxOutputTokens` caps a SINGLE reply, and unlike `contextWindow` it is
 // enforced: it becomes the generation call's output ceiling for every turn on
@@ -1557,8 +1558,19 @@ export type TriggerRunStatus = z.infer<typeof triggerRunStatusSchema>;
 export const triggerRunStatsSchema = z.object({
   steps: z.number(),
   toolCalls: z.array(z.object({ name: z.string(), count: z.number() })),
+  // Cross-step SUMS, and billing figures: every step's usage folded together.
+  // They are rendered on the trigger runs page and deliberately keep that
+  // meaning — occupancy gets its own field below rather than reinterpreting a
+  // number an Operator already reads (ADR-0018).
   inputTokens: z.number(),
   outputTokens: z.number(),
+  /**
+   * How full the model's context got: the input tokens reported for the FINAL
+   * step of the run, which is the whole conversation as last sent. A last
+   * value, never a sum. Absent where the Provider reported no usage — occupancy
+   * is then unknown and nothing is estimated.
+   */
+  contextOccupancy: z.number().int().nonnegative().optional(),
   /**
    * Set only when the run stopped because it hit the model's output ceiling.
    * Absent rather than `false` so an untruncated run stores nothing, matching

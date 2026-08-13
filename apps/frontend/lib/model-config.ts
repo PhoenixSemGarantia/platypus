@@ -129,6 +129,21 @@ export const getPassthroughFileTypes = (
 };
 
 /**
+ * The total token capacity declared for a model, or `undefined` where none was
+ * declared (ADR-0018) — which is the normal state and the reason the context
+ * meter has a hidden mode.
+ *
+ * No default to fall back to, unlike the passthrough types above: nothing can
+ * discover a context window, so an undeclared one stays unknown rather than
+ * being guessed at.
+ */
+export const getContextWindow = (
+  provider: Pick<Provider, "modelIds">,
+  modelId: ConcreteModelId,
+): number | undefined =>
+  getModelConfigs(provider).find((m) => m.id === modelId)?.contextWindow;
+
+/**
  * Classify an attachment against a model's passthrough set — the metadata-only
  * mirror of the backend gate. `reject` means the turn would be blocked: the file
  * is neither native, text-like, nor an extractable document. `extract` (PDF /

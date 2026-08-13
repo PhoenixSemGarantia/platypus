@@ -1,11 +1,12 @@
 import { describe, it, expect } from "vitest";
-import type { Provider } from "@platypus/schemas";
+import type { ConcreteModelId, Provider } from "@platypus/schemas";
 import {
   getModelConfigs,
   getModelOptions,
   findModelOption,
   resolveModelId,
   getPassthroughFileTypes,
+  getContextWindow,
 } from "./model-config";
 
 const provider = (modelIds: unknown, over: Partial<Provider> = {}) =>
@@ -131,5 +132,37 @@ describe("getPassthroughFileTypes", () => {
     ]);
     const resolved = resolveModelId(p, "alias:flagship")!;
     expect(getPassthroughFileTypes(p, resolved)).toEqual(["image/*"]);
+  });
+});
+
+describe("getContextWindow", () => {
+  it("returns the declared window for an aliased model", () => {
+    // The window lives on the model ENTRY, so repointing an alias moves it —
+    // no special handling required (ADR-0017 + ADR-0018).
+    const p = provider([
+      {
+        id: "claude-sonnet",
+        passthroughFileTypes: [],
+        alias: "flagship",
+        contextWindow: 200_000,
+      },
+    ]);
+    const resolved = resolveModelId(p, "alias:flagship")!;
+    expect(getContextWindow(p, resolved)).toBe(200_000);
+  });
+
+  it("returns undefined when undeclared, unknown, or on a legacy list", () => {
+    const declaredNone = provider([{ id: "gpt-4", passthroughFileTypes: [] }]);
+    expect(
+      getContextWindow(declaredNone, resolveModelId(declaredNone, "gpt-4")!),
+    ).toBeUndefined();
+    expect(
+      getContextWindow(declaredNone, "ghost" as ConcreteModelId),
+    ).toBeUndefined();
+
+    const legacy = provider(["legacy-model"]);
+    expect(
+      getContextWindow(legacy, resolveModelId(legacy, "legacy-model")!),
+    ).toBeUndefined();
   });
 });

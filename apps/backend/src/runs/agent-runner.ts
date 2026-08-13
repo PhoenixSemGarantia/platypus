@@ -62,6 +62,15 @@ export type GenerateResult = {
 };
 
 /**
+ * One step's Context occupancy: the input tokens the vendor reported for it,
+ * which is the whole conversation as that call sent it (ADR-0018). `undefined`
+ * where the step reported none — nothing is estimated, and 0 would read as a
+ * measurement of an empty context.
+ */
+const stepOccupancy = (usage?: { inputTokens?: number }): number | undefined =>
+  typeof usage?.inputTokens === "number" ? usage.inputTokens : undefined;
+
+/**
  * Folds a single step's tool calls and usage into a running `RunStats`
  * accumulator. Mutates `stats` in place. Used by `onStepFinish` so the
  * sink can observe partial progress without waiting for the final result.
@@ -87,6 +96,13 @@ const accumulateStepStats = (
     stats.outputTokens =
       (stats.outputTokens ?? 0) + (step.usage.outputTokens ?? 0);
   }
+  // REPLACED, not summed, and outside the guard above: the whole conversation
+  // is in every step's input count, so the latest step is the current context
+  // size while the running totals are sums of context sizes (ADR-0018). A step
+  // that reports nothing — no count, or no usage object at all — clears the
+  // figure rather than leaving an earlier, smaller step's standing as if it
+  // were current, which is what a mid-run stats flush would otherwise publish.
+  stats.contextOccupancy = stepOccupancy(step.usage);
 };
 
 /**
@@ -94,7 +110,10 @@ const accumulateStepStats = (
  * `totalUsage`. Works for both stream and generate paths.
  */
 const computeStats = (result: {
-  steps: Array<{ toolCalls: Array<{ toolName: string }> }>;
+  steps: Array<{
+    toolCalls: Array<{ toolName: string }>;
+    usage?: { inputTokens?: number };
+  }>;
   totalUsage: { inputTokens?: number; outputTokens?: number };
 }): RunStats => {
   const toolCallCounts = new Map<string, number>();
@@ -106,11 +125,19 @@ const computeStats = (result: {
       );
     }
   }
+  // The FINAL step only. Scanning back for the most recent step that did report
+  // a count would answer with a smaller, earlier context as though it were the
+  // one the run ended on.
+  const contextOccupancy = stepOccupancy(result.steps.at(-1)?.usage);
   return {
     steps: result.steps.length,
     toolCalls: Array.from(toolCallCounts, ([name, count]) => ({ name, count })),
     inputTokens: result.totalUsage.inputTokens ?? 0,
     outputTokens: result.totalUsage.outputTokens ?? 0,
+    // Spread so a run whose Provider reported no usage stores no key at all,
+    // matching the schema's optional field: absent means unknown, and 0 would
+    // read as a measurement of an empty context.
+    ...(contextOccupancy === undefined ? {} : { contextOccupancy }),
   };
 };
 

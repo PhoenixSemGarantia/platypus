@@ -81,3 +81,27 @@ describe("Trigger runs truncation marker", () => {
     expect(screen.queryByText(RUN_CUT_SHORT_NOTICE)).toBeNull();
   });
 });
+
+// Without this an Operator can only see a scheduled Agent's context filling up
+// after it starts failing at the vendor (ADR-0018).
+describe("Trigger runs Context occupancy", () => {
+  it("shows how full the context got on the run's last step", async () => {
+    await renderRuns([run(stats({ contextOccupancy: 42000 }))]);
+
+    expect(screen.getByText(/42,000 context/)).toBeInTheDocument();
+  });
+
+  it("shows nothing where the Provider reported no usage", async () => {
+    await renderRuns([run(stats())]);
+
+    expect(screen.queryByText(/context/)).toBeNull();
+  });
+
+  it("leaves the existing token sums reading as they always have", async () => {
+    // These are cross-step billing sums an Operator has been reading; occupancy
+    // is a separate figure and must not be mistaken for either of them.
+    await renderRuns([run(stats({ contextOccupancy: 42000 }))]);
+
+    expect(screen.getByText(/100 in \/ 4096 out/)).toBeInTheDocument();
+  });
+});
