@@ -30,6 +30,7 @@ import {
   modelReferenceFor,
   modelLabelFor,
   findModelEntry,
+  triggerRunStatsSchema,
 } from "./index";
 
 describe("Organization Schema", () => {
@@ -1066,5 +1067,52 @@ describe("Model reference helpers", () => {
 
   it("never resolves an alias reference to a like-named concrete id", () => {
     expect(findModelEntry(models, "alias:gpt-4")).toBeUndefined();
+  });
+});
+
+describe("triggerRunStatsSchema", () => {
+  const base = {
+    steps: 3,
+    toolCalls: [{ name: "search", count: 2 }],
+    inputTokens: 900,
+    outputTokens: 120,
+  };
+
+  it("accepts a run that recorded Context occupancy", () => {
+    const result = triggerRunStatsSchema.safeParse({
+      ...base,
+      contextOccupancy: 42_000,
+    });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.contextOccupancy).toBe(42_000);
+  });
+
+  it("leaves occupancy undefined for a Provider that reported no usage", () => {
+    const result = triggerRunStatsSchema.safeParse(base);
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.contextOccupancy).toBeUndefined();
+  });
+
+  it("keeps the cross-step token sums meaning what they meant", () => {
+    // Occupancy is a separate field precisely so these two keep their billing
+    // meaning — a reader of the trigger runs page must not find the same name
+    // holding a different quantity (ADR-0018).
+    const result = triggerRunStatsSchema.safeParse({
+      ...base,
+      contextOccupancy: 42_000,
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.inputTokens).toBe(900);
+      expect(result.data.outputTokens).toBe(120);
+    }
+  });
+
+  it("rejects a negative or fractional occupancy", () => {
+    for (const contextOccupancy of [-1, 1.5]) {
+      expect(
+        triggerRunStatsSchema.safeParse({ ...base, contextOccupancy }).success,
+      ).toBe(false);
+    }
   });
 });

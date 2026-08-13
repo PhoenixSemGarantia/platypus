@@ -148,12 +148,18 @@ Declaring less than the vendor's real capacity is safe; declaring more is not,
 because the vendor rejects the turn outright. So when you aren't sure, round
 down.
 
+Declaring a window makes a **context meter** appear beside the prompt input in
+every Chat on that model, showing how full the conversation got on its last turn
+— see [How full the conversation
+is](/building-with-platypus/chat#how-full-the-conversation-is). Leave it empty
+and that meter is hidden; nothing else changes.
+
 <Callout type="warning">
-  A Context window is a **statement**, not a budget. Platypus does not enforce
-  it: nothing warns, trims a conversation to fit, or blocks a turn for
-  approaching it, and a turn is assembled and sent exactly as it was before. All
-  the field does is tell Platypus a capacity it has no way to look up. Leaving
-  it empty breaks nothing.
+  A Context window is a **statement**, not a budget. Declaring it makes the
+  meter appear — it does not make Platypus enforce anything. Nothing warns, trims
+  a conversation to fit, or blocks a turn for approaching the window, and a turn
+  is assembled and sent exactly as it was before. Reaching the real limit still
+  fails at the vendor.
 </Callout>
 
 #### Capping a single reply

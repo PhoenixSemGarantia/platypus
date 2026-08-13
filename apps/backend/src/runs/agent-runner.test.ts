@@ -538,6 +538,85 @@ describe("AgentRunner.generate", () => {
     expect(dispose).toHaveBeenCalledTimes(1);
   });
 
+  // ADR-0018: an unattended run's only record of how full the context got is
+  // the stats it hands the sink, and the two plausible-looking figures beside
+  // occupancy — `totalUsage.inputTokens` and the accumulated `stats.inputTokens`
+  // — are both cross-step sums.
+  it("records Context occupancy from the final step, not the sum across steps", async () => {
+    mockPrepareChatTurn.mockResolvedValueOnce(fakeTurn());
+    mockGenerateText.mockResolvedValueOnce({
+      text: "ok",
+      steps: [
+        { toolCalls: [], usage: { inputTokens: 1_000, outputTokens: 40 } },
+        { toolCalls: [], usage: { inputTokens: 3_500, outputTokens: 60 } },
+      ],
+      totalUsage: { inputTokens: 4_500, outputTokens: 100 },
+    });
+
+    const sink = new RecordingSink();
+    const result = await runner.generate({ scope, input: baseInput, sink });
+
+    expect(result.stats.contextOccupancy).toBe(3_500);
+    const finish = sink.events.at(-1) as Extract<
+      LifecycleEvent,
+      { name: "onFinish" }
+    >;
+    expect(finish.stats?.contextOccupancy).toBe(3_500);
+    // The billing sums keep their existing meaning.
+    expect(finish.stats?.inputTokens).toBe(4_500);
+    expect(finish.stats?.outputTokens).toBe(100);
+  });
+
+  // The interim stats a long run flushes mid-flight are what the Operator reads
+  // while it is still going, so a step that reports nothing must not leave an
+  // earlier, smaller step's figure looking current.
+  it("clears the interim occupancy when a step reports no usage", async () => {
+    mockPrepareChatTurn.mockResolvedValueOnce(fakeTurn());
+    const progressed: Array<number | undefined> = [];
+    mockGenerateText.mockImplementationOnce(
+      async ({
+        onStepFinish,
+      }: {
+        onStepFinish: (s: unknown) => void | Promise<void>;
+      }) => {
+        await onStepFinish({
+          toolCalls: [],
+          usage: { inputTokens: 1_000, outputTokens: 40 },
+        });
+        await onStepFinish({ toolCalls: [] });
+        return { text: "ok", steps: [{ toolCalls: [] }], totalUsage: {} };
+      },
+    );
+
+    const sink = new RecordingSink();
+    const recorded = sink.onProgress.bind(sink);
+    // Read at call time: the runner passes one mutated stats object every time,
+    // so the figure has to be copied out as each flush happens.
+    sink.onProgress = (ctx: { runId: string; stats?: RunStats }) => {
+      progressed.push(ctx.stats?.contextOccupancy);
+      return recorded(ctx);
+    };
+    await runner.generate({ scope, input: baseInput, sink });
+
+    expect(progressed).toEqual([1_000, undefined]);
+  });
+
+  it("records no occupancy when the Provider reports no usage", async () => {
+    mockPrepareChatTurn.mockResolvedValueOnce(fakeTurn());
+    mockGenerateText.mockResolvedValueOnce({
+      text: "ok",
+      steps: [{ toolCalls: [] }],
+      totalUsage: {},
+    });
+
+    const sink = new RecordingSink();
+    const result = await runner.generate({ scope, input: baseInput, sink });
+
+    // Unknown stays unknown: nothing is estimated, and 0 would read as a
+    // measurement of an empty context.
+    expect(result.stats.contextOccupancy).toBeUndefined();
+  });
+
   it("invariant: reaches onFinish even when prepareChatTurn throws", async () => {
     mockPrepareChatTurn.mockRejectedValueOnce(new Error("Agent not found"));
 
