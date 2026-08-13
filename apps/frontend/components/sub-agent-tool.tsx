@@ -27,7 +27,7 @@ import {
 } from "./ai-elements/message";
 import { Shimmer } from "./ai-elements/shimmer";
 import { ToolDuration } from "./tool-duration";
-import { toolDurationMs } from "@/lib/tool-duration";
+import { toolCallDurationMs } from "@/lib/tool-duration";
 import { useMemo, type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 
@@ -235,13 +235,22 @@ const ResponseBlock = ({
 
 interface SubAgentToolProps {
   toolPart: ToolUIPart;
+  /**
+   * The metadata of the message this invocation sits on, which is where a
+   * duration arrives from mid-turn. Passed in rather than read here: resolving
+   * it needs both carriers, and the composing message already holds them.
+   */
+  messageMetadata?: unknown;
 }
 
 /**
  * Renders a sub-agent tool invocation. Shows a real-time activity log while the
  * sub-agent runs, then the plain-text result when complete.
  */
-export const SubAgentTool = ({ toolPart }: SubAgentToolProps) => {
+export const SubAgentTool = ({
+  toolPart,
+  messageMetadata,
+}: SubAgentToolProps) => {
   const input = toolPart.input as { task?: string };
   const output = toolPart.output as SubAgentActivity | string | null;
   const errorText = toolPart.errorText;
@@ -280,7 +289,13 @@ export const SubAgentTool = ({ toolPart }: SubAgentToolProps) => {
         <div className="flex items-center gap-2">
           <BotIcon className="size-4 text-muted-foreground" />
           <span className="font-medium text-sm">{subAgentName}</span>
-          <ToolDuration durationMs={toolDurationMs(toolPart.toolMetadata)} />
+          <ToolDuration
+            durationMs={toolCallDurationMs(
+              toolPart.toolMetadata,
+              messageMetadata,
+              toolPart.toolCallId,
+            )}
+          />
           {getStatusBadge(effectiveState)}
         </div>
         <ChevronDownIcon className="size-4 text-muted-foreground transition-transform group-data-[state=open]/subagent:rotate-180" />

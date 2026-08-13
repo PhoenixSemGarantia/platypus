@@ -92,10 +92,10 @@ card. Its header shows the Tool's name, a status — **Pending**, **Running**,
 **Completed**, **Error** — and how long the Tool took: `<1ms`, `842ms`, `1.2s`,
 or `1m 03s` past a minute.
 
-The time is the Tool's own work, measured on the server, so it appears a moment
-after the reply finishes rather than while the Tool is running. It is stored
-with the message and does not change afterwards. A Tool that failed still shows
-the time it spent before failing.
+The time is the Tool's own work, measured on the server, so it appears the
+moment the Tool finishes rather than counting up while it runs. It is stored
+with the message and does not change afterwards — the number you first see is
+final. A Tool that failed still shows the time it spent before failing.
 
 Read it against the reply as a whole: most Tools land in single milliseconds, so
 a turn that felt slow and shows nothing above `1.2s` spent its time in the
