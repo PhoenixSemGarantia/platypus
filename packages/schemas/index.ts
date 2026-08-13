@@ -189,6 +189,19 @@ export type ChatList = z.infer<typeof chatListSchema>;
 
 // Agent
 
+/**
+ * Default agentic step ceiling for an agent that has no explicit `maxSteps`,
+ * and the value the Agent form prefills. Keeps API-created agents sane (a
+ * single step never lets a tool-calling agent finish its work) while staying
+ * low enough to bound a model that fails to converge.
+ *
+ * Lives here rather than beside either consumer: both the Chat-turn path and
+ * the Sub-Agent delegation path resolve an unset `maxSteps` through it, and
+ * homing it in one of them makes the other import a module it has no other
+ * reason to load.
+ */
+export const DEFAULT_AGENT_MAX_STEPS = 15;
+
 // An Agent is scoped to either a Workspace or an Organization (mutually
 // exclusive), mirroring the dual-scope shape of `provider`/`mcp`/`skill`.
 // Org-scoped Agents are Shared resources managed by Org Admins (ADR-0007);
@@ -203,7 +216,13 @@ const agentBaseSchema = z.object({
   description: z.string().min(1).max(128),
   instructions: z.string().optional(),
   modelId: z.string(),
-  maxSteps: z.number().optional(),
+  // Bounded because the value reaches `stepCountIs(n)`, whose predicate is
+  // `steps.length === n`, evaluated only after a step has completed. A `0` (or
+  // any negative, or a fraction the integer column would never match) is
+  // therefore never equal to a real step count, so the loop runs unbounded —
+  // the opposite of the ceiling the operator asked for. `min(1)` matches the
+  // `min="1"` the Agent form already puts on the input.
+  maxSteps: z.number().int().min(1).optional(),
   // Sampling params are nullable so the UI can clear them back to "unset"
   // (null) — without null, JSON.stringify drops the cleared `undefined` key
   // and the column keeps its previous value (#263). null is treated as "unset"
