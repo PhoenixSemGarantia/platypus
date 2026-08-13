@@ -401,9 +401,8 @@ const ModelRow = ({
                 <>
                   The most this model may produce in a{" "}
                   <strong>single reply</strong> — a cap on the answer, not the
-                  window. Leave empty to use the vendor’s own default, which on{" "}
-                  <strong>Amazon Bedrock</strong> is far below what the model
-                  can actually write and cuts long answers short.
+                  window. Leave empty to use the vendor’s own default, which may
+                  be well below what the model can actually write.
                 </>
               }
               error={errors.fields.maxOutputTokens}
