@@ -462,8 +462,9 @@ export class AgentRunner {
     logger.debug({ systemPrompt: modelArgs.system }, "System prompt for chat");
 
     // How long each locally-executed tool took, keyed by `toolCallId`. The SDK
-    // has already measured it; we only hold onto it until the finished messages
-    // exist to stamp it onto (see `applyToolDurations`). Provider-executed tools
+    // has already measured it; we only hold onto it long enough to stamp it onto
+    // the outgoing chunks and onto the finished messages (see
+    // `injectToolDurations` and `applyToolDurations`). Provider-executed tools
     // never reach this callback and so carry no duration.
     const toolDurations = new Map<string, number>();
 
@@ -492,12 +493,16 @@ export class AgentRunner {
     const uiStream = result.toUIMessageStream<PlatypusUIMessage>({
       originalMessages: input.messages,
       generateMessageId: createIdGenerator({ prefix: "msg", size: 16 }),
-      messageMetadata: createMessageMetadata(state.turn?.resolved.agentId),
+      messageMetadata: createMessageMetadata(
+        state.turn?.resolved.agentId,
+        toolDurations,
+      ),
       onError: (error) => formatStreamError(error),
       onFinish: async ({ messages: finalMessages }) => {
-        // Stamped here rather than on the snapshot branch below, which sees no
-        // durations at all. Setting the flag first closes that branch's window
-        // to overwrite this, so the sink's terminal write observes the patch.
+        // Stamped onto the parts here as well as travelling out as metadata:
+        // this is the per-part form the persisted messages use, and the one a
+        // reload reads. Setting the flag first closes the snapshot branch's
+        // window to overwrite this, so the sink's terminal write observes it.
         finalMessagesReceived = true;
         state.messages = applyToolDurations(finalMessages, toolDurations);
         let status: RunStatus = "succeeded";

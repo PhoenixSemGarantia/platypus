@@ -23,6 +23,21 @@ export type ChatMessageMetadata = {
    */
   truncatedByTokenLimit?: true;
   /**
+   * How long each of the turn's locally-executed tools took, in whole
+   * milliseconds, keyed by `toolCallId`.
+   *
+   * A delivery channel, not the record: the same figures are stamped onto the
+   * tool parts themselves (`toolMetadata.durationMs`), which is what a reload
+   * reads and what every message persisted so far carries. They live here as
+   * well because the UI message stream's tool reducer discards metadata an
+   * output chunk carries, leaving message metadata as the only seam that
+   * reaches the browser mid-turn (issue #353).
+   *
+   * Absent for a turn that ran no local tools. A single call is absent where the
+   * Provider executed it in its own service, which Platypus never measures.
+   */
+  toolDurations?: Record<string, number>;
+  /**
    * How full the model's Context window was when this message was produced
    * (ADR-0018): the input-token count the Provider reported for the **last**
    * model call of the turn — inclusive of cached reads and writes, so the true

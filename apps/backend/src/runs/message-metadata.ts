@@ -20,8 +20,15 @@ import type { ChatMessageMetadata } from "../types.ts";
  * `agentId` is read once, here, rather than off the run state when the `start`
  * part arrives: the turn resolves during setup, before the stream is built, and
  * nothing reassigns the resolved agent mid-run.
+ *
+ * `toolDurations` is the live map the runner fills from `onToolExecutionEnd`.
+ * It is read rather than copied: this extractor runs per part, and each read
+ * happens after the entry it wants has been written.
  */
-export const createMessageMetadata = (agentId: string | undefined) => {
+export const createMessageMetadata = (
+  agentId: string | undefined,
+  toolDurations: ReadonlyMap<string, number> = new Map(),
+) => {
   // Whether any step of this turn has reported an input-token count. Only
   // read to erase a reading, never to synthesise one — see the `finish-step`
   // branch below.
@@ -66,6 +73,28 @@ export const createMessageMetadata = (agentId: string | undefined) => {
           outputTokens: typeof outputTokens === "number" ? outputTokens : null,
         },
       };
+    }
+    // How long the tool that just finished took. This is the ONLY way the
+    // figure reaches the browser: the stream's tool reducer rebuilds the tool
+    // part from the stored invocation and discards the `toolMetadata` an output
+    // chunk carried, so the per-part stamp `applyToolDurations` writes is
+    // invisible until the message is re-fetched (issue #353).
+    //
+    // Read on the tool's own result part rather than gathered at the end, so
+    // each duration lands with the output it describes instead of the whole set
+    // arriving after the reply. The SDK awaits `onToolExecutionEnd` inside
+    // `executeToolCall` and only emits the result afterwards, so the map
+    // already holds this call's figure — ordering, not luck.
+    //
+    // One key per call, merged: the SDK's deep merge recurses into plain
+    // objects, so each part contributes its own entry and the accumulated map
+    // survives. A call absent from the map was executed by the Provider, never
+    // locally, and so was never measured.
+    if (part.type === "tool-result" || part.type === "tool-error") {
+      const durationMs = toolDurations.get(part.toolCallId);
+      return durationMs === undefined
+        ? undefined
+        : { toolDurations: { [part.toolCallId]: Math.round(durationMs) } };
     }
     // The terminal finish only. A step inside a tool loop can end at the
     // ceiling and the run still recover and complete normally; flagging those

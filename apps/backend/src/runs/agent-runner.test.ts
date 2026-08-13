@@ -462,7 +462,7 @@ describe("rejected tool input instrumentation", () => {
       (opts: { onStepFinish: (step: unknown) => void }) => {
         streamHarness.onStepFinish = opts.onStepFinish;
         return {
-          toUIMessageStream: () => ({ tee: () => [{}, {}] }),
+          toUIMessageStream: () => emptyUIStream(),
         };
       },
     );
@@ -897,6 +897,20 @@ const resetStreamHarness = (): void => {
   streamHarness.messageMetadata = undefined;
 };
 
+/**
+ * A stand-in for what `toUIMessageStream` returns.
+ *
+ * A real (empty) `ReadableStream` rather than a `{ tee }` literal, because the
+ * runner pipes it through the tool-duration transform before teeing — a literal
+ * with only the methods used today silently becomes a lie the moment the
+ * pipeline changes. Nothing reads the branches: `readUIMessageStream` is mocked
+ * to the harness queue and the response is a sentinel.
+ */
+const emptyUIStream = () =>
+  new ReadableStream({
+    start: (controller) => controller.close(),
+  });
+
 // Make streamText return a fake result whose UI-stream callbacks the test can
 // drive by hand: `onStepFinish` (per step), `onFinish` (completion), and
 // `messageMetadata` (per stream part).
@@ -918,7 +932,7 @@ const primeStreamText = () => {
         }) => {
           streamHarness.onFinish = uiOpts.onFinish;
           streamHarness.messageMetadata = uiOpts.messageMetadata;
-          return { tee: () => [{}, {}] };
+          return emptyUIStream();
         },
       };
     },
@@ -1116,7 +1130,7 @@ describe("AgentRunner.stream — success & interruption", () => {
             onFinish: (ctx: { messages: unknown[] }) => Promise<void> | void;
           }) => {
             streamHarness.onFinish = uiOpts.onFinish;
-            return { tee: () => [{}, {}] };
+            return emptyUIStream();
           },
         };
       },

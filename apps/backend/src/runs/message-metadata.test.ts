@@ -1,5 +1,11 @@
 import { describe, it, expect, vi } from "vitest";
-import { readUIMessageStream, stepCountIs, streamText, tool } from "ai";
+import {
+  isToolUIPart,
+  readUIMessageStream,
+  stepCountIs,
+  streamText,
+  tool,
+} from "ai";
 import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 import { z } from "zod";
 
@@ -266,5 +272,98 @@ describe("Context occupancy over a real multi-step stream", () => {
       inputTokens: 4_200,
       outputTokens: null,
     });
+  });
+});
+
+/**
+ * Tool durations over a real stream.
+ *
+ * The point of driving the real SDK here is that the mechanism this feature
+ * depends on is entirely the SDK's. `applyToolDurations` stamps the figure onto
+ * the tool part, but the stream's tool reducer rebuilds that part from its
+ * stored invocation and discards the stamp — so a unit test of the stamp passes
+ * while the browser shows nothing (issue #353). Only a real stream can tell the
+ * two apart, and these tests assert on the message a client actually reduces.
+ */
+describe("tool durations over a real multi-step stream", () => {
+  /** Takes long enough that a rounded millisecond figure is non-zero. */
+  const slowPing = tool({
+    description: "Ping a service.",
+    inputSchema: z.object({}),
+    execute: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return "pong";
+    },
+  });
+
+  /** Runs a two-step turn, wiring the durations exactly as the runner does. */
+  const runToolTurn = async (tools: Record<string, typeof slowPing>) => {
+    const toolDurations = new Map<string, number>();
+    const result = streamText({
+      model: mockModel([
+        toolCallStep(usage(1_000, 30)),
+        answerStep(usage(4_200, 70)),
+      ]),
+      prompt: "Ping the service and tell me what it said.",
+      tools,
+      stopWhen: [stepCountIs(5)],
+      onToolExecutionEnd: ({ toolCall, toolExecutionMs }) => {
+        toolDurations.set(toolCall.toolCallId, toolExecutionMs);
+      },
+    });
+
+    const message = await lastSnapshot(
+      result.toUIMessageStream({
+        messageMetadata: createMessageMetadata("agent-1", toolDurations),
+      }),
+    );
+    return { message, toolDurations };
+  };
+
+  it("delivers the executed tool's duration on the reduced message", async () => {
+    const { message } = await runToolTurn({ ping: slowPing });
+
+    const delivered = message?.metadata?.toolDurations?.["call-1"];
+    expect(typeof delivered).toBe("number");
+    expect(delivered).toBeGreaterThanOrEqual(15);
+  });
+
+  // The reason the duration travels as message metadata at all: the SDK gives
+  // the tool part back without it, so this asserts the gap the metadata fills.
+  // If a future SDK starts honouring the output chunk's `toolMetadata`, this
+  // test failing is the signal that the metadata channel is now redundant.
+  it("confirms the SDK leaves the tool part itself without a duration", async () => {
+    const { message } = await runToolTurn({ ping: slowPing });
+
+    const toolPart = message?.parts.find((part) => isToolUIPart(part));
+    expect(toolPart).toBeDefined();
+    expect(
+      (toolPart as { toolMetadata?: Record<string, unknown> }).toolMetadata
+        ?.durationMs,
+    ).toBeUndefined();
+  });
+
+  it("agrees with the figure the SDK measured", async () => {
+    const { message, toolDurations } = await runToolTurn({ ping: slowPing });
+
+    expect(message?.metadata?.toolDurations?.["call-1"]).toBe(
+      Math.round(toolDurations.get("call-1")!),
+    );
+  });
+
+  it("records no durations for a turn that ran no tools", async () => {
+    const result = streamText({
+      model: mockModel([answerStep(usage(1_000, 30))]),
+      prompt: "Just answer.",
+      stopWhen: [stepCountIs(5)],
+    });
+
+    const message = await lastSnapshot(
+      result.toUIMessageStream({
+        messageMetadata: createMessageMetadata("agent-1", new Map()),
+      }),
+    );
+
+    expect(message?.metadata?.toolDurations).toBeUndefined();
   });
 });
