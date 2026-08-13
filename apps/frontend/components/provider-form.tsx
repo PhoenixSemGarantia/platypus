@@ -210,8 +210,16 @@ const ModelRow = ({
   // at nothing (issue #454). Undefined is also what clears a value already
   // stored: the whole `modelIds` array is replaced on save, so the key simply
   // stops being sent.
-  const parsePositiveInt = (value: string): number | undefined => {
-    const parsed = Number.parseInt(value, 10);
+  //
+  // `Number`, never `Number.parseInt`: parseInt truncates at the first
+  // character it cannot read, so `1e5` and `1.9` both became 1 — a value the
+  // schema accepts, which then capped every reply on the model at one token
+  // with nothing on screen pointing at the field. Anything numeric is passed
+  // through EXACTLY as typed and a non-integer is left for the schema to reject
+  // with a message, matching `parseContextWindowInput`. Silently coercing input
+  // into something storable is the one outcome neither field can afford.
+  const parsePositiveNumber = (value: string): number | undefined => {
+    const parsed = Number(value);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
   };
 
@@ -388,7 +396,7 @@ const ModelRow = ({
                 value={model.maxExtractedTextChars ?? ""}
                 onChange={(e) =>
                   onChange({
-                    maxExtractedTextChars: parsePositiveInt(e.target.value),
+                    maxExtractedTextChars: parsePositiveNumber(e.target.value),
                   })
                 }
                 disabled={disabled}
@@ -417,7 +425,7 @@ const ModelRow = ({
                 aria-invalid={!!errors.fields.maxOutputTokens}
                 onChange={(e) =>
                   onChange({
-                    maxOutputTokens: parsePositiveInt(e.target.value),
+                    maxOutputTokens: parsePositiveNumber(e.target.value),
                   })
                 }
                 disabled={disabled}

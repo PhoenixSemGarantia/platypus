@@ -292,6 +292,62 @@ describe("ProviderForm model rows", () => {
     expect(savedModelIds(fetchMock)[0]).not.toHaveProperty("maxOutputTokens");
   });
 
+  // `Number.parseInt` truncated at the first unreadable character, so `1e5` and
+  // `1.9` both saved as 1 — accepted by the schema, and every reply on the model
+  // then stopped after one token. A ceiling must reach the server as typed or
+  // not at all.
+  it("reads an exponent in the output ceiling as the number it denotes", async () => {
+    const fetchMock = mockAcceptedSave();
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderEditForm([
+      { id: "gpt-4o", passthroughFileTypes: [], maxOutputTokens: 64000 },
+    ]);
+    fireEvent.change(screen.getByLabelText("Max output tokens"), {
+      target: { value: "1e5" },
+    });
+    save();
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(savedModelIds(fetchMock)[0].maxOutputTokens).toBe(100_000);
+  });
+
+  // Passed through as typed rather than floored to 1: the schema's `.int()`
+  // rejects it with a message the reader can act on, which is the whole point of
+  // not coercing here.
+  it("sends a fractional output ceiling as typed, for the schema to reject", async () => {
+    const fetchMock = mockAcceptedSave();
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderEditForm([
+      { id: "gpt-4o", passthroughFileTypes: [], maxOutputTokens: 64000 },
+    ]);
+    fireEvent.change(screen.getByLabelText("Max output tokens"), {
+      target: { value: "1.9" },
+    });
+    save();
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(savedModelIds(fetchMock)[0].maxOutputTokens).toBe(1.9);
+  });
+
+  // The extracted-text cap shares the parser, so it shares the fix.
+  it("reads an exponent in the extracted-text cap as the number it denotes", async () => {
+    const fetchMock = mockAcceptedSave();
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderEditForm([
+      { id: "gpt-4o", passthroughFileTypes: [], maxExtractedTextChars: 1000 },
+    ]);
+    fireEvent.change(screen.getByLabelText("Max extracted text characters"), {
+      target: { value: "2e4" },
+    });
+    save();
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(savedModelIds(fetchMock)[0].maxExtractedTextChars).toBe(20_000);
+  });
+
   it("declares no output ceiling for a row that was left alone", async () => {
     const fetchMock = mockAcceptedSave();
     vi.stubGlobal("fetch", fetchMock);
