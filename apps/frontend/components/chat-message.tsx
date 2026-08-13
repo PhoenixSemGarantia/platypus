@@ -43,11 +43,11 @@ import {
   CopyIcon,
   TrashIcon,
   RefreshCwIcon,
-  TriangleAlertIcon,
   XIcon,
 } from "lucide-react";
 import { Textarea } from "./ui/textarea";
 import { toolDurationMs } from "@/lib/tool-duration";
+import { CutShortNotice } from "./cut-short-notice";
 import { LoadSkillTool } from "./load-skill-tool";
 import { SubAgentTool } from "./sub-agent-tool";
 
@@ -289,10 +289,7 @@ export const ChatMessage = memo(function ChatMessage({
       })}
       {message.role === "assistant" &&
         message.metadata?.truncatedByTokenLimit && (
-          <div className="flex items-center gap-1.5 pl-8 text-xs text-muted-foreground">
-            <TriangleAlertIcon className="size-3.5 shrink-0" />
-            <span>{CUT_SHORT_NOTICE}</span>
-          </div>
+          <CutShortNotice className="pl-8">{CUT_SHORT_NOTICE}</CutShortNotice>
         )}
       {!(isLastMessage && status === "streaming") &&
         (isEditing ? (

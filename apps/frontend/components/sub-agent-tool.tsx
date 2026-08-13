@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import type { ToolUIPart } from "ai";
 import { Badge } from "@/components/ui/badge";
+import { CutShortNotice } from "./cut-short-notice";
 import {
   Collapsible,
   CollapsibleContent,
@@ -40,7 +41,18 @@ type SubAgentActivityEntry = {
 type SubAgentActivity = {
   entries: SubAgentActivityEntry[];
   text?: string;
+  truncatedByTokenLimit?: true;
 };
+
+/**
+ * What the person reading a delegated run is told when the sub-agent stopped at
+ * its model's output ceiling rather than because it had finished. The Chat
+ * counterpart of the marker a cut-short reply carries, one level down: the card
+ * shows the delegate's answer verbatim, so an unmarked fragment reads as a
+ * finished finding. A constant so tests assert the wording without restating it.
+ */
+export const SUB_AGENT_CUT_SHORT_NOTICE =
+  "Sub-agent response cut short at the model's output limit.";
 
 const isSubAgentActivity = (output: unknown): output is SubAgentActivity =>
   typeof output === "object" &&
@@ -192,6 +204,35 @@ const ActivityEntry = ({ entry }: { entry: CompactEntry }) => {
   );
 };
 
+/**
+ * The delegate's answer. One component for both call sites — with and without
+ * an activity log — so a marker can never be shown on one and missed on the
+ * other.
+ */
+const ResponseBlock = ({
+  text,
+  truncated,
+}: {
+  text: string;
+  truncated: boolean;
+}) => (
+  <div className="space-y-2 border-t p-4">
+    <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
+      Response
+    </h4>
+    <Message from="assistant">
+      <MessageContent className="max-w-full">
+        <MessageResponse>{text}</MessageResponse>
+      </MessageContent>
+    </Message>
+    {truncated && (
+      <CutShortNotice className="mt-2">
+        {SUB_AGENT_CUT_SHORT_NOTICE}
+      </CutShortNotice>
+    )}
+  </div>
+);
+
 interface SubAgentToolProps {
   toolPart: ToolUIPart;
 }
@@ -212,6 +253,7 @@ export const SubAgentTool = ({ toolPart }: SubAgentToolProps) => {
   const activity = isSubAgentActivity(output) ? output : null;
   const legacyText = typeof output === "string" ? output : null;
   const responseText = activity?.text ?? legacyText;
+  const truncated = activity?.truncatedByTokenLimit ?? false;
   const compacted = useMemo(
     () => (activity ? compactEntries(activity.entries) : []),
     [activity],
@@ -280,16 +322,7 @@ export const SubAgentTool = ({ toolPart }: SubAgentToolProps) => {
               ))}
             </div>
             {responseText ? (
-              <div className="space-y-2 border-t p-4">
-                <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
-                  Response
-                </h4>
-                <Message from="assistant">
-                  <MessageContent className="max-w-full">
-                    <MessageResponse>{responseText}</MessageResponse>
-                  </MessageContent>
-                </Message>
-              </div>
+              <ResponseBlock text={responseText} truncated={truncated} />
             ) : null}
           </>
         ) : !isComplete ? (
@@ -297,16 +330,7 @@ export const SubAgentTool = ({ toolPart }: SubAgentToolProps) => {
             <Shimmer className="text-sm">Working...</Shimmer>
           </div>
         ) : responseText ? (
-          <div className="space-y-2 border-t p-4">
-            <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
-              Response
-            </h4>
-            <Message from="assistant">
-              <MessageContent className="max-w-full">
-                <MessageResponse>{responseText}</MessageResponse>
-              </MessageContent>
-            </Message>
-          </div>
+          <ResponseBlock text={responseText} truncated={truncated} />
         ) : null}
       </CollapsibleContent>
     </Collapsible>
