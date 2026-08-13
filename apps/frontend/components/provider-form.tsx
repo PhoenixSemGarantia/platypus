@@ -164,7 +164,8 @@ const ModelRow = ({
 }) => {
   const [showAdvanced, setShowAdvanced] = useState(
     model.passthroughFileTypes.length > 0 ||
-      model.maxExtractedTextChars !== undefined,
+      model.maxExtractedTextChars !== undefined ||
+      model.maxOutputTokens !== undefined,
   );
 
   // Whether the Context window is being typed rather than picked. State as well
@@ -192,7 +193,8 @@ const ModelRow = ({
   // server is complaining about.
   const hasAdvancedError =
     !!errors.fields.passthroughFileTypes ||
-    !!errors.fields.maxExtractedTextChars;
+    !!errors.fields.maxExtractedTextChars ||
+    !!errors.fields.maxOutputTokens;
   const advancedOpen = showAdvanced || hasAdvancedError;
 
   // Passthrough types are edited as a comma-separated string of media types.
@@ -202,9 +204,13 @@ const ModelRow = ({
       .map((t) => t.trim())
       .filter((t) => t.length > 0);
 
-  // An empty (or nonsense) cap means "use the shared default" rather than 0 —
-  // sending 0 would truncate every extracted document to nothing (issue #342).
-  const parseExtractedTextCap = (value: string): number | undefined => {
+  // Shared by the two numeric Advanced fields. An empty (or nonsense) value
+  // means "unset, use the default" rather than 0 — sending 0 would truncate
+  // every extracted document to nothing (issue #342), and would cap every reply
+  // at nothing (issue #454). Undefined is also what clears a value already
+  // stored: the whole `modelIds` array is replaced on save, so the key simply
+  // stops being sent.
+  const parsePositiveInt = (value: string): number | undefined => {
     const parsed = Number.parseInt(value, 10);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
   };
@@ -381,9 +387,37 @@ const ModelRow = ({
                 value={model.maxExtractedTextChars ?? ""}
                 onChange={(e) =>
                   onChange({
-                    maxExtractedTextChars: parseExtractedTextCap(
-                      e.target.value,
-                    ),
+                    maxExtractedTextChars: parsePositiveInt(e.target.value),
+                  })
+                }
+                disabled={disabled}
+              />
+            </ModelField>
+
+            <ModelField
+              htmlFor={`max-output-tokens-${index}`}
+              label="Max output tokens"
+              hint={
+                <>
+                  The most this model may produce in a{" "}
+                  <strong>single reply</strong> — a cap on the answer, not the
+                  window. Leave empty to use the vendor’s own default, which on{" "}
+                  <strong>Amazon Bedrock</strong> is far below what the model
+                  can actually write and cuts long answers short.
+                </>
+              }
+              error={errors.fields.maxOutputTokens}
+            >
+              <Input
+                id={`max-output-tokens-${index}`}
+                type="number"
+                min={1}
+                placeholder="Provider default"
+                value={model.maxOutputTokens ?? ""}
+                aria-invalid={!!errors.fields.maxOutputTokens}
+                onChange={(e) =>
+                  onChange({
+                    maxOutputTokens: parsePositiveInt(e.target.value),
                   })
                 }
                 disabled={disabled}

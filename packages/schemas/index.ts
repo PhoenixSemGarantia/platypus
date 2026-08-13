@@ -588,6 +588,17 @@ export type ProviderApiMode = z.infer<typeof providerApiModeSchema>;
 // model, declared by an Org Admin because nothing can discover it — see
 // ADR-0018. Optional always, and nothing reads it yet.
 //
+// `maxOutputTokens` caps a SINGLE reply, and unlike `contextWindow` it is
+// enforced: it becomes the generation call's output ceiling for every turn on
+// this model. Omitted means Platypus sends nothing and the provider's own
+// default applies — which is fine for the direct Anthropic provider (it carries
+// a per-model fallback table) and silently truncating on Amazon Bedrock, whose
+// Converse API omits `inferenceConfig.maxTokens` entirely when nothing is
+// passed and falls back to a default far below the model's real ceiling (issue
+// #454). Deliberately unbounded above: the only meaningful ceiling is the
+// model's own, Platypus cannot know it behind a proxy, and a value the model
+// won't take is the vendor's to reject.
+//
 // The universal wildcard (`*/*` or `*`) is an advanced escape hatch: it sends
 // EVERY attached file to the model raw. Values are deliberately NOT validated
 // as MIME patterns, so declaring a type the endpoint can't actually ingest is
@@ -746,6 +757,7 @@ export const modelConfigSchema = z.object({
     .optional(),
   passthroughFileTypes: z.array(z.string()).default([]),
   maxExtractedTextChars: z.number().int().positive().optional(),
+  maxOutputTokens: z.number().int().positive().optional(),
   contextWindow: z
     .number()
     .int()

@@ -1367,6 +1367,75 @@ describe("AgentRunner.stream — message metadata", () => {
   });
 });
 
+// Issue #454: the ceiling the Provider declares for the model has to reach the
+// generation call itself. Amazon Bedrock omits `inferenceConfig.maxTokens`
+// entirely when the SDK is passed nothing, so a value stopping short of the
+// call is a value that changes nothing.
+describe("model output ceiling", () => {
+  let runner: AgentRunner;
+  beforeEach(() => {
+    runner = new AgentRunner();
+    vi.clearAllMocks();
+    resetStreamHarness();
+  });
+
+  const turnWithCeiling = (maxOutputTokens?: number) => {
+    const turn = fakeTurn();
+    return { ...turn, stream: { ...turn.stream, maxOutputTokens } };
+  };
+
+  it("passes the declared ceiling to the unattended generation call", async () => {
+    mockPrepareChatTurn.mockResolvedValueOnce(turnWithCeiling(64000));
+    mockGenerateText.mockResolvedValueOnce(fakeGenerateResult);
+
+    await runner.generate({
+      scope,
+      input: baseInput,
+      sink: new RecordingSink(),
+    });
+
+    expect(mockGenerateText).toHaveBeenCalledWith(
+      expect.objectContaining({ maxOutputTokens: 64000 }),
+    );
+  });
+
+  it("passes the declared ceiling to the streaming call", async () => {
+    mockPrepareChatTurn.mockResolvedValueOnce(turnWithCeiling(32000));
+    streamHarness.queue = new streamHarness.AsyncQueue();
+    primeStreamText();
+
+    await runner.stream({
+      scope,
+      input: { ...baseInput, runId: "s-ceiling" },
+      sink: new RecordingSink(),
+      options: { origin: "http://test" },
+    });
+
+    expect(mockStreamText).toHaveBeenCalledWith(
+      expect.objectContaining({ maxOutputTokens: 32000 }),
+    );
+  });
+
+  // Undeclared has to stay undeclared: the SDK reads an absent key and an
+  // `undefined` value the same way, and anything else would move the ceiling
+  // for every Provider that has never set one.
+  it("sends no ceiling when the model declares none", async () => {
+    mockPrepareChatTurn.mockResolvedValueOnce(turnWithCeiling(undefined));
+    mockGenerateText.mockResolvedValueOnce(fakeGenerateResult);
+
+    await runner.generate({
+      scope,
+      input: baseInput,
+      sink: new RecordingSink(),
+    });
+
+    const args = mockGenerateText.mock.calls[0][0] as {
+      maxOutputTokens?: number;
+    };
+    expect(args.maxOutputTokens).toBeUndefined();
+  });
+});
+
 // Smoke test the TimeoutError export so the type stays public-importable
 describe("AgentRunner timeout types", () => {
   it("TimeoutError remains an Error subclass", () => {

@@ -649,6 +649,24 @@ describe("createSubAgentTool", () => {
       }
     });
 
+    // The ceiling is not a sampling parameter — it comes off the sub-agent's
+    // OWN Provider model entry, not its Agent row (issue #454). Without it a
+    // delegated run truncates one level down, on Bedrock especially, with the
+    // Org Admin's declared ceiling applying only to the parent turn.
+    it("passes the sub-agent model's output ceiling to its agent", () => {
+      createSubAgentTool({ ...baseOptions, maxOutputTokens: 64000 });
+
+      expect(settingsPassedToAgent()).toMatchObject({
+        maxOutputTokens: 64000,
+      });
+    });
+
+    it("sends no ceiling when the sub-agent's model declares none", () => {
+      createSubAgentTool({ ...baseOptions });
+
+      expect(settingsPassedToAgent()).not.toHaveProperty("maxOutputTokens");
+    });
+
     it("cannot have sampling override the model, instructions or tools", () => {
       createSubAgentTool({
         ...baseOptions,
@@ -795,6 +813,26 @@ describe("createSubAgentTools", () => {
     expect(result.failures).toEqual([]);
     expect(createModelFn).toHaveBeenCalledTimes(2);
     expect(loadToolsFn).toHaveBeenCalledTimes(2);
+  });
+
+  // The ceiling belongs to the sub-agent's own (Provider, model) pair, which
+  // only the resolver has, so it rides back with the model it applies to.
+  it("forwards the resolved model's output ceiling to the sub-agent's agent", async () => {
+    const createModelFn = vi.fn().mockResolvedValue({
+      model: {},
+      securityGuardrails: null,
+      maxOutputTokens: 32000,
+    });
+
+    await createSubAgentTools(
+      [{ id: "sa-1", name: "Research", providerId: "p1", modelId: "m1" }],
+      createModelFn,
+      vi.fn().mockResolvedValue({}),
+    );
+
+    expect(agentConstructorSpy.mock.calls[0][0]).toMatchObject({
+      maxOutputTokens: 32000,
+    });
   });
 
   it("continues when a sub-agent fails to initialize, and reports it as a failure", async () => {

@@ -103,6 +103,14 @@ interface SubAgentToolOptions {
    * a delegated run is tuned exactly as the same Agent would be on a Chat.
    */
   sampling?: SamplingSettings;
+  /**
+   * The output ceiling THIS sub-agent's model declares, or undefined for none
+   * (issue #454). Not a sampling parameter: it comes off the sub-agent's own
+   * Provider model entry rather than its Agent row, which is why it arrives
+   * separately from `sampling`. Omitted when undefined so the SDK is passed
+   * nothing at all.
+   */
+  maxOutputTokens?: number;
   /** Called on each activity update from the sub-agent. Used to reset the parent run's per-step timeout. */
   onProgress?: () => void;
 }
@@ -126,6 +134,7 @@ export const createSubAgentTool = (options: SubAgentToolOptions) => {
     maxSteps = 50,
     securityGuardrails,
     sampling,
+    maxOutputTokens,
     onProgress,
   } = options;
 
@@ -146,6 +155,9 @@ export const createSubAgentTool = (options: SubAgentToolOptions) => {
 
   const agent = new ToolLoopAgent({
     ...sampling,
+    // Spread rather than assigned, so an undeclared ceiling leaves the key off
+    // entirely instead of sending `maxOutputTokens: undefined`.
+    ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
     model,
     instructions: composedInstructions,
     // The sub-agent's own tools never pass through the parent turn's
@@ -362,7 +374,16 @@ export const createSubAgentTools = async (
   createModelFn: (
     providerId: string,
     modelId: string,
-  ) => Promise<{ model: LanguageModel; securityGuardrails: string | null }>,
+  ) => Promise<{
+    model: LanguageModel;
+    securityGuardrails: string | null;
+    /**
+     * The output ceiling the resolved `(Provider, model)` pair declares, if any.
+     * Rides back with the model because resolving it needs the sub-agent's own
+     * Provider row, which only the caller's resolver has (issue #454).
+     */
+    maxOutputTokens?: number;
+  }>,
   loadToolsFn: (
     subAgentId: string,
     toolSetIds: string[],
@@ -377,11 +398,10 @@ export const createSubAgentTools = async (
 
   for (const subAgent of subAgents) {
     try {
-      // Get the sub-agent's model and its provider's security directives.
-      const { model, securityGuardrails } = await createModelFn(
-        subAgent.providerId,
-        subAgent.modelId,
-      );
+      // Get the sub-agent's model, its provider's security directives, and
+      // the output ceiling that model declares.
+      const { model, securityGuardrails, maxOutputTokens } =
+        await createModelFn(subAgent.providerId, subAgent.modelId);
 
       // Load the sub-agent's tools
       const subAgentTools = await loadToolsFn(
@@ -400,6 +420,7 @@ export const createSubAgentTools = async (
         maxSteps: subAgent.maxSteps || 50,
         securityGuardrails,
         sampling: resolveSamplingSettings(subAgent),
+        maxOutputTokens,
         onProgress,
       });
 

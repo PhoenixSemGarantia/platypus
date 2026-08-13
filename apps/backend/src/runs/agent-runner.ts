@@ -400,6 +400,11 @@ export class AgentRunner {
         ? [stepCountIs(state.turn.stream.maxSteps), noProgress.stopCondition]
         : [stepCountIs(state.turn.stream.maxSteps)],
       abortSignal: handle.signal,
+      // The Provider's declared ceiling for this model, or undefined when it
+      // declares none — which is what Bedrock needs, since its Converse request
+      // carries no `inferenceConfig.maxTokens` at all unless one is passed
+      // (issue #454).
+      maxOutputTokens: state.turn.stream.maxOutputTokens,
       temperature: state.turn.stream.temperature,
       topP: state.turn.stream.topP,
       topK: state.turn.stream.topK,
