@@ -8,6 +8,7 @@ import {
 import { z } from "zod";
 import { logger } from "../logger.ts";
 import { describeToolInput } from "../rejected-tool-input.ts";
+import { isTruncatedByTokenLimit } from "../runs/stream-error.ts";
 import { renderSecurityGuardrails } from "../security-prompt.ts";
 import { withNormalizedResults } from "../services/tool-result.ts";
 import {
@@ -42,7 +43,22 @@ type SubAgentActivityEntry = {
 export type SubAgentActivity = {
   entries: SubAgentActivityEntry[];
   text?: string;
+  /**
+   * Set when the sub-agent's terminal finish hit its model's output ceiling, so
+   * `text` is a fragment. Named as the run path names the same fact on a Chat
+   * message, because it is the same fact one level down.
+   */
+  truncatedByTokenLimit?: true;
 };
+
+/**
+ * What the parent Agent is told when a delegate's answer stopped at the output
+ * ceiling. Addressed to the model, not the user: the parent is the one that
+ * would otherwise summarise the fragment and present it as the finding.
+ * Exported so tests assert the behaviour without restating the prose.
+ */
+export const SUB_AGENT_TRUNCATION_NOTE =
+  "[Incomplete: the sub-agent stopped at its model's output token limit, so the answer above breaks off part-way. Treat it as partial — do not present it as the sub-agent's complete finding. Delegate the remainder as a narrower task if you need it.]";
 
 /** The subset of a streamed tool-result part used to synthesize a fallback answer. */
 type ToolResultSummary = { toolName?: string; output: unknown };
@@ -181,7 +197,13 @@ export const createSubAgentTool = (options: SubAgentToolOptions) => {
             "A fully self-contained task description. Include ALL necessary context, constraints, and requirements directly. The task must be understandable without any prior conversation context.",
           ),
       }),
-      execute: async function* ({ task }, { abortSignal }) {
+      // The yield type is stated rather than inferred: an optional key present
+      // on only some of the yields makes the inferred union unreadable by
+      // `toModelOutput`, which sees every yield as a possible tool output.
+      execute: async function* (
+        { task },
+        { abortSignal },
+      ): AsyncGenerator<SubAgentActivity> {
         const result = await agent.stream({ prompt: task, abortSignal });
         const entries: SubAgentActivityEntry[] = [];
 
@@ -199,6 +221,16 @@ export const createSubAgentTool = (options: SubAgentToolOptions) => {
         // would return whatever text had accumulated — typically the model's
         // opening preamble — and the parent would read a crash as an answer.
         let streamFailure: string | undefined;
+        // Set when the delegate ran out of output budget. Unlike the two above
+        // this is not a failure — the text is real work — but the stream ends
+        // normally either way, so without reading the finish reason a fragment
+        // is indistinguishable from a finished answer (#442).
+        let truncatedByTokenLimit = false;
+        // What the provider itself called the ending. The unified reason
+        // collapses anything the adapter doesn't recognise, so this is the only
+        // record of the actual stop signal (#406), and a delegated run has no
+        // other observable surface at all.
+        let rawFinishReason: string | undefined;
 
         const completeLastRunning = (type: SubAgentActivityEntry["type"]) => {
           const entry = entries.findLast(
@@ -278,6 +310,18 @@ export const createSubAgentTool = (options: SubAgentToolOptions) => {
                 error: streamFailure,
               });
               break;
+            // The terminal finish only, as on the run path: a step inside the
+            // tool loop can end at the ceiling and the sub-agent still recover
+            // and answer in full. A cutoff is a fact about the answer rather
+            // than a step of the work, so it adds no activity entry — hence no
+            // yield either.
+            case "finish":
+              truncatedByTokenLimit = isTruncatedByTokenLimit(
+                part.finishReason,
+              );
+              rawFinishReason = part.rawFinishReason;
+              changed = false;
+              break;
             case "abort":
               streamFailure = part.reason
                 ? `Stopped before finishing: ${part.reason}`
@@ -322,14 +366,35 @@ export const createSubAgentTool = (options: SubAgentToolOptions) => {
 
         const text = aggregatedText || summarizeToolResult(lastToolResult);
 
+        if (truncatedByTokenLimit) {
+          logger.warn(
+            { subAgentId: id, subAgentName: name, rawFinishReason },
+            `Sub-agent "${name}" answer truncated at the output token limit`,
+          );
+        }
+
         // Yield (not return) the final value with text — the SDK's executeTool
         // uses for-await-of which discards generator return values.
-        yield { entries, text } satisfies SubAgentActivity;
+        yield {
+          entries,
+          text,
+          // Omitted rather than `false` when the answer is whole, so the flag's
+          // presence is the whole of its meaning wherever it is read.
+          ...(truncatedByTokenLimit ? { truncatedByTokenLimit: true } : {}),
+        } satisfies SubAgentActivity;
       },
-      toModelOutput: ({ output }) => ({
-        type: "text" as const,
-        value: output?.text ?? "Task completed.",
-      }),
+      toModelOutput: ({ output }) => {
+        const value = output?.text ?? "Task completed.";
+        return {
+          type: "text" as const,
+          // Annotated rather than thrown: the fragment is real work the parent
+          // can still use, and the run path treats a cutoff as a fact to record
+          // rather than a failure. What it must not do is read as complete.
+          value: output?.truncatedByTokenLimit
+            ? `${value}\n\n${SUB_AGENT_TRUNCATION_NOTE}`.trim()
+            : value,
+        };
+      },
     }),
   };
 };
