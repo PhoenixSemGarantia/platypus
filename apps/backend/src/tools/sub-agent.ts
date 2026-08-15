@@ -178,7 +178,13 @@ interface SubAgentToolOptions {
   description?: string;
   instructions?: string;
   model: LanguageModel;
-  tools: Record<string, Tool>;
+  /**
+   * This sub-agent's own tools, opened on first delegation rather than supplied
+   * up front: a parent that never delegates must not pay for — or warn about —
+   * the MCP servers its delegates would have used (the sub-agent's half of the
+   * Tool session, see `tool-session.ts`).
+   */
+  loadTools: () => Promise<Record<string, Tool>>;
   maxSteps?: number;
   /**
    * Free-text security directives from THIS sub-agent's resolved provider,
@@ -223,7 +229,7 @@ export const createSubAgentTool = (options: SubAgentToolOptions) => {
     description,
     instructions,
     model,
-    tools,
+    loadTools,
     maxSteps = DEFAULT_AGENT_MAX_STEPS,
     securityGuardrails,
     sampling,
@@ -354,14 +360,18 @@ export const createSubAgentTool = (options: SubAgentToolOptions) => {
           let entries: SubAgentActivityEntry[] = [];
 
           try {
+            // Inside the try: opening this delegate's own tools can fail the
+            // same way its stream can, and it reaches the parent as a tool error
+            // either way rather than an unattributed throw.
+            const tools = await loadTools();
             const result = streamText({
               ...buildModelInvocation(
                 {
                   ...plan,
-                  // Wrapped per invocation: the wrapper holds THIS run's per-step
-                  // stall timer down for the duration of each tool call, and
-                  // normalizes results so a raw Drizzle `Date` can't fail the
-                  // sub-agent's next-step prompt validation (#321 one level down).
+                  // Wrapped per invocation: the wrapper holds THIS run's
+                  // per-step stall timer down for the duration of each tool
+                  // call. Results arrive already normalized — the Tool session
+                  // that loaded them owns that (#321 one level down).
                   tools: wrapToolsWithActivity(tools, run.onActivity),
                 },
                 { abortSignal: run.handle.signal },
@@ -514,9 +524,13 @@ export type SubAgentFailure = { id: string; name?: string; reason: string };
  * A sub-agent that fails to initialize is skipped rather than failing the whole
  * turn, and is reported in `failures` so the caller can stop advertising it.
  *
+ * `loadToolsFn` is called on a delegate's first invocation rather than here, so
+ * building the delegation tools costs no connections. A failure to load them is
+ * therefore reported to the parent as a tool error, not as a `failures` entry.
+ *
  * @param subAgents List of sub-agent configurations from the database
  * @param createModelFn Factory function to create a model instance for a sub-agent
- * @param loadToolsFn Async function to load tools for a sub-agent
+ * @param loadToolsFn Async function to load tools for a sub-agent, called lazily
  * @param parentRun The run these delegates will nest inside, when there is one
  * @returns The callable tools keyed by tool name, plus the sub-agents that failed
  */
@@ -565,11 +579,11 @@ export const createSubAgentTools = async (
       const { model, securityGuardrails, maxOutputTokens } =
         await createModelFn(subAgent.providerId, subAgent.modelId);
 
-      // Load the sub-agent's tools
-      const subAgentTools = await loadToolsFn(
-        subAgent.id,
-        subAgent.toolSetIds || [],
-      );
+      // The sub-agent's tools are opened on its first delegation, not here.
+      // Memoized so a delegate called twice in one turn resolves them once.
+      let toolsPromise: Promise<Record<string, Tool>> | undefined;
+      const loadTools = () =>
+        (toolsPromise ??= loadToolsFn(subAgent.id, subAgent.toolSetIds || []));
 
       // Create the tool
       const { toolName, tool } = createSubAgentTool({
@@ -578,7 +592,7 @@ export const createSubAgentTools = async (
         description: subAgent.description || undefined,
         instructions: subAgent.instructions || undefined,
         model,
-        tools: subAgentTools,
+        loadTools,
         maxSteps: subAgent.maxSteps ?? DEFAULT_AGENT_MAX_STEPS,
         securityGuardrails,
         sampling: resolveSamplingSettings(subAgent),

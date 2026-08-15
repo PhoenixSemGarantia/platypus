@@ -99,31 +99,22 @@ describe("@platypus/tools-platform — loaded into the core registry", () => {
     }
   });
 
-  it("resolves each tool set's factory to a non-empty tool map at chat-turn time", () => {
+  it("resolves each tool set to a non-empty tool map at chat-turn time", async () => {
     for (const id of EXPECTED_IDS) {
-      const set = getToolSet(id)!;
-      expect(typeof set.tools).toBe("function");
-      const tools =
-        typeof set.tools === "function" ? set.tools(ctx) : set.tools;
+      const tools = await getToolSet(id)!.buildTurnTools(ctx);
       expect(Object.keys(tools).length).toBeGreaterThan(0);
     }
   });
 
-  it("resolves the read/write agent-management split tools as before", () => {
-    const discovery = getToolSet("agent-discovery")!;
+  it("resolves the read/write agent-management split tools as before", async () => {
     const discoveryTools =
-      typeof discovery.tools === "function"
-        ? discovery.tools(ctx)
-        : discovery.tools;
+      await getToolSet("agent-discovery")!.buildTurnTools(ctx);
     expect(Object.keys(discoveryTools).sort()).toEqual(
       ["getAgent", "listAgents", "listModelProviders", "listToolSets"].sort(),
     );
 
-    const management = getToolSet("agent-management")!;
     const managementTools =
-      typeof management.tools === "function"
-        ? management.tools(ctx)
-        : management.tools;
+      await getToolSet("agent-management")!.buildTurnTools(ctx);
     expect(Object.keys(managementTools).sort()).toEqual(
       ["createAgent", "deleteAgent", "updateAgent"].sort(),
     );

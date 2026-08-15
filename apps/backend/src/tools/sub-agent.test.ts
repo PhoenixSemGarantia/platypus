@@ -100,11 +100,19 @@ const parentScope: WorkspaceScope = workspaceScope(
   true,
 );
 
+/**
+ * A delegate's tools as the lazy loader it now takes: they are opened on first
+ * invocation, so the option is a thunk rather than a resolved map.
+ */
+const toolsOf =
+  (tools: Record<string, Tool>) => (): Promise<Record<string, Tool>> =>
+    Promise.resolve(tools);
+
 const baseOptions = {
   id: "agent-1",
   name: "Research Agent",
   model: modelOf(step([])),
-  tools: {} as Record<string, Tool>,
+  loadTools: toolsOf({}),
 };
 
 /** Build the delegate tool, run one delegation, collect every yield. */
@@ -278,12 +286,12 @@ describe("createSubAgentTool", () => {
             ...text("t1", "Sub-agent result"),
           ]),
         ),
-        tools: {
+        loadTools: toolsOf({
           webFetch: {
             inputSchema: z.object({}),
             execute: () => Promise.resolve("result"),
-          } as unknown as Tool,
-        },
+          },
+        }),
       });
 
       const final = yielded.at(-1)!;
@@ -346,12 +354,12 @@ describe("createSubAgentTool", () => {
           step(toolCall("tc1", "listBoards", "{}"), { unified: "tool-calls" }),
           step([]),
         ),
-        tools: {
+        loadTools: toolsOf({
           listBoards: {
             inputSchema: z.object({}),
             execute: () => Promise.resolve([{ id: "b1", name: "Board One" }]),
-          } as unknown as Tool,
-        },
+          },
+        }),
       });
 
       // Not silently empty — carries the tool name and the result payload so the
@@ -429,12 +437,12 @@ describe("createSubAgentTool", () => {
           step(toolCall("tc1", "webFetch", "{}"), { unified: "tool-calls" }),
           step([]),
         ),
-        tools: {
+        loadTools: toolsOf({
           webFetch: {
             inputSchema: z.object({}),
             execute: () => Promise.reject(new Error("Connection refused")),
-          } as unknown as Tool,
-        },
+          },
+        }),
       });
 
       expect(yielded.at(-1)!.entries).toContainEqual({
@@ -456,12 +464,12 @@ describe("createSubAgentTool", () => {
           step(toolCall("tc1", "webFetch", raw), { unified: "tool-calls" }),
           step([]),
         ),
-        tools: {
+        loadTools: toolsOf({
           webFetch: {
             inputSchema: z.object({ url: z.string() }),
             execute: () => Promise.resolve("ok"),
-          } as unknown as Tool,
-        },
+          },
+        }),
       });
 
       // The same message the run driver logs, so an Operator greps once and
@@ -489,12 +497,12 @@ describe("createSubAgentTool", () => {
           }),
           step([]),
         ),
-        tools: {
+        loadTools: toolsOf({
           webFetch: {
             inputSchema: z.object({ url: z.string() }),
             execute: () => Promise.resolve("page text"),
-          } as unknown as Tool,
-        },
+          },
+        }),
       });
 
       expect(
@@ -516,16 +524,16 @@ describe("createSubAgentTool", () => {
           ),
           step([]),
         ),
-        tools: {
+        loadTools: toolsOf({
           search: {
             inputSchema: z.object({}),
             execute: () => Promise.resolve("a"),
-          } as unknown as Tool,
+          },
           fetch: {
             inputSchema: z.object({}),
             execute: () => Promise.resolve("b"),
-          } as unknown as Tool,
-        },
+          },
+        }),
       });
 
       expect(yielded[0].entries).toHaveLength(1);
@@ -608,12 +616,12 @@ describe("createSubAgentTool", () => {
           step(toolCall("tc1", "noop", "{}"), { unified: "tool-calls" }),
           step(text("t1", "done")),
         ),
-        tools: {
+        loadTools: toolsOf({
           noop: {
             inputSchema: z.object({}),
             execute: () => Promise.resolve("ok"),
-          } as unknown as Tool,
-        },
+          },
+        }),
       });
 
       const finished = vi
@@ -713,12 +721,12 @@ describe("createSubAgentTool", () => {
           }),
           step(text("t1", "One card.")),
         ),
-        tools: {
+        loadTools: toolsOf({
           listCards: {
             inputSchema: z.object({}),
             execute: () => Promise.resolve([{ id: "c1" }]),
-          } as unknown as Tool,
-        },
+          },
+        }),
       });
 
       expect(yielded.at(-1)!).not.toHaveProperty("truncatedByTokenLimit");
@@ -811,46 +819,36 @@ describe("createSubAgentTool", () => {
     });
   });
 
-  // Regression for #321 recurring one level down. The parent turn normalizes
-  // tool results in its activity wrapper; a sub-agent's own tools used to go
-  // from `loadTools` straight into the delegated run untouched, so a raw
-  // Drizzle `Date` failed the sub-agent's next-step prompt validation.
-  describe("sub-agent tool results", () => {
-    it("normalizes Date values out of an async tool result", async () => {
-      const createdAt = new Date("2026-08-06T00:00:00.000Z");
-      await delegate({
-        tools: {
-          listBoards: {
-            inputSchema: z.object({}),
-            execute: () => Promise.resolve([{ id: "b1", createdAt }]),
-          } as unknown as Tool,
-        },
-      });
+  // A delegate's tools are opened when it is invoked, not when it is built, so
+  // a parent that never delegates opens none of their MCP connections. Results
+  // arrive already normalized — the Tool session that loads them owns that
+  // (#321 one level down), which is why this wrapper no longer touches them.
+  describe("sub-agent tools", () => {
+    it("opens its tools on invocation, not when the delegate is built", async () => {
+      const loadTools = vi.fn().mockResolvedValue({});
+      const { tool } = createSubAgentTool({ ...baseOptions, loadTools });
+      expect(loadTools).not.toHaveBeenCalled();
 
-      const result = await streamArgs().tools.listBoards.execute({}, {});
-      expect(result).toEqual([
-        { id: "b1", createdAt: createdAt.toISOString() },
-      ]);
+      const gen = tool.execute(
+        { task: "Do something" },
+        {} as ToolExecutionOptions<Record<string, unknown>>,
+      ) as AsyncGenerator<SubAgentActivity>;
+      for await (const _ of gen) void _;
+
+      expect(loadTools).toHaveBeenCalledTimes(1);
     });
 
-    it("normalizes a synchronous tool result too", async () => {
-      await delegate({
-        tools: {
-          now: {
-            inputSchema: z.object({}),
-            execute: () => ({ at: new Date("2026-08-06T00:00:00.000Z") }),
-          } as unknown as Tool,
-        },
-      });
-
-      expect(streamArgs().tools.now.execute({}, {})).toEqual({
-        at: "2026-08-06T00:00:00.000Z",
-      });
+    it("reports a failure to open them to the parent as a tool error", async () => {
+      await expect(
+        delegate({
+          loadTools: () => Promise.reject(new Error("MCP handshake failed")),
+        }),
+      ).rejects.toThrow(/MCP handshake failed/);
     });
 
-    it("leaves a tool without an execute function alone", async () => {
+    it("hands the delegated run the tools it opened", async () => {
       const bare = { description: "no execute" } as unknown as Tool;
-      await delegate({ tools: { bare } });
+      await delegate({ loadTools: toolsOf({ bare }) });
 
       expect(streamArgs().tools.bare).toBe(bare);
     });
@@ -947,7 +945,17 @@ describe("createSubAgentTools", () => {
     expect(result.tools).toHaveProperty("delegateToCoder");
     expect(result.failures).toEqual([]);
     expect(createModelFn).toHaveBeenCalledTimes(2);
-    expect(loadToolsFn).toHaveBeenCalledTimes(2);
+    // Building the delegates opens nothing: each sub-agent's tools are loaded
+    // if and when the parent actually delegates to it.
+    expect(loadToolsFn).not.toHaveBeenCalled();
+
+    await runTool(result.tools.delegateToResearch);
+    expect(loadToolsFn).toHaveBeenCalledExactlyOnceWith("sa-1", ["ts1"]);
+
+    // Memoized per delegate: a second delegation in the same turn reuses the
+    // tools — and the connections — the first one opened.
+    await runTool(result.tools.delegateToResearch);
+    expect(loadToolsFn).toHaveBeenCalledTimes(1);
   });
 
   // The ceiling belongs to the sub-agent's own (Provider, model) pair, which

@@ -64,6 +64,12 @@ factory, aborts startup with an error naming the Plugin and the entry that
 failed. The package types catch these mistakes in TypeScript; the same checks
 protect deployments that load JavaScript or a malformed package.
 
+Strict at boot, forgiving at runtime: once loaded, a Contribution that fails
+during a Chat turn — a Tool set factory that throws, a Web-search backend that
+times out — costs that turn its own tools and is logged against your Plugin. It
+never fails the turn, so one broken Plugin cannot take a deployment's chats down
+with it.
+
 Contribution ids are trimmed before they are namespaced, so surrounding
 whitespace never reaches a stored id.
 

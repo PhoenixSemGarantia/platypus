@@ -104,6 +104,23 @@ tools**, not throw. The core `sandbox` set is the model: in a Workspace with no
 Sandbox configured it returns an empty map and the turn proceeds without shell
 tools. Boot is strict; runtime is forgiving.
 
+If a factory throws anyway, core catches it: the turn serves none of that set's
+tools, logs a warning naming your Plugin and the set, and carries on with
+everything else the Agent was granted. One broken Tool set costs its own tools,
+never the chat. Returning an empty map is still the better habit — the outcome
+is the same, and you get to say _why_ through the
+[logger](/extending/plugin-api-and-config#logging).
+
+## Tool names
+
+<Callout type="warning">
+  Tool names are **not** namespaced the way ids are. An Agent granted two Tool
+  sets that both define `search` gets one of them — whichever sits later in its
+  list — and the other's tool is never offered to the model. Core logs a warning
+  naming both sets and both Plugins. Prefix the names in your set
+  (`acmeSearch`) if a collision with a set you don't control would be confusing.
+</Callout>
+
 ## Adding one to a core plugin
 
 If you are working in the repository rather than shipping your own package, a

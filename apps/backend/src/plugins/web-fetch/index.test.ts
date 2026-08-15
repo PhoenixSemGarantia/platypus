@@ -63,11 +63,9 @@ describe("@platypus/web-fetch plugin manifest", () => {
     const set = getToolSet("web-fetch")!;
     expect(set.name).toBe("Web Fetch");
     expect(set.category).toBe("Web");
-    // The loader binds the plugin config into a factory; resolving it (as a Chat
-    // turn would) yields the fetchUrl tool.
-    expect(typeof set.tools).toBe("function");
-    if (typeof set.tools !== "function") throw new Error("expected factory");
-    const tools = await set.tools({
+    // The loader binds the plugin config into the composed builder; resolving it
+    // (as a Chat turn would) yields the fetchUrl tool.
+    const tools = await set.buildTurnTools({
       workspaceId: "w",
       agentId: "a",
       orgId: "o",
