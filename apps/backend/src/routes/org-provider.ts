@@ -4,7 +4,6 @@ import { nanoid } from "nanoid";
 import { db } from "../index.ts";
 import { provider as providerTable } from "../db/schema.ts";
 import { providerCreateSchema, providerUpdateSchema } from "@platypus/schemas";
-import { eq, and } from "drizzle-orm";
 import { handleEmbeddingConfigChange } from "../services/embedding-invalidation.ts";
 import { dedupeModelConfigs } from "../services/model-capability.ts";
 import {
@@ -18,6 +17,7 @@ import {
 } from "../middleware/authorization.ts";
 import {
   listOrgScoped,
+  orgScopedWhere,
   requireOrgScoped,
   requireSharedDeletable,
 } from "../services/scoped-resource.ts";
@@ -114,12 +114,7 @@ orgProvider.put(
         ...data,
         updatedAt: new Date(),
       })
-      .where(
-        and(
-          eq(providerTable.id, providerId),
-          eq(providerTable.organizationId, orgId),
-        ),
-      )
+      .where(orgScopedWhere("provider", providerId, orgId))
       .returning();
 
     if (record.length === 0) {
@@ -157,12 +152,7 @@ orgProvider.delete(
 
     const result = await db
       .delete(providerTable)
-      .where(
-        and(
-          eq(providerTable.id, providerId),
-          eq(providerTable.organizationId, orgId),
-        ),
-      )
+      .where(orgScopedWhere("provider", providerId, orgId))
       .returning();
 
     if (result.length === 0) {

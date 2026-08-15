@@ -12,7 +12,6 @@ import {
   mcpUpdateSchema,
   mcpTestSchema,
 } from "@platypus/schemas";
-import { eq, and } from "drizzle-orm";
 import { requireAuth } from "../middleware/authentication.ts";
 import {
   orgCredentialsVisible,
@@ -21,6 +20,7 @@ import {
 import { scrubDeletedAgentReference } from "../services/agent-references.ts";
 import {
   listOrgScoped,
+  orgScopedWhere,
   requireOrgScoped,
   resolveOrgScoped,
   requireSharedDeletable,
@@ -121,7 +121,7 @@ orgMcp.put(
         }),
         updatedAt: new Date(),
       })
-      .where(and(eq(mcpTable.id, mcpId), eq(mcpTable.organizationId, orgId)))
+      .where(orgScopedWhere("mcp", mcpId, orgId))
       .returning();
     if (record.length === 0) {
       throw new NotFoundError("MCP not found");
@@ -149,7 +149,7 @@ orgMcp.delete(
     const result = await db.transaction(async (tx) => {
       const rows = await tx
         .delete(mcpTable)
-        .where(and(eq(mcpTable.id, mcpId), eq(mcpTable.organizationId, orgId)))
+        .where(orgScopedWhere("mcp", mcpId, orgId))
         .returning();
       if (rows.length > 0) {
         await scrubDeletedAgentReference(tx, "toolSetIds", mcpId);
@@ -273,7 +273,7 @@ orgMcp.post(
       await db
         .update(mcpTable)
         .set({ ...OAUTH_TOKEN_CLEAR_FIELDS, updatedAt: new Date() })
-        .where(eq(mcpTable.id, mcpId));
+        .where(orgScopedWhere("mcp", mcpId, orgId));
       mcpRecord = { ...mcpRecord, ...OAUTH_TOKEN_CLEAR_FIELDS };
     }
 
@@ -316,7 +316,7 @@ orgMcp.post(
     const record = await db
       .update(mcpTable)
       .set({ ...OAUTH_TOKEN_CLEAR_FIELDS, updatedAt: new Date() })
-      .where(and(eq(mcpTable.id, mcpId), eq(mcpTable.organizationId, orgId)))
+      .where(orgScopedWhere("mcp", mcpId, orgId))
       .returning();
 
     if (record.length === 0) {

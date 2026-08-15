@@ -3,7 +3,6 @@ import { sValidator } from "@hono/standard-validator";
 import { db } from "../index.ts";
 import { agent as agentTable } from "../db/schema.ts";
 import { agentUpdateSchema } from "@platypus/schemas";
-import { eq, and } from "drizzle-orm";
 import { dedupeArray } from "../utils.ts";
 import { requireAuth } from "../middleware/authentication.ts";
 import { requireOrgAccess } from "../middleware/authorization.ts";
@@ -12,6 +11,7 @@ import { SUB_AGENT_SELF_ASSIGNMENT_ERROR } from "../services/sub-agent-validatio
 import { scrubDeletedAgentReference } from "../services/agent-references.ts";
 import {
   listOrgScoped,
+  orgScopedWhere,
   requireOrgScoped,
   requireSharedDeletable,
 } from "../services/scoped-resource.ts";
@@ -98,9 +98,7 @@ orgAgent.put(
     const record = await db
       .update(agentTable)
       .set({ ...data, updatedAt: new Date() })
-      .where(
-        and(eq(agentTable.id, agentId), eq(agentTable.organizationId, orgId)),
-      )
+      .where(orgScopedWhere("agent", agentId, orgId))
       .returning();
     if (record.length === 0) {
       throw new NotFoundError("Agent not found");
@@ -130,9 +128,7 @@ orgAgent.post(
     const record = await db
       .update(agentTable)
       .set({ avatarKey: result.key, updatedAt: new Date() })
-      .where(
-        and(eq(agentTable.id, agentId), eq(agentTable.organizationId, orgId)),
-      )
+      .where(orgScopedWhere("agent", agentId, orgId))
       .returning();
     return c.json(agentWithAvatarUrl(record[0], baseUrl));
   },
@@ -155,9 +151,7 @@ orgAgent.delete(
     const record = await db
       .update(agentTable)
       .set({ avatarKey: null, updatedAt: new Date() })
-      .where(
-        and(eq(agentTable.id, agentId), eq(agentTable.organizationId, orgId)),
-      )
+      .where(orgScopedWhere("agent", agentId, orgId))
       .returning();
     return c.json(agentWithAvatarUrl(record[0], baseUrl));
   },
@@ -182,9 +176,7 @@ orgAgent.delete(
     const result = await db.transaction(async (tx) => {
       const rows = await tx
         .delete(agentTable)
-        .where(
-          and(eq(agentTable.id, agentId), eq(agentTable.organizationId, orgId)),
-        )
+        .where(orgScopedWhere("agent", agentId, orgId))
         .returning();
       if (rows.length > 0) {
         await scrubDeletedAgentReference(tx, "subAgentIds", agentId);
