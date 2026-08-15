@@ -599,9 +599,8 @@ describe("ProviderForm Web-search backend selector", () => {
     { backend: "acme-search.searx", name: "SearXNG", plugin: "acme-search" },
   ];
 
-  /** Renders the edit form and opens the Advanced settings section the field sits in. */
-  const renderWithAdvancedOpen = (overrides: Partial<Provider>) => {
-    loadedProvider = {
+  const aProvider = (overrides: Partial<Provider>) =>
+    ({
       id: "p1",
       name: "vLLM",
       providerType: "OpenAI",
@@ -612,7 +611,11 @@ describe("ProviderForm Web-search backend selector", () => {
       taskModelId: "qwen",
       memoryExtractionModelId: "qwen",
       ...overrides,
-    } as unknown as Provider;
+    }) as unknown as Provider;
+
+  /** Renders the edit form and opens the Advanced settings section the field sits in. */
+  const renderWithAdvancedOpen = (overrides: Partial<Provider>) => {
+    loadedProvider = aProvider(overrides);
     const result = render(<ProviderForm orgId="org1" providerId="p1" />);
     fireEvent.click(screen.getByRole("button", { name: "Toggle" }));
     return result;
@@ -762,6 +765,28 @@ describe("ProviderForm Web-search backend selector", () => {
 
     expect(webBackendSelect()).not.toBeNull();
     expect(webBackendSelect()).toHaveTextContent("None");
+  });
+
+  // The form is reused across Providers within one mount, and the latch above is
+  // scoped to the Provider whose stale id was cleared. Carried into the next one,
+  // it holds the selector open on a deployment with nothing installed — the dead
+  // "None" the visibility rule exists to avoid.
+  it("drops the latch when the form switches to another Provider", async () => {
+    const { rerender } = renderWithAdvancedOpen({
+      webBackend: "gone.searx",
+    } as Partial<Provider>);
+
+    await selectNoBackend();
+    expect(webBackendSelect()).not.toBeNull();
+
+    loadedProvider = aProvider({
+      id: "p2",
+      name: "Ollama",
+      webBackend: null,
+    } as Partial<Provider>);
+    rerender(<ProviderForm orgId="org1" providerId="p2" />);
+
+    await waitFor(() => expect(webBackendSelect()).toBeNull());
   });
 
   it("round-trips the stored backend through a save", async () => {

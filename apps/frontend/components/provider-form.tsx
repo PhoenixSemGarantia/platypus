@@ -84,6 +84,7 @@ import {
 import { toast } from "sonner";
 import { useBackendUrl } from "@/app/client-context";
 import { useAuth } from "@/components/auth-provider";
+import { useResetOnChange } from "@/hooks/use-reset-on-change";
 
 /**
  * Per-field help for a model row. The fields each need a paragraph of
@@ -489,11 +490,6 @@ const ProviderForm = ({
 
   const formScope = workspaceId ? "workspace" : "organization";
 
-  // Reset initialization when providerId changes
-  useEffect(() => {
-    hasInitialized.current = false;
-  }, [providerId]);
-
   const [formData, setFormData] = useState<ProviderFormData>({
     providerType: "OpenAI",
     name: "",
@@ -611,6 +607,16 @@ const ProviderForm = ({
   // thing that turns `webBackendFieldApplies` false.
   const [webBackendEdited, setWebBackendEdited] = useState(false);
   const showWebBackendField = webBackendFieldApplies || webBackendEdited;
+
+  // Drop everything the previous Provider left behind, so switching Providers
+  // within one mount starts the form over: the initialisation flag the effect
+  // below reads, and the latch above — which belongs to the Provider whose field
+  // was edited, and carried into the next one would hold the selector open for an
+  // edit that Provider never had.
+  useResetOnChange(providerId, () => {
+    hasInitialized.current = false;
+    setWebBackendEdited(false);
+  });
 
   useEffect(() => {
     if (provider && !hasInitialized.current) {
