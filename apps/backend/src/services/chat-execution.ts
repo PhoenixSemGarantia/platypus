@@ -60,31 +60,7 @@ import {
   type ToolActivityEvent,
 } from "./tool-activity.ts";
 import type { ParentRunContext } from "../runs/types.ts";
-
-// --- Errors ---
-
-/**
- * Thrown when the caller's request is malformed or references resources in an
- * inconsistent way (e.g. a model id not enabled on the chosen provider).
- * The route maps this to a 400 response.
- */
-export class ValidationError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "ValidationError";
-  }
-}
-
-/**
- * Thrown when a referenced record does not exist (Agent, Provider, Workspace).
- * The route maps this to a 404 response.
- */
-export class NotFoundError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "NotFoundError";
-  }
-}
+import { NotFoundError, ValidationError } from "../errors.ts";
 
 // --- Types ---
 
@@ -699,8 +675,8 @@ export const prepareChatTurn = async (
  * if any attached file (fresh upload or history) is neither natively accepted,
  * text-like, nor a document extraction can convert to text (#342 — a freshly
  * uploaded document is extracted here to prove it, so a scanned PDF is refused
- * before it can enter history). Throws `FileValidationError`, which the chat
- * route maps to a 400 naming the offending file(s).
+ * before it can enter history). Throws `FileValidationError`, which the
+ * central `onError` (ADR-0010) maps to a 400 naming the offending file(s).
  *
  * A no-op when the turn carries no file parts (the common case, including all
  * headless runs), so it adds no lookups there. If model resolution itself fails
