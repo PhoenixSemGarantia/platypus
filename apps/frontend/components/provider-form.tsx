@@ -1353,11 +1353,16 @@ const ProviderForm = ({
                     <FieldLabel htmlFor="nativeSearchEnabled">
                       Native web search
                     </FieldLabel>
+                    {/* The Web-search backend caveat only when that field is
+                    actually on the form — on a deployment with no search plugin
+                    installed it points at a control the reader cannot see. */}
                     <FieldDescription>
                       Use this provider&apos;s built-in web_search tool. Turn
                       off for endpoints that don&apos;t implement it (e.g. vLLM,
-                      Ollama, LiteLLM) — but not if you have selected a
-                      Web-search backend below, which this switch disables too.
+                      Ollama, LiteLLM)
+                      {showWebBackendField
+                        ? " — but not if you have selected a Web-search backend below, which this switch disables too."
+                        : "."}{" "}
                       This also hides the search toggle in chat.
                     </FieldDescription>
                   </div>

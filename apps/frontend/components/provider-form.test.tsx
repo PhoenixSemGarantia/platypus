@@ -779,6 +779,32 @@ describe("ProviderForm Web-search backend selector", () => {
     ).toBeNull();
   });
 
+  // The Native web search description carries a caveat about the selector below
+  // it. On a deployment with no search plugin installed the selector is not
+  // rendered, and the caveat sends the reader looking for a field that is not
+  // there.
+  it("does not mention the backend selector where it is not rendered", () => {
+    renderWithAdvancedOpen({});
+
+    expect(webBackendSelect()).toBeNull();
+    expect(
+      screen.queryByText(/selected a Web-search backend below/),
+    ).toBeNull();
+    expect(
+      screen.getByText(/Use this provider's built-in web_search tool/),
+    ).toBeInTheDocument();
+  });
+
+  it("mentions the backend selector once it is on the form", () => {
+    webBackendCatalog = CATALOG;
+    renderWithAdvancedOpen({});
+
+    expect(webBackendSelect()).not.toBeNull();
+    expect(
+      screen.getByText(/selected a Web-search backend below/),
+    ).toBeInTheDocument();
+  });
+
   // The recovery path for a stale id on a deployment where nothing is installed:
   // choosing None empties `webBackend`, which is the same value the field's own
   // visibility condition reads. Unlatched, the control unmounted here — mid-
