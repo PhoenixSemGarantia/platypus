@@ -5,7 +5,7 @@ import { db } from "../index.ts";
 import { skill as skillTable } from "../db/schema.ts";
 import { skillCreateSchema, skillUpdateSchema } from "@platypus/schemas";
 import { requireAuth } from "../middleware/authentication.ts";
-import { requireOrgAccess } from "../middleware/authorization.ts";
+import { orgScopeOf, requireOrgAccess } from "../middleware/authorization.ts";
 import { scrubDeletedAgentReference } from "../services/agent-references.ts";
 import {
   listOrgScoped,
@@ -29,7 +29,7 @@ orgSkill.post(
   requireOrgAccess(["admin"]),
   sValidator("json", skillCreateSchema),
   async (c) => {
-    const orgId = c.req.param("orgId")!;
+    const { orgId } = orgScopeOf(c);
     // Agent associations are a workspace concern; org-scoped Skills carry none.
     const { agentIds: _agentIds, ...data } = c.req.valid("json");
 
@@ -52,14 +52,14 @@ orgSkill.post(
 
 /** List org-scoped Skills */
 orgSkill.get("/", requireAuth, requireOrgAccess(), async (c) => {
-  const orgId = c.req.param("orgId")!;
+  const { orgId } = orgScopeOf(c);
   const results = await listOrgScoped(db, "skill", orgId);
   return c.json({ results });
 });
 
 /** Get an org-scoped Skill by ID */
 orgSkill.get("/:skillId", requireAuth, requireOrgAccess(), async (c) => {
-  const orgId = c.req.param("orgId")!;
+  const { orgId } = orgScopeOf(c);
   const skillId = c.req.param("skillId");
   const record = await requireOrgScoped(db, "skill", skillId, orgId);
   return c.json(record);
@@ -72,7 +72,7 @@ orgSkill.put(
   requireOrgAccess(["admin"]),
   sValidator("json", skillUpdateSchema),
   async (c) => {
-    const orgId = c.req.param("orgId")!;
+    const { orgId } = orgScopeOf(c);
     const skillId = c.req.param("skillId");
     const { agentIds: _agentIds, ...data } = c.req.valid("json");
 
@@ -101,7 +101,7 @@ orgSkill.delete(
   requireAuth,
   requireOrgAccess(["admin"]),
   async (c) => {
-    const orgId = c.req.param("orgId")!;
+    const { orgId } = orgScopeOf(c);
     const skillId = c.req.param("skillId");
 
     // A Shared resource cannot be deleted while anything still points at it —

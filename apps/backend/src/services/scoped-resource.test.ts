@@ -23,7 +23,7 @@ import {
 } from "./scoped-resource.ts";
 import { NotFoundError, LockedError, ConflictError } from "../errors.ts";
 
-const ctx = { orgId: "org-1", wsId: "ws-1" };
+const ctx = { orgId: "org-1", workspaceId: "ws-1" };
 
 describe("ScopedResource module", () => {
   beforeEach(() => {

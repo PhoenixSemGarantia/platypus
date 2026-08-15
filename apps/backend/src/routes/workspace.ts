@@ -13,8 +13,10 @@ import {
 import { eq, and } from "drizzle-orm";
 import { requireAuth } from "../middleware/authentication.ts";
 import {
+  orgScopeOf,
   requireOrgAccess,
   requireWorkspaceAccess,
+  workspaceScopeOf,
 } from "../middleware/authorization.ts";
 import { resolveScoped } from "../services/scoped-resource.ts";
 import type { Variables } from "../server.ts";
@@ -30,7 +32,7 @@ workspace.post(
   sValidator("json", workspaceCreateSchema),
   async (c) => {
     const user = c.get("user")!;
-    const orgId = c.req.param("orgId")!;
+    const { orgId } = orgScopeOf(c);
     const data = c.req.valid("json");
 
     // ownerId is admin-assignable (ADR-0008); default to the calling admin
@@ -72,7 +74,7 @@ workspace.post(
 
 /** List all workspaces */
 workspace.get("/", requireAuth, requireOrgAccess(), async (c) => {
-  const orgId = c.req.param("orgId")!;
+  const { orgId } = orgScopeOf(c);
   const orgMembership = c.get("orgMembership")!;
   const user = c.get("user")!;
 
@@ -105,7 +107,7 @@ workspace.get(
   requireOrgAccess(),
   requireWorkspaceAccess,
   async (c) => {
-    const workspaceId = c.req.param("workspaceId");
+    const { workspaceId } = workspaceScopeOf(c);
     const record = await db
       .select()
       .from(workspaceTable)
@@ -126,8 +128,8 @@ workspace.put(
   requireWorkspaceAccess,
   sValidator("json", workspaceUpdateSchema),
   async (c) => {
-    const orgId = c.req.param("orgId")!;
-    const workspaceId = c.req.param("workspaceId");
+    const scope = workspaceScopeOf(c);
+    const { workspaceId } = scope;
     const data = c.req.valid("json");
 
     // Delegation flags (ADR-0006) are admin-only. A non-admin owner may edit
@@ -151,7 +153,7 @@ workspace.put(
         db,
         "provider",
         data.memoryExtractionProviderId,
-        { orgId, wsId: workspaceId },
+        scope,
       );
 
       if (!resolved) {
@@ -174,7 +176,7 @@ workspace.put(
         db,
         "provider",
         data.memoryEmbeddingProviderId,
-        { orgId, wsId: workspaceId },
+        scope,
       );
 
       if (!resolved) {
@@ -216,7 +218,7 @@ workspace.delete(
   requireOrgAccess(),
   requireWorkspaceAccess,
   async (c) => {
-    const workspaceId = c.req.param("workspaceId");
+    const { workspaceId } = workspaceScopeOf(c);
     // Best-effort sandbox teardown before the DB cascade fires. Never throws;
     // failures are recorded in sandbox_teardown_failure (ADR-0001).
     await destroyWorkspaceSandboxes(workspaceId);

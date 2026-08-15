@@ -10,6 +10,7 @@ import {
   requireOrgAccess,
   requireWorkspaceAccess,
   requireWorkspaceConfigAccess,
+  workspaceScopeOf,
 } from "../middleware/authorization.ts";
 import type { Variables } from "../server.ts";
 import { destroySandboxRow } from "../sandbox/teardown.ts";
@@ -136,7 +137,7 @@ sandbox.get(
   requireOrgAccess(),
   requireWorkspaceAccess,
   async (c) => {
-    const workspaceId = c.req.param("workspaceId")!;
+    const { workspaceId } = workspaceScopeOf(c);
     const record = await db
       .select()
       .from(sandboxTable)
@@ -159,7 +160,7 @@ sandbox.post(
   requireSandboxAdmin,
   sValidator("json", sandboxCreateSchema),
   async (c) => {
-    const workspaceId = c.req.param("workspaceId")!;
+    const { workspaceId } = workspaceScopeOf(c);
     const data = c.req.valid("json");
 
     const configError = validateSandboxConfig(data.backend, data.config);
@@ -240,7 +241,7 @@ sandbox.put(
   requireWorkspaceAccess,
   sValidator("json", sandboxUpdateSchema),
   async (c) => {
-    const workspaceId = c.req.param("workspaceId")!;
+    const { workspaceId } = workspaceScopeOf(c);
     const data = c.req.valid("json");
     const force = c.req.query("force") === "true";
     const isAdmin = c.get("orgMembership")?.role === "admin";
@@ -378,7 +379,7 @@ sandbox.delete(
   requireWorkspaceAccess,
   requireSandboxAdmin,
   async (c) => {
-    const workspaceId = c.req.param("workspaceId")!;
+    const { workspaceId } = workspaceScopeOf(c);
     const force = c.req.query("force") === "true";
 
     const existing = await db

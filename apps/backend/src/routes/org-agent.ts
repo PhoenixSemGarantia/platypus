@@ -5,7 +5,7 @@ import { agent as agentTable } from "../db/schema.ts";
 import { agentUpdateSchema } from "@platypus/schemas";
 import { dedupeArray } from "../utils.ts";
 import { requireAuth } from "../middleware/authentication.ts";
-import { requireOrgAccess } from "../middleware/authorization.ts";
+import { orgScopeOf, requireOrgAccess } from "../middleware/authorization.ts";
 import { findNonSharedReferences } from "../services/agent-scope-validation.ts";
 import { SUB_AGENT_SELF_ASSIGNMENT_ERROR } from "../services/sub-agent-validation.ts";
 import { scrubDeletedAgentReference } from "../services/agent-references.ts";
@@ -38,7 +38,7 @@ function agentWithAvatarUrl(
 
 /** List org-scoped Agents */
 orgAgent.get("/", requireAuth, requireOrgAccess(), async (c) => {
-  const orgId = c.req.param("orgId")!;
+  const { orgId } = orgScopeOf(c);
   const baseUrl = getOrigin(c);
   const results = await listOrgScoped(db, "agent", orgId);
   return c.json({
@@ -48,7 +48,7 @@ orgAgent.get("/", requireAuth, requireOrgAccess(), async (c) => {
 
 /** Get an org-scoped Agent by ID */
 orgAgent.get("/:agentId", requireAuth, requireOrgAccess(), async (c) => {
-  const orgId = c.req.param("orgId")!;
+  const { orgId } = orgScopeOf(c);
   const agentId = c.req.param("agentId");
   const baseUrl = getOrigin(c);
   const record = await requireOrgScoped(db, "agent", agentId, orgId);
@@ -62,7 +62,7 @@ orgAgent.put(
   requireOrgAccess(["admin"]),
   sValidator("json", agentUpdateSchema),
   async (c) => {
-    const orgId = c.req.param("orgId")!;
+    const { orgId } = orgScopeOf(c);
     const agentId = c.req.param("agentId");
     const data = c.req.valid("json");
     const baseUrl = getOrigin(c);
@@ -113,7 +113,7 @@ orgAgent.post(
   requireAuth,
   requireOrgAccess(["admin"]),
   async (c) => {
-    const orgId = c.req.param("orgId")!;
+    const { orgId } = orgScopeOf(c);
     const agentId = c.req.param("agentId");
     const baseUrl = getOrigin(c);
 
@@ -140,7 +140,7 @@ orgAgent.delete(
   requireAuth,
   requireOrgAccess(["admin"]),
   async (c) => {
-    const orgId = c.req.param("orgId")!;
+    const { orgId } = orgScopeOf(c);
     const agentId = c.req.param("agentId");
     const baseUrl = getOrigin(c);
 
@@ -163,7 +163,7 @@ orgAgent.delete(
   requireAuth,
   requireOrgAccess(["admin"]),
   async (c) => {
-    const orgId = c.req.param("orgId")!;
+    const { orgId } = orgScopeOf(c);
     const agentId = c.req.param("agentId");
 
     // A Shared resource cannot be deleted while anything still points at it —

@@ -6,11 +6,8 @@ import { db } from "../index.ts";
 import { trigger as triggerTable } from "../db/schema.ts";
 import { validateCronExpression } from "../utils/cron.ts";
 import { buildResourceUrl } from "../utils/resource-url.ts";
-import {
-  listScoped,
-  resolveScoped,
-  type ScopeContext,
-} from "../services/scoped-resource.ts";
+import { listScoped, resolveScoped } from "../services/scoped-resource.ts";
+import type { ScopeContext } from "../scope.ts";
 
 export function createTriggerTools(
   workspaceId: string,
@@ -20,7 +17,7 @@ export function createTriggerTools(
   // A trigger may point at any Agent this Workspace can run — its own, or a
   // Shared one attached to it (ADR-0007), which is exactly what the Chat turn
   // resolves when the trigger fires.
-  const ctx: ScopeContext = { orgId, wsId: workspaceId };
+  const ctx: ScopeContext = { orgId, workspaceId };
 
   const listAgents = tool({
     description:

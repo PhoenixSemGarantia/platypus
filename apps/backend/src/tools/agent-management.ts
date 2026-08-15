@@ -8,8 +8,8 @@ import { validateSubAgentAssignment } from "../services/sub-agent-validation.ts"
 import {
   resolveScoped,
   workspaceMutationLockedMessage,
-  type ScopeContext,
 } from "../services/scoped-resource.ts";
+import type { ScopeContext } from "../scope.ts";
 import { getStorage } from "../storage/index.ts";
 import { buildResourceUrl } from "../utils/resource-url.ts";
 
@@ -30,7 +30,7 @@ export function createAgentManagementTools(
   orgId: string,
   frontendUrl: string | undefined,
 ): Record<string, Tool> {
-  const ctx: ScopeContext = { orgId, wsId: workspaceId };
+  const ctx: ScopeContext = { orgId, workspaceId };
 
   /**
    * Resolves an Agent this Workspace may write to, for the mutating tools. An
@@ -103,7 +103,7 @@ export function createAgentManagementTools(
       if (data.subAgentIds && data.subAgentIds.length > 0) {
         const newId = nanoid();
         const validation = await validateSubAgentAssignment(
-          { orgId, wsId: workspaceId },
+          { orgId, workspaceId },
           newId,
           data.subAgentIds,
         );

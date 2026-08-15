@@ -4,11 +4,8 @@ import { db } from "../index.ts";
 import { getToolSets } from "../tools/index.ts";
 import { buildResourceUrl } from "../utils/resource-url.ts";
 import { providerModelReferences } from "../services/model-capability.ts";
-import {
-  listScoped,
-  resolveScoped,
-  type ScopeContext,
-} from "../services/scoped-resource.ts";
+import { listScoped, resolveScoped } from "../services/scoped-resource.ts";
+import type { ScopeContext } from "../scope.ts";
 import type { Provider } from "@platypus/schemas";
 
 /**
@@ -48,7 +45,7 @@ export function createAgentDiscoveryTools(
   orgId: string,
   frontendUrl: string | undefined,
 ): Record<string, Tool> {
-  const ctx: ScopeContext = { orgId, wsId: workspaceId };
+  const ctx: ScopeContext = { orgId, workspaceId };
 
   const listToolSets = tool({
     description:

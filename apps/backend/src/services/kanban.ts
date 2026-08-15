@@ -16,6 +16,7 @@ import {
 } from "../db/schema.ts";
 import { user } from "../db/auth-schema.ts";
 import { NotFoundError, ValidationError } from "../errors.ts";
+import type { ScopeContext } from "../scope.ts";
 import { dispatchEvent } from "./event-dispatch.ts";
 import { listScopedByIds } from "./scoped-resource.ts";
 import { calculateCardPosition } from "../utils/kanban-positioning.ts";
@@ -44,14 +45,14 @@ import {
 export type KanbanActor = { userId: string } | { agentId: string };
 
 /**
- * Where a lookup may reach. `boardId` narrows it to a single board (the HTTP
+ * Where a lookup may reach: a {@link ScopeContext} — so the HTTP surface hands
+ * over the `WorkspaceScope` its middleware resolved, unchanged — plus an
+ * optional board. `boardId` narrows the reach to a single board (the HTTP
  * surface, which addresses cards through their board); left out, any board in
  * the Workspace matches (the Tool surface, whose Agent works Workspace-wide).
  * Either way the Workspace is the outer boundary — nothing resolves across it.
  */
-export type KanbanScope = {
-  orgId: string;
-  workspaceId: string;
+export type KanbanScope = ScopeContext & {
   boardId?: string;
 };
 
@@ -368,7 +369,7 @@ export const pruneCardLabelsForBoard = async (
 export const requireValidAssignees = async (
   database: Database,
   assignees: KanbanCardAssignee[] | undefined,
-  scope: Pick<KanbanScope, "orgId" | "workspaceId">,
+  scope: ScopeContext,
 ): Promise<void> => {
   if (!assignees || assignees.length === 0) return;
 
@@ -393,10 +394,7 @@ export const requireValidAssignees = async (
           .from(user)
           .where(and(eq(user.role, "admin"), inArray(user.id, userIds)))
       : Promise.resolve([]),
-    listScopedByIds(database, "agent", agentIds, {
-      orgId: scope.orgId,
-      wsId: scope.workspaceId,
-    }),
+    listScopedByIds(database, "agent", agentIds, scope),
   ]);
 
   // Super admins may hold no org membership record, so the two sets combine.

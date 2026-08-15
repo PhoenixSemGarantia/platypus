@@ -7,7 +7,7 @@ import {
 } from "../db/schema.ts";
 import { and, eq } from "drizzle-orm";
 import { requireAuth } from "../middleware/authentication.ts";
-import { requireOrgAccess } from "../middleware/authorization.ts";
+import { orgScopeOf, requireOrgAccess } from "../middleware/authorization.ts";
 import { isUniqueViolation } from "../errors.ts";
 import {
   isScopedResourceType,
@@ -28,7 +28,7 @@ const orgAttachment = new Hono<{ Variables: Variables }>();
  * attachment with its workspace name so the org surface can show "Shared with".
  */
 orgAttachment.get("/", requireAuth, requireOrgAccess(["admin"]), async (c) => {
-  const orgId = c.req.param("orgId")!;
+  const { orgId } = orgScopeOf(c);
   const resourceType = c.req.query("resourceType");
   const resourceId = c.req.query("resourceId");
 
@@ -65,7 +65,7 @@ orgAttachment.get("/", requireAuth, requireOrgAccess(["admin"]), async (c) => {
 
 /** Attach an org-scoped Shared resource to a workspace (admin only) */
 orgAttachment.post("/", requireAuth, requireOrgAccess(["admin"]), async (c) => {
-  const orgId = c.req.param("orgId")!;
+  const { orgId } = orgScopeOf(c);
   const body = (await c.req.json().catch(() => ({}))) as {
     resourceType?: string;
     resourceId?: string;
@@ -128,7 +128,7 @@ orgAttachment.delete(
   requireAuth,
   requireOrgAccess(["admin"]),
   async (c) => {
-    const orgId = c.req.param("orgId")!;
+    const { orgId } = orgScopeOf(c);
     const resourceType = c.req.param("resourceType");
     const resourceId = c.req.param("resourceId");
     const workspaceId = c.req.param("workspaceId");

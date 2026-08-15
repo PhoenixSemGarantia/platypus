@@ -31,6 +31,7 @@ import {
   requireWorkspaceAccess,
   requireWorkspaceOwner,
   isSuperAdmin,
+  workspaceScopeOf,
 } from "../middleware/authorization.ts";
 import type { Variables } from "../server.ts";
 import { NotFoundError } from "../errors.ts";
@@ -61,10 +62,12 @@ import {
 
 const kanban = new Hono<{ Variables: Variables }>();
 
-/** Everything the module needs to place this request: which board, in which Workspace. */
+/**
+ * Everything the module needs to place this request: the Workspace the
+ * middleware already resolved, narrowed to the board this route addresses.
+ */
 const scopeOf = (c: Context<{ Variables: Variables }>): KanbanScope => ({
-  orgId: c.req.param("orgId")!,
-  workspaceId: c.req.param("workspaceId")!,
+  ...workspaceScopeOf(c),
   boardId: c.req.param("boardId"),
 });
 
@@ -83,7 +86,7 @@ kanban.get(
   requireOrgAccess(),
   requireWorkspaceAccess,
   async (c) => {
-    const workspaceId = c.req.param("workspaceId")!;
+    const { workspaceId } = workspaceScopeOf(c);
     const results = await db
       .select()
       .from(kanbanBoardTable)
@@ -103,7 +106,7 @@ kanban.post(
   sValidator("json", kanbanBoardCreateSchema),
   async (c) => {
     const data = c.req.valid("json");
-    const workspaceId = c.req.param("workspaceId")!;
+    const { workspaceId } = workspaceScopeOf(c);
     const id = nanoid();
     const now = new Date();
 
@@ -172,7 +175,7 @@ kanban.put(
   sValidator("json", kanbanBoardUpdateSchema),
   async (c) => {
     const boardId = c.req.param("boardId");
-    const workspaceId = c.req.param("workspaceId")!;
+    const { workspaceId } = workspaceScopeOf(c);
     const data = c.req.valid("json");
 
     // Labels the update drops are gone from the board, so the cards using them
@@ -211,7 +214,7 @@ kanban.delete(
   requireWorkspaceOwner,
   async (c) => {
     const boardId = c.req.param("boardId");
-    const workspaceId = c.req.param("workspaceId")!;
+    const { workspaceId } = workspaceScopeOf(c);
 
     const result = await db
       .delete(kanbanBoardTable)

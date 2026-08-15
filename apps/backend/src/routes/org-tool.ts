@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { getToolSets } from "../tools/index.ts";
 import { db } from "../index.ts";
 import { requireAuth } from "../middleware/authentication.ts";
-import { requireOrgAccess } from "../middleware/authorization.ts";
+import { orgScopeOf, requireOrgAccess } from "../middleware/authorization.ts";
 import { listOrgScoped } from "../services/scoped-resource.ts";
 import type { Variables } from "../server.ts";
 
@@ -14,7 +14,7 @@ import type { Variables } from "../server.ts";
 const orgTool = new Hono<{ Variables: Variables }>();
 
 orgTool.get("/", requireAuth, requireOrgAccess(), async (c) => {
-  const orgId = c.req.param("orgId")!;
+  const { orgId } = orgScopeOf(c);
 
   const toolSetsList = getToolSets().map((toolSet) => ({
     id: toolSet.id,
