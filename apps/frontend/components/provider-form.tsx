@@ -1451,8 +1451,11 @@ const ProviderForm = ({
                   the switch — and says so instead.
                   On a Provider whose switch is not rendered the same warning must
                   not point at it: the only way into that state, and out of it, is
-                  the Provider API. */}
-                  {!formData.nativeSearchEnabled && (
+                  the Provider API.
+                  Both need a backend actually selected. The field renders for every
+                  Provider once a search plugin is installed, so without this gate
+                  "this backend" names something that is not there. */}
+                  {!!formData.webBackend && !formData.nativeSearchEnabled && (
                     <FieldDescription className="text-destructive">
                       {nativeSearchSwitchShown ? (
                         <>
