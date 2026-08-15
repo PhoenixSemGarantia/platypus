@@ -4,7 +4,7 @@ import type {
 } from "@platypuschat/plugin-sdk";
 import { PLUGIN_API_VERSION } from "@platypuschat/plugin-sdk";
 import {
-  DockerSandboxBackend,
+  createDockerSandboxBackend,
   dockerPluginConfigSchema,
   dockerSandboxConfigSchema,
   dockerSandboxCredentialsSchema,
@@ -30,7 +30,7 @@ const dockerBackend: SandboxBackendContribution<
   configSchema: dockerSandboxConfigSchema,
   credentialsSchema: dockerSandboxCredentialsSchema,
   create: (config, credentials) =>
-    new DockerSandboxBackend(config, credentials),
+    createDockerSandboxBackend(config, credentials),
 };
 
 export const plugin: PlatypusPlugin = {
