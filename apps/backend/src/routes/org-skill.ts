@@ -4,12 +4,12 @@ import { nanoid } from "nanoid";
 import { db } from "../index.ts";
 import { skill as skillTable } from "../db/schema.ts";
 import { skillCreateSchema, skillUpdateSchema } from "@platypus/schemas";
-import { eq, and } from "drizzle-orm";
 import { requireAuth } from "../middleware/authentication.ts";
 import { requireOrgAccess } from "../middleware/authorization.ts";
 import { scrubDeletedAgentReference } from "../services/agent-references.ts";
 import {
   listOrgScoped,
+  orgScopedWhere,
   requireOrgScoped,
   requireSharedDeletable,
 } from "../services/scoped-resource.ts";
@@ -86,9 +86,7 @@ orgSkill.put(
         body: data.body,
         updatedAt: new Date(),
       })
-      .where(
-        and(eq(skillTable.id, skillId), eq(skillTable.organizationId, orgId)),
-      )
+      .where(orgScopedWhere("skill", skillId, orgId))
       .returning();
     if (record.length === 0) {
       throw new NotFoundError("Skill not found");
@@ -116,9 +114,7 @@ orgSkill.delete(
     const result = await db.transaction(async (tx) => {
       const rows = await tx
         .delete(skillTable)
-        .where(
-          and(eq(skillTable.id, skillId), eq(skillTable.organizationId, orgId)),
-        )
+        .where(orgScopedWhere("skill", skillId, orgId))
         .returning();
       if (rows.length > 0) {
         await scrubDeletedAgentReference(tx, "skillIds", skillId);
