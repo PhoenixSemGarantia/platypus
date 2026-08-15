@@ -3,8 +3,12 @@ import { sValidator } from "@hono/standard-validator";
 import { z } from "zod";
 import { db } from "../index.ts";
 import { chat as chatTable } from "../db/schema.ts";
-import { NotFoundError, ValidationError } from "../services/chat-execution.ts";
+import {
+  NotFoundError as ChatTurnNotFoundError,
+  ValidationError,
+} from "../services/chat-execution.ts";
 import { FileValidationError } from "../services/file-gate.ts";
+import { NotFoundError } from "../errors.ts";
 import { chatSubmitSchema, chatUpdateSchema } from "@platypus/schemas";
 import { and, count, desc, eq, or, sql } from "drizzle-orm";
 import { requireAuth } from "../middleware/authentication.ts";
@@ -14,6 +18,11 @@ import {
   requireWorkspaceOwner,
   workspaceScopeOf,
 } from "../middleware/authorization.ts";
+import {
+  requireOwned,
+  updateOwned,
+  ownedWhere,
+} from "../services/workspace-resource.ts";
 import type { Variables } from "../server.ts";
 import { type PlatypusUIMessage } from "../types.ts";
 import { rewriteStorageUrls, deleteFiles } from "../storage/utils.ts";
@@ -97,19 +106,9 @@ chat.get(
     const chatId = c.req.param("chatId");
     const { workspaceId } = workspaceScopeOf(c);
 
-    const record = await db
-      .select()
-      .from(chatTable)
-      .where(
-        and(eq(chatTable.id, chatId), eq(chatTable.workspaceId, workspaceId)),
-      )
-      .limit(1);
-    if (record.length === 0) {
-      return c.json({ error: "Chat not found" }, 404);
-    }
+    const chat = await requireOwned(db, "chat", chatId, workspaceId);
 
     // Rewrite storage:// URLs to HTTP URLs
-    const chat = record[0];
     const origin = getOrigin(c);
     if (chat.messages) {
       chat.messages = rewriteStorageUrls(
@@ -166,7 +165,7 @@ chat.post(
       if (error instanceof ValidationError) {
         return c.json({ message: error.message }, 400);
       }
-      if (error instanceof NotFoundError) {
+      if (error instanceof ChatTurnNotFoundError) {
         return c.json({ message: error.message }, 404);
       }
       throw error;
@@ -188,17 +187,7 @@ chat.post(
     // This is what makes a cross-workspace cancel return 404 rather than
     // silently no-op — runIds (which equal chat IDs) are otherwise the
     // only thing the registry sees.
-    const record = await db
-      .select({ id: chatTable.id })
-      .from(chatTable)
-      .where(
-        and(eq(chatTable.id, chatId), eq(chatTable.workspaceId, workspaceId)),
-      )
-      .limit(1);
-
-    if (record.length === 0) {
-      return c.json({ error: "Chat not found" }, 404);
-    }
+    await requireOwned(db, "chat", chatId, workspaceId);
 
     // Idempotent: cancel returns false for unknown / already-finished
     // runs, but we still respond 200 so flaky clients can safely retry.
@@ -218,29 +207,15 @@ chat.delete(
     const { workspaceId } = workspaceScopeOf(c);
 
     // First fetch the chat to get its messages for file cleanup
-    const chatRecord = await db
-      .select()
-      .from(chatTable)
-      .where(
-        and(eq(chatTable.id, chatId), eq(chatTable.workspaceId, workspaceId)),
-      )
-      .limit(1);
-
-    if (chatRecord.length === 0) {
-      return c.json({ error: "Chat not found" }, 404);
-    }
+    const chatRecord = await requireOwned(db, "chat", chatId, workspaceId);
 
     // Delete associated files from storage (best-effort)
-    if (chatRecord[0].messages) {
-      await deleteFiles(chatRecord[0].messages as PlatypusUIMessage[]);
+    if (chatRecord.messages) {
+      await deleteFiles(chatRecord.messages as PlatypusUIMessage[]);
     }
 
     // Delete the chat record
-    await db
-      .delete(chatTable)
-      .where(
-        and(eq(chatTable.id, chatId), eq(chatTable.workspaceId, workspaceId)),
-      );
+    await db.delete(chatTable).where(ownedWhere("chat", chatId, workspaceId));
 
     return c.json({ message: "Chat deleted successfully" }, 200);
   },
@@ -258,19 +233,18 @@ chat.put(
     const { workspaceId } = workspaceScopeOf(c);
     const { title, isPinned, tags } = c.req.valid("json");
 
-    const result = await db
-      .update(chatTable)
-      .set({ title, isPinned, tags, updatedAt: new Date() })
-      .where(
-        and(eq(chatTable.id, chatId), eq(chatTable.workspaceId, workspaceId)),
-      )
-      .returning();
+    const result = await updateOwned(db, "chat", chatId, workspaceId, {
+      title,
+      isPinned,
+      tags,
+      updatedAt: new Date(),
+    });
 
-    if (result.length === 0) {
-      return c.json({ error: "Chat not found" }, 404);
+    if (!result) {
+      throw new NotFoundError("Chat not found");
     }
 
-    return c.json(result[0]);
+    return c.json(result);
   },
 );
 
