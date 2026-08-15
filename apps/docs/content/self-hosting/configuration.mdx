@@ -151,6 +151,10 @@ empty list unless it says otherwise, and silently runs without web-fetch.
   tools. Two plugins whose Tool set ids collide also abort startup.
 - **New gate-able core plugins in a later release are not auto-enabled** — add
   them to your pinned list to opt in.
+- **A plugin logs into your stream, under your `LOG_LEVEL`.** Lines a plugin
+  writes carry `"plugin":"<name>"` and are formatted and filtered exactly like
+  core's own, so raising `LOG_LEVEL` to `debug` while diagnosing one plugin
+  raises everything else with it.
 
 <Callout type="warning">
   **`compose.sandbox.yaml` replaces `PLATYPUS_PLUGINS` — it does not merge.**
