@@ -76,6 +76,10 @@ the link as optional.
 A factory also receives the plugin's deploy-time config as an appended second
 argument — see
 [Plugin API & config](/extending/plugin-api-and-config#deploy-time-config-and-credentials).
+That same argument carries the [logger](/extending/plugin-api-and-config#logging)
+core binds to your plugin's name, which is a reason to reach for a factory even
+where a static map would otherwise do: a static map is handed nothing, so it has
+nowhere to log from.
 
 ## Ids and namespacing
 

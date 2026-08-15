@@ -39,7 +39,7 @@ the deployment rather than be configured in it.
 ## Start here
 
 **[Your first plugin](/extending/your-first-plugin)** is a runnable quickstart
-off the example package in the repository. It ends with two checkpoints, so you
+off the example package in the repository. It ends with three checkpoints, so you
 find out whether it worked rather than guessing.
 
 Then the page for the Extension point you're filling —
@@ -66,6 +66,14 @@ protect deployments that load JavaScript or a malformed package.
 
 Contribution ids are trimmed before they are namespaced, so surrounding
 whitespace never reaches a stored id.
+
+## Logging
+
+A Plugin does not bring its own logger. Core puts one on the deploy-time block it
+hands every contribution factory, already tagged with your Plugin's name, and the
+Operator's `LOG_LEVEL` decides which of your lines are written — the same control
+they have over core's. [Plugin API &
+config](/extending/plugin-api-and-config#logging) has the shape and the levels.
 
 ## Web-search backends
 

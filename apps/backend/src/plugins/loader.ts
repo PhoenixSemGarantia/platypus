@@ -3,9 +3,11 @@ import {
   PLUGIN_API_VERSION,
   type PlatypusPlugin,
   type PluginConfigContext,
+  type PluginLogger,
   type SandboxBackendContribution,
   type ToolSetContribution,
 } from "@platypuschat/plugin-sdk";
+import { logger } from "../logger.ts";
 import { ALWAYS_ON_PLUGINS, BUILTIN_PLUGINS } from "./builtin.ts";
 import { registerToolSet } from "../tools/index.ts";
 import { registerSandboxBackend } from "../sandbox/index.ts";
@@ -88,6 +90,17 @@ export interface RawPluginConfig {
 // Parsed from `PLATYPUS_PLUGIN_CONFIG` (see {@link parsePluginConfig}).
 export type PluginConfigMap = Record<string, RawPluginConfig>;
 
+/**
+ * What the loader derives each plugin's logger from — core's own logger, whose
+ * level the Operator sets with `LOG_LEVEL`. Declared structurally, one method
+ * wide, so the seam a test replaces is "make me a child" rather than the whole
+ * logging library, and so nothing here leaks pino's types into the SDK contract
+ * the child is handed to plugins as.
+ */
+export interface PluginLoggerParent {
+  child(bindings: Record<string, unknown>): PluginLogger;
+}
+
 export interface LoadPluginsOptions {
   /** Plugin names to load. Defaults to parsing `PLATYPUS_PLUGINS`. */
   pluginNames?: string[];
@@ -119,6 +132,11 @@ export interface LoadPluginsOptions {
    * parsing `PLATYPUS_PLUGIN_CONFIG` (see {@link parsePluginConfig}).
    */
   pluginConfig?: PluginConfigMap;
+  /**
+   * Parent of the per-plugin child loggers. Defaults to core's own logger, so a
+   * plugin's lines share core's stream, format and `LOG_LEVEL`.
+   */
+  baseLogger?: PluginLoggerParent;
 }
 
 /**
@@ -180,10 +198,16 @@ export const parsePluginConfig = (raw: string | undefined): PluginConfigMap => {
  * validated against the manifest's plugin-level schema when declared (fail-loud,
  * plugin-named); when no schema is declared the raw Operator value passes
  * through untouched (`undefined` when absent — nothing to validate against).
+ *
+ * The plugin's logger joins the same block: a child of core's logger bound to
+ * the manifest name, so a line a plugin writes is attributable to it without the
+ * author having to remember to say so, and is filtered by the Operator's
+ * `LOG_LEVEL` like every other line core emits.
  */
 const resolvePluginConfig = (
   manifest: PlatypusPlugin,
   raw: RawPluginConfig,
+  baseLogger: PluginLoggerParent,
 ): PluginConfigContext => {
   const resolveOne = (
     kind: "config" | "credentials",
@@ -208,6 +232,9 @@ const resolvePluginConfig = (
       manifest.credentialsSchema,
       raw.credentials,
     ),
+    // Same `plugin` binding key core's own boot lines use, so an Operator
+    // filtering on one plugin gets core's lines about it and the plugin's own.
+    logger: baseLogger.child({ plugin: manifest.name }),
   };
 };
 
@@ -351,6 +378,7 @@ export async function loadPlugins(
   const registerWeb = opts.registerWeb ?? registerWebBackend;
   const pluginConfig =
     opts.pluginConfig ?? parsePluginConfig(process.env.PLATYPUS_PLUGIN_CONFIG);
+  const baseLogger = opts.baseLogger ?? logger;
 
   // Tracks contribution id -> owning plugin name for owner-attributed
   // collisions, and is handed to the registry afterwards for catalog annotation.
@@ -422,10 +450,13 @@ export async function loadPlugins(
 
     // Resolve the plugin's deploy-time config/credentials once (fail-loud) and
     // share the single block across every contribution factory below — this
-    // object identity IS the "one credential block per plugin" of ADR-0013.
+    // object identity IS the "one credential block per plugin" of ADR-0013. The
+    // plugin's name-bound logger rides along in the same block, which is why one
+    // addition reaches all three Extension points with no per-point plumbing.
     const pluginCtx = resolvePluginConfig(
       manifest,
       pluginConfig[manifest.name] ?? {},
+      baseLogger,
     );
 
     // Core Contributions keep their flat, bare ids (no data migration — every

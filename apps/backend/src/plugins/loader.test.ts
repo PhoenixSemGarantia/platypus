@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
+import pino from "pino";
 import { z } from "zod";
 import {
   OLDEST_SUPPORTED_API_VERSION,
@@ -14,7 +15,12 @@ import {
   MAX_WEB_TIMEOUT_MS,
   type WebBackendRegistration,
 } from "../web-backends/index.ts";
-import { loadPlugins, parsePluginConfig, parsePluginList } from "./loader.ts";
+import {
+  loadPlugins,
+  parsePluginConfig,
+  parsePluginList,
+  type PluginLoggerParent,
+} from "./loader.ts";
 import { plugin as examplePlugin } from "./example/index.ts";
 import { registerToolSet, getToolSet } from "../tools/index.ts";
 
@@ -63,6 +69,29 @@ const toolSet = (id: string): ToolSetContribution => ({
   category: "Test",
   tools: {},
 });
+
+// Every deploy-time block the loader builds now carries a plugin-bound logger.
+// The assertions below still spell the block out in full — `expect.anything()`
+// widened once here, because it is typed `any` and would be an unsafe
+// assignment at each site. What the logger IS is asserted on its own, further
+// down.
+const A_LOGGER_MATCHER = expect.anything() as unknown;
+
+// Core's own logger, at whatever level an Operator's LOG_LEVEL would have set,
+// writing its parsed JSON into `lines` instead of stdout. Same library and same
+// `child()` seam the loader uses by default, only with somewhere to read the
+// output back from — so what these tests assert is what an Operator would see.
+const captureLogger = (level: string) => {
+  const lines: Array<Record<string, unknown>> = [];
+  const logger = pino(
+    { level },
+    {
+      write: (chunk: string) =>
+        lines.push(JSON.parse(chunk) as Record<string, unknown>),
+    },
+  );
+  return { logger, lines };
+};
 
 // A capturing `registerWeb` for the Web-search-backend extension point. It takes
 // core's composed registration, not the raw contribution.
@@ -906,6 +935,7 @@ describe("loadPlugins — web-search backends", () => {
     expect(createExecutors).toHaveBeenCalledWith(ctx, {
       config: { endpoint: "https://searx.internal" },
       credentials: { apiKey: "sk-test" },
+      logger: A_LOGGER_MATCHER,
     });
   });
 });
@@ -1047,10 +1077,12 @@ describe("loadPlugins — deploy-time plugin config injection", () => {
     expect(seen.toolSet).toEqual({
       config: { region: "eu" },
       credentials: { apiToken: "tok_123" },
+      logger: A_LOGGER_MATCHER,
     });
     expect(seen.sandbox).toEqual({
       config: { region: "eu" },
       credentials: { apiToken: "tok_123" },
+      logger: A_LOGGER_MATCHER,
     });
   });
 
@@ -1175,7 +1207,164 @@ describe("loadPlugins — deploy-time plugin config injection", () => {
       userId: "u",
     });
 
-    expect(seenPlugin).toEqual({ config: undefined, credentials: undefined });
+    expect(seenPlugin).toEqual({
+      config: undefined,
+      credentials: undefined,
+      logger: A_LOGGER_MATCHER,
+    });
+  });
+});
+
+describe("loadPlugins — plugin logger injection", () => {
+  // A plugin contributing to all three Extension points, each factory recording
+  // the block it was handed and writing one line through it.
+  const loggingManifest = (
+    name: string,
+    seen: Record<string, PluginConfigContext | undefined>,
+  ): PlatypusPlugin => ({
+    name,
+    version: "0.1.0",
+    apiVersion: 1,
+    contributes: {
+      toolSets: [
+        {
+          id: "tools",
+          name: "Tools",
+          category: "Test",
+          tools: (_ctx, plugin) => {
+            seen.toolSet = plugin;
+            plugin?.logger?.info({ point: "toolSet" }, "resolving tools");
+            return {};
+          },
+        },
+      ],
+      sandboxBackends: [
+        {
+          backend: "sandbox",
+          name: "Sandbox",
+          configSchema: z.object({}),
+          credentialsSchema: z.object({}),
+          create: (_config, _credentials, plugin) => {
+            seen.sandbox = plugin;
+            plugin?.logger?.info({ point: "sandbox" }, "creating adapter");
+            return {} as unknown as SandboxBackend;
+          },
+        },
+      ],
+      webBackends: [
+        {
+          backend: "web",
+          name: "Web",
+          createExecutors: (_ctx, plugin) => {
+            seen.web = plugin;
+            plugin?.logger?.info({ point: "web" }, "building executors");
+            return { web_search: () => ({ query: "q", results: [] }) };
+          },
+        },
+      ],
+    },
+  });
+
+  // Drive every factory the way core does at turn time, so what is asserted is
+  // what a plugin author's own code would actually receive.
+  const invokeAllFactories = async (opts: {
+    pluginName: string;
+    baseLogger: PluginLoggerParent;
+    seen: Record<string, PluginConfigContext | undefined>;
+  }) => {
+    const registered: Record<string, Omit<ToolSetContribution, "id">> = {};
+    const sandboxCalls: SandboxBackendContribution[] = [];
+    const { registerWeb, calls: webCalls } = makeWebRegister();
+
+    await loadPlugins({
+      pluginNames: [opts.pluginName],
+      builtinPlugins: {},
+      importPlugin: () =>
+        Promise.resolve({
+          plugin: loggingManifest(opts.pluginName, opts.seen),
+        }),
+      register: (id, def) => {
+        registered[id] = def;
+      },
+      registerSandbox: (c) => sandboxCalls.push(c),
+      registerWeb,
+      baseLogger: opts.baseLogger,
+    });
+
+    await (
+      registered[`${opts.pluginName}.tools`].tools as (ctx: unknown) => unknown
+    )({
+      workspaceId: "w",
+      agentId: "a",
+      orgId: "o",
+      frontendUrl: undefined,
+      userId: "u",
+    });
+    sandboxCalls[0].create({}, {});
+    await webCalls[0].buildTurnTools({
+      orgId: "o",
+      workspaceId: "w",
+      userId: "u",
+    });
+  };
+
+  it("reaches all three Extension points as one logger bound to the manifest name", async () => {
+    const { logger, lines } = captureLogger("info");
+    const seen: Record<string, PluginConfigContext | undefined> = {};
+
+    await invokeAllFactories({
+      pluginName: "acme",
+      baseLogger: logger,
+      seen,
+    });
+
+    // One child per plugin, shared by object identity with the rest of the
+    // deploy-time block — no per-Extension-point plumbing.
+    expect(seen.toolSet?.logger).toBeDefined();
+    expect(seen.sandbox?.logger).toBe(seen.toolSet?.logger);
+    expect(seen.web?.logger).toBe(seen.toolSet?.logger);
+
+    // Every line landed in core's stream, attributed to the manifest name.
+    expect(lines).toHaveLength(3);
+    expect(lines.map((l) => l.point)).toEqual(["toolSet", "sandbox", "web"]);
+    for (const line of lines) {
+      expect(line.plugin).toBe("acme");
+      expect(line.msg).toEqual(expect.any(String));
+    }
+  });
+
+  it("suppresses a plugin line the Operator's LOG_LEVEL excludes", async () => {
+    // The plugin logs at `info`; the deployment is set to `warn`. Nothing is
+    // written — the plugin's lines obey LOG_LEVEL like core's own.
+    const { logger, lines } = captureLogger("warn");
+
+    await invokeAllFactories({
+      pluginName: "acme",
+      baseLogger: logger,
+      seen: {},
+    });
+
+    expect(lines).toEqual([]);
+  });
+
+  it("binds each plugin to its own name", async () => {
+    const { logger, lines } = captureLogger("info");
+
+    await invokeAllFactories({
+      pluginName: "acme",
+      baseLogger: logger,
+      seen: {},
+    });
+    await invokeAllFactories({
+      pluginName: "widgets",
+      baseLogger: logger,
+      seen: {},
+    });
+
+    expect([...new Set(lines.map((l) => l.plugin))]).toEqual([
+      "acme",
+      "widgets",
+    ]);
   });
 });
 
@@ -1572,10 +1761,15 @@ describe("loadPlugins — example third-party npm package (end to end)", () => {
   });
 
   it("registers into the real registry so a Chat turn resolves it by the prefixed id", async () => {
+    // The package logs at `debug`, so the stream is set to admit it — the same
+    // thing an Operator does with LOG_LEVEL when they want a plugin's detail.
+    const { logger: baseLogger, lines } = captureLogger("debug");
+
     await loadPlugins({
       pluginNames: ["@platypus-examples/tool-set"],
       builtinPlugins: {},
       register: registerToolSet,
+      baseLogger,
     });
 
     // Chat-turn resolution walks the tool-set registry by id (ADR-0013): the
@@ -1584,13 +1778,54 @@ describe("loadPlugins — example third-party npm package (end to end)", () => {
     expect(set.category).toBe("Examples");
     expect(getToolSet("greeting")).toBeUndefined();
 
-    if (typeof set.tools === "function") {
-      throw new Error("expected a static tool map");
+    if (typeof set.tools !== "function") {
+      throw new Error("expected a tool-set factory");
     }
-    const result = (await set.tools.greet.execute!(
+    const tools = await set.tools({
+      workspaceId: "ws-1",
+      agentId: "agent-1",
+      orgId: "org-1",
+      frontendUrl: undefined,
+      userId: "user-1",
+    });
+    const result = (await tools.greet.execute!(
       { name: "Ada" },
       { toolCallId: "t1", messages: [], context: {} },
     )) as string;
     expect(result).toContain("Ada");
+
+    // The whole third-party logging path, through the real published package:
+    // the line the plugin wrote is in core's stream, attributed to its manifest
+    // name, with the fields it supplied intact.
+    expect(lines).toContainEqual(
+      expect.objectContaining({
+        plugin: "example",
+        workspaceId: "ws-1",
+        agentId: "agent-1",
+        level: 20, // debug
+      }),
+    );
+  });
+
+  it("writes nothing when the Operator's LOG_LEVEL excludes the plugin's level", async () => {
+    const { logger: baseLogger, lines } = captureLogger("info");
+    const { register, calls } = makeRegister();
+
+    await loadPlugins({
+      pluginNames: ["@platypus-examples/tool-set"],
+      builtinPlugins: {},
+      register,
+      baseLogger,
+    });
+
+    await (calls[0].def.tools as (ctx: unknown) => unknown)({
+      workspaceId: "ws-1",
+      agentId: "agent-1",
+      orgId: "org-1",
+      frontendUrl: undefined,
+      userId: "user-1",
+    });
+
+    expect(lines).toEqual([]);
   });
 });
