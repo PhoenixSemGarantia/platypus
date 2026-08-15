@@ -5,11 +5,10 @@ import {
   type PluginConfigContext,
   type PluginLogger,
   type SandboxBackendContribution,
-  type ToolSetContribution,
 } from "@platypuschat/plugin-sdk";
 import { logger } from "../logger.ts";
 import { ALWAYS_ON_PLUGINS, BUILTIN_PLUGINS } from "./builtin.ts";
-import { registerToolSet } from "../tools/index.ts";
+import { registerToolSet, type ToolSetRegistration } from "../tools/index.ts";
 import { registerSandboxBackend } from "../sandbox/index.ts";
 import {
   registerWebBackend,
@@ -116,8 +115,13 @@ export interface LoadPluginsOptions {
   builtinPlugins?: Record<string, () => Promise<PluginModule>>;
   /** Resolves a third-party plugin. Defaults to dynamic `import()`. */
   importPlugin?: (name: string) => Promise<PluginModule>;
-  /** Registers one Tool set contribution. Defaults to the core `registerToolSet`. */
-  register?: (id: string, def: Omit<ToolSetContribution, "id">) => void;
+  /**
+   * Registers one Tool set. Takes the *composed* registration — core has already
+   * wrapped the contribution's factory in its own guard — rather than the raw
+   * contribution, for the same reason `registerWeb` does (ADR-0013/0014).
+   * Defaults to the core `registerToolSet`.
+   */
+  register?: (id: string, registration: ToolSetRegistration) => void;
   /** Registers one Sandbox-backend contribution. Defaults to core `registerSandboxBackend`. */
   registerSandbox?: (contribution: SandboxBackendContribution) => void;
   /**

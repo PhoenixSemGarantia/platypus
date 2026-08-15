@@ -31,13 +31,14 @@ tool.get(
       category: toolSet.category,
       description: toolSet.description,
       plugin: getToolSetPlugin(toolSet.id) ?? CORE_BUILTIN_OWNER,
-      tools:
-        typeof toolSet.tools === "function"
-          ? []
-          : Object.entries(toolSet.tools).map(([toolId, tool]) => ({
-              id: toolId,
-              description: tool.description || "No description",
-            })),
+      // Named tools only for a static-map set; a factory's depend on the
+      // Workspace and are not knowable ahead of a turn.
+      tools: Object.entries(toolSet.staticTools ?? {}).map(
+        ([toolId, tool]) => ({
+          id: toolId,
+          description: tool.description || "No description",
+        }),
+      ),
     }));
 
     // The MCPs this Workspace may actually use: its own, plus the Shared

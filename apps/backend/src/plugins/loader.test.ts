@@ -22,13 +22,17 @@ import {
   type PluginLoggerParent,
 } from "./loader.ts";
 import { plugin as examplePlugin } from "./example/index.ts";
-import { registerToolSet, getToolSet } from "../tools/index.ts";
+import {
+  registerToolSet,
+  getToolSet,
+  type ToolSetRegistration,
+} from "../tools/index.ts";
 
 // A capturing `register` and the builtin/import module shapes the loader expects.
 const makeRegister = () => {
-  const calls: Array<{ id: string; def: Omit<ToolSetContribution, "id"> }> = [];
-  const register = (id: string, def: Omit<ToolSetContribution, "id">) => {
-    calls.push({ id, def });
+  const calls: Array<{ id: string; registration: ToolSetRegistration }> = [];
+  const register = (id: string, registration: ToolSetRegistration) => {
+    calls.push({ id, registration });
   };
   return { register, calls };
 };
@@ -1035,9 +1039,9 @@ describe("loadPlugins — deploy-time plugin config injection", () => {
       toolSet?: PluginConfigContext;
       sandbox?: PluginConfigContext;
     } = {};
-    const registered: Record<string, Omit<ToolSetContribution, "id">> = {};
-    const register = (id: string, def: Omit<ToolSetContribution, "id">) => {
-      registered[id] = def;
+    const registered: Record<string, ToolSetRegistration> = {};
+    const register = (id: string, registration: ToolSetRegistration) => {
+      registered[id] = registration;
     };
     const sandboxCalls: SandboxBackendContribution[] = [];
     const registerSandbox = (c: SandboxBackendContribution) => {
@@ -1061,9 +1065,7 @@ describe("loadPlugins — deploy-time plugin config injection", () => {
 
     // Tool-set factory: invoked as core would at Chat-turn time, with ctx only.
     // Third-party ids are namespaced, so the registry key is prefixed.
-    const toolsFactory = registered["acmecloud.managed"].tools;
-    expect(typeof toolsFactory).toBe("function");
-    await (toolsFactory as (ctx: unknown) => unknown)({
+    await registered["acmecloud.managed"].buildTurnTools({
       workspaceId: "w",
       agentId: "a",
       orgId: "o",
@@ -1091,9 +1093,9 @@ describe("loadPlugins — deploy-time plugin config injection", () => {
       toolSet?: PluginConfigContext;
       sandbox?: PluginConfigContext;
     } = {};
-    const registered: Record<string, Omit<ToolSetContribution, "id">> = {};
-    const register = (id: string, def: Omit<ToolSetContribution, "id">) => {
-      registered[id] = def;
+    const registered: Record<string, ToolSetRegistration> = {};
+    const register = (id: string, registration: ToolSetRegistration) => {
+      registered[id] = registration;
     };
     const sandboxCalls: SandboxBackendContribution[] = [];
 
@@ -1112,7 +1114,7 @@ describe("loadPlugins — deploy-time plugin config injection", () => {
       },
     });
 
-    await (registered["acmecloud.managed"].tools as (ctx: unknown) => unknown)({
+    await registered["acmecloud.managed"].buildTurnTools({
       workspaceId: "w",
       agentId: "a",
       orgId: "o",
@@ -1168,7 +1170,7 @@ describe("loadPlugins — deploy-time plugin config injection", () => {
 
   it("passes undefined config/credentials to plugins declaring no schemas", async () => {
     let seenPlugin: PluginConfigContext | undefined;
-    const registered: Record<string, Omit<ToolSetContribution, "id">> = {};
+    const registered: Record<string, ToolSetRegistration> = {};
 
     await loadPlugins({
       pluginNames: ["noschema"],
@@ -1194,12 +1196,12 @@ describe("loadPlugins — deploy-time plugin config injection", () => {
             },
           } satisfies PlatypusPlugin,
         }),
-      register: (id, def) => {
-        registered[id] = def;
+      register: (id, registration) => {
+        registered[id] = registration;
       },
     });
 
-    await (registered["noschema.plain"].tools as (ctx: unknown) => unknown)({
+    await registered["noschema.plain"].buildTurnTools({
       workspaceId: "w",
       agentId: "a",
       orgId: "o",
@@ -1272,7 +1274,7 @@ describe("loadPlugins — plugin logger injection", () => {
     baseLogger: PluginLoggerParent;
     seen: Record<string, PluginConfigContext | undefined>;
   }) => {
-    const registered: Record<string, Omit<ToolSetContribution, "id">> = {};
+    const registered: Record<string, ToolSetRegistration> = {};
     const sandboxCalls: SandboxBackendContribution[] = [];
     const { registerWeb, calls: webCalls } = makeWebRegister();
 
@@ -1283,17 +1285,15 @@ describe("loadPlugins — plugin logger injection", () => {
         Promise.resolve({
           plugin: loggingManifest(opts.pluginName, opts.seen),
         }),
-      register: (id, def) => {
-        registered[id] = def;
+      register: (id, registration) => {
+        registered[id] = registration;
       },
       registerSandbox: (c) => sandboxCalls.push(c),
       registerWeb,
       baseLogger: opts.baseLogger,
     });
 
-    await (
-      registered[`${opts.pluginName}.tools`].tools as (ctx: unknown) => unknown
-    )({
+    await registered[`${opts.pluginName}.tools`].buildTurnTools({
       workspaceId: "w",
       agentId: "a",
       orgId: "o",
@@ -1372,15 +1372,15 @@ describe("loadPlugins — example third-party plugin", () => {
   // Proves the documented example plugin wires one shared credential block into
   // BOTH its Sandbox backend and its management Tool set (ADR-0013).
   it("shares one credential block across its two contributions", async () => {
-    const registered: Record<string, Omit<ToolSetContribution, "id">> = {};
+    const registered: Record<string, ToolSetRegistration> = {};
     const sandboxCalls: SandboxBackendContribution[] = [];
 
     const { plugins: loaded } = await loadPlugins({
       pluginNames: ["example-cloud-sandbox"],
       builtinPlugins: {},
       importPlugin: () => Promise.resolve({ plugin: examplePlugin }),
-      register: (id, def) => {
-        registered[id] = def;
+      register: (id, registration) => {
+        registered[id] = registration;
       },
       registerSandbox: (c) => sandboxCalls.push(c),
       pluginConfig: {
@@ -1409,17 +1409,18 @@ describe("loadPlugins — example third-party plugin", () => {
     expect(backend.region).toBe("ap");
 
     // Management tool set: its tool description reflects the SAME token/region.
-    const toolsFactory = registered["example-cloud-sandbox.management"]
-      .tools as unknown as (
-      ctx: unknown,
-    ) => Promise<Record<string, { execute: (i: unknown) => Promise<string> }>>;
-    const tools = await toolsFactory({
+    const tools = (await registered[
+      "example-cloud-sandbox.management"
+    ].buildTurnTools({
       workspaceId: "w",
       agentId: "a",
       orgId: "o",
       frontendUrl: undefined,
       userId: "u",
-    });
+    })) as unknown as Record<
+      string,
+      { execute: (i: unknown) => Promise<string> }
+    >;
     const msg = await tools.listSandboxes.execute({});
     expect(msg).toContain("ap");
     expect(msg).toContain("dtn");
@@ -1471,8 +1472,8 @@ describe("loadPlugins — the documented quickstart package", () => {
     // the switch with `name`, so those are the two strings the reader hunts for.
     expect(calls).toHaveLength(1);
     expect(calls[0].id).toBe("example.greeting");
-    expect(calls[0].def.name).toBe("Greeting");
-    expect(calls[0].def.category).toBe("Examples");
+    expect(calls[0].registration.name).toBe("Greeting");
+    expect(calls[0].registration.category).toBe("Examples");
   });
 });
 
@@ -1778,10 +1779,7 @@ describe("loadPlugins — example third-party npm package (end to end)", () => {
     expect(set.category).toBe("Examples");
     expect(getToolSet("greeting")).toBeUndefined();
 
-    if (typeof set.tools !== "function") {
-      throw new Error("expected a tool-set factory");
-    }
-    const tools = await set.tools({
+    const tools = await set.buildTurnTools({
       workspaceId: "ws-1",
       agentId: "agent-1",
       orgId: "org-1",
@@ -1818,7 +1816,7 @@ describe("loadPlugins — example third-party npm package (end to end)", () => {
       baseLogger,
     });
 
-    await (calls[0].def.tools as (ctx: unknown) => unknown)({
+    await calls[0].registration.buildTurnTools({
       workspaceId: "ws-1",
       agentId: "agent-1",
       orgId: "org-1",

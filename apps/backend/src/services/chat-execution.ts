@@ -1,7 +1,3 @@
-import {
-  experimental_createMCPClient as createMCPClient,
-  type MCPClient,
-} from "@ai-sdk/mcp";
 import { openProvider, type OpenedProvider } from "./provider.ts";
 import { eq } from "drizzle-orm";
 import { db } from "../index.ts";
@@ -13,7 +9,11 @@ import {
   sandbox as sandboxTable,
   workspace as workspaceTable,
 } from "../db/schema.ts";
-import { getToolSet } from "../tools/index.ts";
+import {
+  openToolSession,
+  type ToolSession,
+  type ToolSessionScope,
+} from "../tools/tool-session.ts";
 import { createLoadSkillTool } from "../tools/skill.ts";
 import {
   createSubAgentTools,
@@ -41,7 +41,6 @@ import {
 } from "../web-backends/index.ts";
 import type { LanguageModel, Tool } from "ai";
 import { logger } from "../logger.ts";
-import { buildMcpTransportConfig } from "./mcp-oauth-provider.ts";
 import { inlineFileUrls } from "../storage/utils.ts";
 import {
   maxExtractedTextCharsForModel,
@@ -547,18 +546,30 @@ export const prepareChatTurn = async (
   const opened = openProvider(provider);
   const model = opened.languageModel(resolvedModelId);
 
+  // Where this turn runs, shared by the Agent and every delegate it may reach.
+  const scope: ToolSessionScope = {
+    orgId,
+    workspaceId,
+    userId: user.id,
+    frontendUrl,
+  };
+  // Started before the `Promise.all` rather than inside it because the delegates
+  // built alongside it nest their own sessions into this one — they take the
+  // promise, not the session, and await it only if they are ever invoked.
+  const sessionPromise = openToolSession(scope, agent, queries);
+
   const [
-    { tools, mcpClients },
+    session,
     skills,
-    { subAgents, unavailableSubAgents, subAgentTools, subAgentMcpClients },
+    { subAgents, unavailableSubAgents, subAgentTools },
     userContexts,
     memories,
     sandboxEnvKeys,
     searchTools,
   ] = await Promise.all([
-    loadTools(queries, agent, workspaceId, orgId, frontendUrl, user.id),
+    sessionPromise,
     loadSkills(queries, agent, orgId, workspaceId),
-    loadSubAgents(queries, agent, orgId, workspaceId, frontendUrl, run),
+    loadSubAgents(queries, agent, scope, sessionPromise, run),
     queries.getUserContexts(user.id, workspaceId),
     queries.getRecentMemories(user.id, workspaceId),
     queries.getSandboxEnvKeys(workspaceId),
@@ -570,12 +581,11 @@ export const prepareChatTurn = async (
     ),
   ]);
 
-  const allMcpClients = [...mcpClients, ...subAgentMcpClients];
-
   // Assignment order is the precedence order, and it is deliberate: search lands
-  // after `loadTools` so it wins over an agent/MCP tool that happens to share a
-  // name (exactly as native search already did), and before `subAgentTools` so a
-  // sub-agent's tools still win over search.
+  // after the session's tools so it wins over an agent/MCP tool that happens to
+  // share a name (exactly as native search already did), and before
+  // `subAgentTools` so a sub-agent's tools still win over search.
+  const tools: Record<string, Tool> = { ...session.tools };
   Object.assign(tools, searchTools);
   Object.assign(tools, subAgentTools);
 
@@ -605,6 +615,10 @@ export const prepareChatTurn = async (
     tools.loadSkill = createLoadSkillTool(orgId, workspaceId);
   }
 
+  // Activity events only. Result normalization (#321) is no longer bolted on
+  // here: it happens for every tool the Tool session loads, whether or not this
+  // turn is being observed. The tools core adds itself above — search, the
+  // sub-agent delegates, `loadSkill` — return core-owned JSON shapes.
   const wrappedTools = onActivity
     ? wrapToolsWithActivity(tools, onActivity)
     : tools;
@@ -632,19 +646,6 @@ export const prepareChatTurn = async (
       ),
     },
   );
-
-  let disposed = false;
-  const dispose = async () => {
-    if (disposed) return;
-    disposed = true;
-    for (const client of allMcpClients) {
-      try {
-        await client.close();
-      } catch (e) {
-        logger.error({ error: e }, "Error closing MCP client");
-      }
-    }
-  };
 
   const systemPrompt = generation.systemPrompt!;
 
@@ -686,7 +687,9 @@ export const prepareChatTurn = async (
       presencePenalty: agent ? undefined : generation.presencePenalty,
       seed: agent ? undefined : generation.seed,
     },
-    dispose,
+    // The session closes what it opened, delegates' nested sessions included —
+    // the caller no longer reconciles two lists of clients to get there.
+    dispose: session.dispose,
   };
 };
 
@@ -824,70 +827,6 @@ const resolveChatContext = async (
   };
 };
 
-const loadTools = async (
-  queries: ChatTurnQueries,
-  agent: Pick<AgentRow, "id" | "toolSetIds"> | undefined,
-  workspaceId: string,
-  orgId: string,
-  frontendUrl: string | undefined,
-  userId?: string,
-): Promise<{ tools: Record<string, Tool>; mcpClients: MCPClient[] }> => {
-  const tools: Record<string, Tool> = {};
-  const mcpClients: MCPClient[] = [];
-
-  if (!agent || !agent.toolSetIds || agent.toolSetIds.length === 0) {
-    return { tools, mcpClients };
-  }
-
-  for (const toolSetId of agent.toolSetIds) {
-    const toolSet = getToolSet(toolSetId);
-    if (!toolSet) {
-      // Static tool set not found — fall back to MCP lookup.
-      const mcp = await queries.getMcp(toolSetId, orgId, workspaceId);
-      if (mcp && mcp.url) {
-        // An unreachable MCP must fail soft: log a warning and contribute no
-        // tools, rather than throwing and killing the whole Chat turn. A Shared
-        // (org-scoped) MCP has org-wide blast radius, so a single down server
-        // must not break every attached Workspace's chats at once (ADR-0007).
-        try {
-          const mcpClient = await createMCPClient({
-            transport: buildMcpTransportConfig(mcp),
-          });
-          const mcpTools = await mcpClient.tools();
-          Object.assign(tools, mcpTools);
-          mcpClients.push(mcpClient);
-        } catch (error) {
-          logger.warn(
-            { error, mcpId: mcp.id, scope: mcp.organizationId ? "org" : "ws" },
-            `MCP '${toolSetId}' is unreachable; skipping its tools`,
-          );
-        }
-      } else if (mcp) {
-        logger.warn(`MCP '${toolSetId}' has no URL configured`);
-      } else {
-        logger.warn(
-          `Tool set with id '${toolSetId}' not found as static tool set or MCP`,
-        );
-      }
-      continue;
-    }
-
-    const resolvedTools =
-      typeof toolSet.tools === "function"
-        ? await toolSet.tools({
-            workspaceId,
-            agentId: agent.id,
-            orgId,
-            frontendUrl,
-            userId: userId || "",
-          })
-        : toolSet.tools;
-    Object.assign(tools, resolvedTools);
-  }
-
-  return { tools, mcpClients };
-};
-
 const resolveGenerationConfig = (
   data: ChatTurnRequest,
   agent: AgentRow | undefined,
@@ -923,25 +862,23 @@ const UNRESOLVED_SUB_AGENT_REASON =
 const loadSubAgents = async (
   queries: ChatTurnQueries,
   agent: AgentRow | undefined,
-  orgId: string,
-  workspaceId: string,
-  frontendUrl: string | undefined,
+  scope: ToolSessionScope,
+  session: Promise<ToolSession>,
   run: ParentRunContext | undefined,
 ): Promise<{
   subAgents: Array<{ id: string; name: string; description?: string | null }>;
   unavailableSubAgents: SubAgentFailure[];
   subAgentTools: Record<string, Tool>;
-  subAgentMcpClients: MCPClient[];
 }> => {
   if (!agent?.subAgentIds || agent.subAgentIds.length === 0) {
     return {
       subAgents: [],
       unavailableSubAgents: [],
       subAgentTools: {},
-      subAgentMcpClients: [],
     };
   }
 
+  const { orgId, workspaceId } = scope;
   const assignedIds = [...new Set(agent.subAgentIds)];
   const subAgentRecords = await queries.getSubAgentsByIds(
     assignedIds,
@@ -956,8 +893,6 @@ const loadSubAgents = async (
   const unresolved: SubAgentFailure[] = assignedIds
     .filter((id) => !resolvedIds.has(id))
     .map((id) => ({ id, reason: UNRESOLVED_SUB_AGENT_REASON }));
-
-  const subAgentMcpClients: MCPClient[] = [];
 
   const { tools: subAgentTools, failures } = await createSubAgentTools(
     subAgentRecords,
@@ -991,17 +926,20 @@ const loadSubAgents = async (
         maxOutputTokens: maxOutputTokensForModel(subProvider, subModelId),
       };
     },
+    // Called on a delegate's FIRST invocation, not now: a parent with three
+    // MCP-backed delegates used to open — and warn about — every one of their
+    // servers on every Chat turn, whether or not it delegated. The nested
+    // session closes with the parent's, so a delegate never hands its
+    // connections back to be remembered.
+    //
+    // The delegate runs under its parent's Workspace and user (its scope is
+    // chained from theirs, and `actorUserId` walks back up to the same human), so
+    // its Tool sets resolve against the same identity. They used to be handed an
+    // empty `userId`, which silently blanked the user a delegate's tools ran as.
     async (subAgentId: string, toolSetIds: string[]) => {
-      const subAgentRecord = subAgentRecords.find((sa) => sa.id === subAgentId);
-      const { tools: subTools, mcpClients } = await loadTools(
-        queries,
-        subAgentRecord ?? { id: subAgentId, toolSetIds },
-        workspaceId,
-        orgId,
-        frontendUrl,
-      );
-      subAgentMcpClients.push(...mcpClients);
-      return subTools;
+      const parent = await session;
+      const nested = await parent.nest({ id: subAgentId, toolSetIds });
+      return nested.tools;
     },
     run,
   );
@@ -1022,6 +960,5 @@ const loadSubAgents = async (
     subAgents,
     unavailableSubAgents: [...unresolved, ...failures],
     subAgentTools,
-    subAgentMcpClients,
   };
 };

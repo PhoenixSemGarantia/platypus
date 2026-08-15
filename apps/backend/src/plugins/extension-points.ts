@@ -4,6 +4,7 @@ import type {
   WebBackendContribution,
 } from "@platypuschat/plugin-sdk";
 import type { SandboxBackendRegistration } from "../sandbox/index.ts";
+import { composeToolSet, type ToolSetRegistration } from "../tools/index.ts";
 import {
   composeWebBackend,
   MAX_WEB_TIMEOUT_MS,
@@ -24,10 +25,14 @@ import type { ExtensionPoint } from "./contribution-pipeline.ts";
 // `this` when spread, and its factories must be called on the author's own
 // object.
 
-/** The Tool-set point (ADR-0013). Registers `{ name, category, description, tools }`. */
+/**
+ * The Tool-set point (ADR-0013). Registers core's *composed* registration — core
+ * owns everything between the contribution's factory and the model — rather than
+ * the raw `{ name, category, description, tools }`.
+ */
 export const toolSetPoint = (
-  register: (id: string, definition: Omit<ToolSetContribution, "id">) => void,
-): ExtensionPoint<Omit<ToolSetContribution, "id">> => ({
+  register: (id: string, registration: ToolSetRegistration) => void,
+): ExtensionPoint<ToolSetRegistration> => ({
   noun: "tool set",
   idField: "id",
   validate: (contribution, { pluginName, rawId }) => {
@@ -50,18 +55,15 @@ export const toolSetPoint = (
       );
     }
   },
-  prepare: (contribution, { plugin }) => {
-    const { name, category, description, tools } =
-      contribution as unknown as ToolSetContribution;
-    // Bind the shared plugin config into the factory so core's registry and its
-    // Chat-turn callers stay ignorant of it: they invoke the stored factory with
-    // only the ToolSetContext, as before. A static-map tool set has no factory
-    // to inject into and is registered untouched.
-    const boundTools =
-      typeof tools === "function"
-        ? (context: Parameters<typeof tools>[0]) => tools(context, plugin)
-        : tools;
-    return { name, category, description, tools: boundTools };
+  prepare: (raw, { pluginName, id, plugin }) => {
+    const contribution = raw as unknown as ToolSetContribution;
+    // Core wraps the contribution here, binding the same shared plugin config
+    // that every other contribution factory receives. What lands in the registry
+    // is the finished, guarded builder — per-turn callers never see the raw
+    // `tools`. The contribution goes in by reference, with the namespaced id
+    // alongside it rather than spread over it, for the same prototype/`this`
+    // reason as the sandbox and web points.
+    return composeToolSet({ contribution, id, plugin, pluginName });
   },
   register,
 });

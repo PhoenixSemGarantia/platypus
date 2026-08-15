@@ -98,7 +98,7 @@ import {
   composeWebBackend,
   registerWebBackend,
 } from "../web-backends/index.ts";
-import { registerToolSet } from "../tools/index.ts";
+import { composeToolSet, registerToolSet } from "../tools/index.ts";
 import { logger } from "../logger.ts";
 import { FileValidationError } from "./file-gate.ts";
 import { resetExtractedTextCache } from "./file-extraction.ts";
@@ -377,6 +377,44 @@ describe("chat-execution", () => {
       expect(turn.stream.system).toContain("Research Agent");
       expect(turn.stream.system).toContain("Shared Agent");
       expect(turn.stream.system).not.toContain("## Unavailable Sub-Agents");
+    });
+
+    // A parent with MCP-backed delegates used to connect to — and warn about —
+    // every one of their servers on every turn, delegation or not. The delegate
+    // now opens its own session when it is first invoked.
+    it("opens no connections for a delegate the turn never invokes", async () => {
+      const subAgent = {
+        ...baseAgent,
+        id: "sub-mcp",
+        name: "Research Agent",
+        toolSetIds: ["mcp-1"],
+      };
+      const parent = { ...baseAgent, subAgentIds: ["sub-mcp"] };
+
+      const queries = createInMemoryChatTurnQueries({
+        workspaces: [baseWorkspace],
+        agents: [parent, subAgent],
+        providers: [baseProvider],
+        mcps: [
+          {
+            id: "mcp-1",
+            workspaceId: "ws-1",
+            url: "https://mcp.example.com",
+            authType: "None",
+          } as never,
+        ],
+      });
+      const getMcp = vi.spyOn(queries, "getMcp");
+
+      const turn = await prepareChatTurn(
+        { ...baseInput, request: { agentId: parent.id } },
+        queries,
+      );
+
+      expect(turn.stream.tools).toHaveProperty("delegateToResearchAgent");
+      expect(mockCreateMCPClient).not.toHaveBeenCalled();
+      expect(getMcp).not.toHaveBeenCalled();
+      await turn.dispose();
     });
 
     it("does not resolve a sub-agent that is not visible in the invoking Workspace, and reports it by id", async () => {
@@ -1124,29 +1162,57 @@ describe("chat-execution", () => {
   });
 
   describe("Static tool-set resolution", () => {
-    it("propagates factory errors without falling back to MCP lookup", async () => {
-      const factoryError = new Error("tool-set factory failed");
+    it("costs a throwing tool set its own tools, not the turn, and never falls back to MCP", async () => {
       const toolSetId = "test.throwing-factory";
-      registerToolSet(toolSetId, {
-        name: "Throwing test Tool set",
-        category: "Test",
-        tools: vi.fn().mockRejectedValue(factoryError),
-      });
+      registerToolSet(
+        toolSetId,
+        composeToolSet({
+          id: toolSetId,
+          pluginName: "test-plugin",
+          contribution: {
+            name: "Throwing test Tool set",
+            category: "Test",
+            tools: vi
+              .fn()
+              .mockRejectedValue(new Error("tool-set factory failed")),
+          },
+        }),
+      );
 
-      const agentWithToolSet = { ...baseAgent, toolSetIds: [toolSetId] };
+      const workingId = "test.working-set";
+      registerToolSet(
+        workingId,
+        composeToolSet({
+          id: workingId,
+          pluginName: "test-plugin",
+          contribution: {
+            name: "Working test Tool set",
+            category: "Test",
+            tools: { stillHere: { description: "x" } as never },
+          },
+        }),
+      );
+
+      const agentWithToolSets = {
+        ...baseAgent,
+        toolSetIds: [toolSetId, workingId],
+      };
       const queries = createInMemoryChatTurnQueries({
         workspaces: [baseWorkspace],
-        agents: [agentWithToolSet],
+        agents: [agentWithToolSets],
         providers: [baseProvider],
       });
       const getMcp = vi.spyOn(queries, "getMcp");
 
-      await expect(
-        prepareChatTurn(
-          { ...baseInput, request: { agentId: agentWithToolSet.id } },
-          queries,
-        ),
-      ).rejects.toBe(factoryError);
+      const turn = await prepareChatTurn(
+        { ...baseInput, request: { agentId: agentWithToolSets.id } },
+        queries,
+      );
+
+      // The turn runs, without the broken plugin's tools and with everything
+      // else the Agent was granted.
+      expect(turn.stream.tools).toHaveProperty("stillHere");
+      // A registered id is never re-read as an MCP, however its factory ended.
       expect(getMcp).not.toHaveBeenCalled();
     });
   });
@@ -1393,22 +1459,22 @@ describe("chat-execution", () => {
         .execute;
     };
 
-    it("normalizes a Date-containing result on the promise-resolved path", async () => {
-      const execute = wrapSingle(() =>
-        Promise.resolve({
-          createdAt: new Date("2026-07-13T10:20:30.000Z"),
-        }),
-      );
-      const result = (await execute({}, {})) as { createdAt: string };
-      expect(result.createdAt).toBe("2026-07-13T10:20:30.000Z");
+    // Activity events and nothing else: normalizing results is the loader
+    // seam's job now (`normalizeToolResults`), so it holds whether or not a turn
+    // supplies an `onActivity` callback. This wrapper hands the value back
+    // exactly as the tool returned it.
+    it("passes a resolved result through untouched", async () => {
+      const createdAt = new Date("2026-07-13T10:20:30.000Z");
+      const execute = wrapSingle(() => Promise.resolve({ createdAt }));
+      const result = (await execute({}, {})) as { createdAt: Date };
+      expect(result.createdAt).toBe(createdAt);
     });
 
-    it("normalizes a Date-containing result on the synchronous path", () => {
-      const execute = wrapSingle(() => ({
-        createdAt: new Date("2026-07-13T10:20:30.000Z"),
-      }));
-      const result = execute({}, {}) as { createdAt: string };
-      expect(result.createdAt).toBe("2026-07-13T10:20:30.000Z");
+    it("passes a synchronous result through untouched", () => {
+      const createdAt = new Date("2026-07-13T10:20:30.000Z");
+      const execute = wrapSingle(() => ({ createdAt }));
+      const result = execute({}, {}) as { createdAt: Date };
+      expect(result.createdAt).toBe(createdAt);
     });
 
     it("leaves the async-iterable path intact (yields pass through untouched)", async () => {
@@ -1429,7 +1495,7 @@ describe("chat-execution", () => {
       expect(parts[0].date).toBeInstanceOf(Date);
     });
 
-    it("brackets a normalized result with start and end activity events", async () => {
+    it("brackets a resolved result with start and end activity events", async () => {
       const onActivity = vi.fn<(event: ToolActivityEvent) => void>();
       const wrapped = wrapToolsWithActivity(
         {

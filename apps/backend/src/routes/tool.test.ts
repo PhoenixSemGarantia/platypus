@@ -15,18 +15,21 @@ vi.mock("../tools/index.ts", () => ({
       name: "Math",
       category: "Utilities",
       description: "Math tools",
-      tools: {
+      // A static-map set names its tools ahead of any turn…
+      staticTools: {
         add: { description: "Add numbers" },
       },
+      buildTurnTools: vi.fn(),
     },
     // A core-internal static set (e.g. `sandbox`) with no owning plugin: it
-    // must annotate as core/built-in, not crash.
+    // must annotate as core/built-in, not crash. …and a factory-backed set
+    // names none, since what it serves depends on the Workspace.
     {
       id: "sandbox",
       name: "Sandbox",
       category: "Sandbox",
       description: "Sandbox tools",
-      tools: () => ({}),
+      buildTurnTools: vi.fn(),
     },
   ]),
 }));
@@ -85,15 +88,18 @@ describe("Tool Routes", () => {
           name: "Math",
           category: "Utilities",
           plugin: "@platypus/tools-basic",
+          tools: [{ id: "add", description: "Add numbers" }],
         }),
       );
 
-      // A set with no owning plugin annotates as core/built-in, not blank.
+      // A set with no owning plugin annotates as core/built-in, not blank, and
+      // a factory-backed one names no individual tools.
       expect(json.results).toContainEqual(
         expect.objectContaining({
           id: "sandbox",
           name: "Sandbox",
           plugin: "core (built-in)",
+          tools: [],
         }),
       );
 

@@ -1,5 +1,4 @@
 import type { Tool } from "ai";
-import { normalizeToolResult } from "./tool-result.ts";
 
 /**
  * Per-tool-call lifecycle event surfaced to the run lifecycle.
@@ -20,10 +19,10 @@ export type ToolActivityEvent = {
  * before it runs and an `end` event once it settles — on every exit path,
  * including a synchronous throw and a consumer that drains an async generator.
  *
- * The wrapper also normalizes value-returning results (issue #321): AI SDK v7
- * validates each tool result against a strict JSON-value schema on the next
- * step, and a raw Drizzle `Date` fails it. The async-iterable path is exempt —
- * its yields are streamed UI parts, not the value fed to the model.
+ * Activity events and nothing else. Result normalization (issue #321) used to
+ * ride here too, which mounted a correctness guarantee on an optional
+ * observability parameter: a turn with no `onActivity` got no normalization. It
+ * now happens unconditionally at the loader seam — see `normalizeToolResults`.
  *
  * Lives outside `chat-execution.ts` because both the parent turn and a
  * sub-agent's own tool set need it, and the sub-agent tool builder is imported
@@ -64,9 +63,7 @@ export const wrapToolsWithActivity = (
           result != null &&
           typeof (result as { then?: unknown }).then === "function"
         ) {
-          return (result as Promise<unknown>)
-            .then(normalizeToolResult)
-            .finally(finish);
+          return (result as Promise<unknown>).finally(finish);
         }
         // Async iterable / generator path (sub-agent tools). Wrap it so the
         // "end" event fires once the consumer drains the iterator.
@@ -86,11 +83,8 @@ export const wrapToolsWithActivity = (
             }
           })();
         }
-        // Normalize before finish() so the sync path mirrors the promise path:
-        // a throw (e.g. a BigInt in the result) happens before the "end" event.
-        const normalized = normalizeToolResult(result);
         finish();
-        return normalized;
+        return result;
       },
     };
   }

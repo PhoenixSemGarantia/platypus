@@ -21,13 +21,12 @@ orgTool.get("/", requireAuth, requireOrgAccess(), async (c) => {
     name: toolSet.name,
     category: toolSet.category,
     description: toolSet.description,
-    tools:
-      typeof toolSet.tools === "function"
-        ? []
-        : Object.entries(toolSet.tools).map(([toolId, tool]) => ({
-            id: toolId,
-            description: tool.description || "No description",
-          })),
+    // Named tools only for a static-map set; a factory's depend on the
+    // Workspace and are not knowable ahead of a turn.
+    tools: Object.entries(toolSet.staticTools ?? {}).map(([toolId, tool]) => ({
+      id: toolId,
+      description: tool.description || "No description",
+    })),
   }));
 
   const mcps = await listOrgScoped(db, "mcp", orgId);
