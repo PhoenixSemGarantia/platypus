@@ -31,11 +31,12 @@ import { DynamicToolHeader } from "./dynamic-tool-header";
 import {
   DynamicToolUIPart,
   FileUIPart,
+  SourceUrlUIPart,
   TextUIPart,
   isToolUIPart,
   type ChatStatus,
 } from "ai";
-import { Agent } from "@platypus/schemas";
+import { Agent, isPresentableUrl } from "@platypus/schemas";
 import {
   BotIcon,
   CheckIcon,
@@ -50,6 +51,11 @@ import { toolCallDurationMs } from "@/lib/tool-duration";
 import { CutShortNotice } from "./cut-short-notice";
 import { LoadSkillTool } from "./load-skill-tool";
 import { SubAgentTool } from "./sub-agent-tool";
+import {
+  WebSearchTool,
+  isPluginWebSearchPart,
+  webSearchSources,
+} from "./web-search-tool";
 
 /**
  * What the person reading a reply is told when it stopped at the model's
@@ -133,9 +139,37 @@ export const ChatMessage = memo(function ChatMessage({
     (part): part is FileUIPart =>
       part.type === "file" && !part.mediaType?.startsWith("image/"),
   );
+  // Scheme-checked with the same predicate a plugin result's URL goes through.
+  // A vendor is more trusted than a Web-search backend, but the pill is titled by
+  // the vendor's own title now, so a `javascript:` or `data:` citation would render
+  // as an ordinary-looking link with nothing on screen to give it away — the raw URL
+  // used to be the label, which was the only thing making one visible.
   const sourceUrlParts = message.parts?.filter(
-    (part) => part.type === "source-url",
+    (part): part is SourceUrlUIPart =>
+      part.type === "source-url" && isPresentableUrl(part.url),
   );
+  // Citations from a Web-search backend's client-executed `web_search`, which
+  // arrive as a tool result rather than as `source-url` parts. Merged into the one
+  // Sources row below so the same Chat toggle presents its results the same way on
+  // a vLLM Provider as on Anthropic (ADR-0014).
+  const pluginSearchSources = webSearchSources(message.parts);
+  // A page named by both rows is one pill. Not reachable through search
+  // resolution — a turn resolves to a backend or to native search, never both
+  // (ADR-0014) — but a vendor emits `source-url` parts for citations that are not
+  // search results, and those can land in the same message as a backend search.
+  //
+  // The plugin entry is the one kept: both rows carry a real title, but the plugin
+  // URL has been through core's own presentability rules on the way in, so where the
+  // two disagree the vetted copy is the safer pill. Compared as exact strings, so a
+  // vendor URL differing by a trailing slash or a tracking parameter still reads as
+  // a second page — normalising URLs is a judgement call of its own and belongs
+  // with whoever asks for it.
+  const pluginSearchUrls = new Set(pluginSearchSources.map((s) => s.url));
+  const nativeSourceParts = sourceUrlParts?.filter(
+    (part) => !pluginSearchUrls.has(part.url),
+  );
+  const sourceCount =
+    (nativeSourceParts?.length ?? 0) + pluginSearchSources.length;
 
   const textContent =
     message.parts
@@ -152,12 +186,25 @@ export const ChatMessage = memo(function ChatMessage({
           ))}
         </MessageAttachments>
       )}
-      {message.role === "assistant" && !!sourceUrlParts?.length && (
+      {message.role === "assistant" && sourceCount > 0 && (
         <Sources>
-          <SourcesTrigger count={sourceUrlParts.length} />
-          {sourceUrlParts.map((part, i) => (
+          <SourcesTrigger count={sourceCount} />
+          {nativeSourceParts?.map((part, i) => (
             <SourcesContent key={`${message.id}-${i}`}>
-              <Source href={part.url} title={part.url} />
+              {/* A `source-url` part carries an optional title and Anthropic
+              sends one; the URL is the fallback for a vendor that does not, not
+              the label. Without this a native Provider shows raw URLs where a
+              backend Provider shows real titles, in the same row.
+              `||`, not `??`: a vendor sending an empty title would otherwise
+              render a pill with no label at all. */}
+              <Source href={part.url} title={part.title || part.url} />
+            </SourcesContent>
+          ))}
+          {pluginSearchSources.map((source) => (
+            <SourcesContent key={`${message.id}-search-${source.url}`}>
+              {/* Already URL-or-title resolved by `webSearchSources`, which
+              falls back the same way the native pills above do. */}
+              <Source href={source.url} title={source.title} />
             </SourcesContent>
           ))}
         </Sources>
@@ -238,6 +285,15 @@ export const ChatMessage = memo(function ChatMessage({
           );
         } else if (part.type === "tool-loadSkill") {
           return <LoadSkillTool key={`${message.id}-${i}`} toolPart={part} />;
+        } else if (isToolUIPart(part) && isPluginWebSearchPart(part)) {
+          // Before the generic branch: its results are already the Sources row
+          // above, so the raw JSON body would repeat every one of them.
+          //
+          // The predicate is shared with the Sources lifting and excludes
+          // provider-executed calls: native search registers under the same
+          // `web_search` name, and its parts belong on the generic renderer, which
+          // shows the vendor payload this card cannot read.
+          return <WebSearchTool key={`${message.id}-${i}`} toolPart={part} />;
         } else if (
           isToolUIPart(part) &&
           part.type.startsWith("tool-delegateTo")
