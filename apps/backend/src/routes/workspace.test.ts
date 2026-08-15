@@ -277,7 +277,9 @@ describe("Workspace Routes", () => {
         expect.anything(),
         "provider",
         "provider-other-org",
-        { orgId: "org-1", wsId: "ws-1" },
+        // The middleware's WorkspaceScope, passed through: what pins the fix is
+        // that the org/workspace pair reaches resolveScoped at all.
+        expect.objectContaining({ orgId: "org-1", workspaceId: "ws-1" }),
       );
       expect(mockDb.update).not.toHaveBeenCalled();
     });

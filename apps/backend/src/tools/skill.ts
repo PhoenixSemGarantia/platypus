@@ -15,7 +15,7 @@ export const createLoadSkillTool = (orgId: string, workspaceId: string) =>
       // org-scoped (Shared) one where attached to this workspace (ADR-0007).
       const found = await resolveScopedByName(db, "skill", name, {
         orgId,
-        wsId: workspaceId,
+        workspaceId,
       });
 
       if (!found) {

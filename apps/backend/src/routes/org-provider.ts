@@ -14,6 +14,7 @@ import {
 import { requireAuth } from "../middleware/authentication.ts";
 import {
   orgCredentialsVisible,
+  orgScopeOf,
   requireOrgAccess,
 } from "../middleware/authorization.ts";
 import {
@@ -34,7 +35,7 @@ orgProvider.post(
   requireOrgAccess(["admin"]),
   sValidator("json", providerCreateSchema),
   async (c) => {
-    const orgId = c.req.param("orgId")!;
+    const { orgId } = orgScopeOf(c);
     const data = c.req.valid("json");
 
     if (data.modelIds) {
@@ -59,7 +60,7 @@ orgProvider.post(
 
 /** List all organization providers */
 orgProvider.get("/", requireAuth, requireOrgAccess(), async (c) => {
-  const orgId = c.req.param("orgId")!;
+  const { orgId } = orgScopeOf(c);
   const rows = await listOrgScoped(db, "provider", orgId);
 
   // This route admits any Organization member — a Shared Provider has to be
@@ -72,7 +73,7 @@ orgProvider.get("/", requireAuth, requireOrgAccess(), async (c) => {
 
 /** Get an organization provider by ID */
 orgProvider.get("/:providerId", requireAuth, requireOrgAccess(), async (c) => {
-  const orgId = c.req.param("orgId")!;
+  const { orgId } = orgScopeOf(c);
   const providerId = c.req.param("providerId");
 
   const record = await requireOrgScoped(db, "provider", providerId, orgId);
@@ -89,7 +90,7 @@ orgProvider.put(
   requireOrgAccess(["admin"]),
   sValidator("json", providerUpdateSchema),
   async (c) => {
-    const orgId = c.req.param("orgId")!;
+    const { orgId } = orgScopeOf(c);
     const providerId = c.req.param("providerId");
     const data = c.req.valid("json");
 
@@ -147,7 +148,7 @@ orgProvider.delete(
   requireAuth,
   requireOrgAccess(["admin"]),
   async (c) => {
-    const orgId = c.req.param("orgId")!;
+    const { orgId } = orgScopeOf(c);
     const providerId = c.req.param("providerId");
 
     // A Shared resource cannot be deleted while anything still points at it —

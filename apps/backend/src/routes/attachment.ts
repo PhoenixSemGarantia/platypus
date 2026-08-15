@@ -9,6 +9,7 @@ import { requireAuth } from "../middleware/authentication.ts";
 import {
   requireOrgAccess,
   requireWorkspaceAccess,
+  workspaceScopeOf,
 } from "../middleware/authorization.ts";
 import { isUniqueViolation } from "../errors.ts";
 import { resolveOrgScoped } from "../services/scoped-resource.ts";
@@ -27,7 +28,7 @@ attachment.get(
   requireOrgAccess(["admin"]),
   requireWorkspaceAccess,
   async (c) => {
-    const workspaceId = c.req.param("workspaceId")!;
+    const { workspaceId } = workspaceScopeOf(c);
     const results = await db
       .select()
       .from(attachmentTable)
@@ -44,8 +45,7 @@ attachment.post(
   requireWorkspaceAccess,
   sValidator("json", attachmentCreateSchema),
   async (c) => {
-    const orgId = c.req.param("orgId")!;
-    const workspaceId = c.req.param("workspaceId")!;
+    const { orgId, workspaceId } = workspaceScopeOf(c);
     const { resourceType, resourceId } = c.req.valid("json");
 
     // The resource must be org-scoped and belong to this organization — you can
@@ -88,7 +88,7 @@ attachment.delete(
   requireOrgAccess(["admin"]),
   requireWorkspaceAccess,
   async (c) => {
-    const workspaceId = c.req.param("workspaceId")!;
+    const { workspaceId } = workspaceScopeOf(c);
     const resourceType = c.req.param("resourceType");
     const resourceId = c.req.param("resourceId");
 

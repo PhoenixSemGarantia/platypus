@@ -93,7 +93,7 @@ export const generateChatMetadata = async (
   // makes it visible to this Workspace (ADR-0007).
   const found = await resolveScoped(db, "provider", effectiveProviderId, {
     orgId,
-    wsId: workspaceId,
+    workspaceId,
   });
   if (!found) {
     // Titling is fire-and-forget, so an unresolvable provider leaves chats

@@ -302,7 +302,7 @@ export const drizzleChatTurnQueries: ChatTurnQueries = {
     // Sandbox/MCP tools still rebind to that invoking Workspace via loadTools.
     const found = await resolveScoped(db, "agent", id, {
       orgId,
-      wsId: workspaceId,
+      workspaceId,
     });
     return found?.row ?? null;
   },
@@ -310,7 +310,7 @@ export const drizzleChatTurnQueries: ChatTurnQueries = {
   async getProvider(id, orgId, workspaceId) {
     const found = await resolveScoped(db, "provider", id, {
       orgId,
-      wsId: workspaceId,
+      workspaceId,
     });
     return (found?.row as Provider | undefined) ?? null;
   },
@@ -318,7 +318,7 @@ export const drizzleChatTurnQueries: ChatTurnQueries = {
   async getSkillsByIds(ids, orgId, workspaceId) {
     const visible = await listScopedByIds(db, "skill", ids, {
       orgId,
-      wsId: workspaceId,
+      workspaceId,
     });
 
     // A workspace-scoped Skill wins a name collision with an attached org-scoped
@@ -338,7 +338,7 @@ export const drizzleChatTurnQueries: ChatTurnQueries = {
   async getMcp(id, orgId, workspaceId) {
     const found = await resolveScoped(db, "mcp", id, {
       orgId,
-      wsId: workspaceId,
+      workspaceId,
     });
     return found?.row ?? null;
   },
@@ -351,7 +351,7 @@ export const drizzleChatTurnQueries: ChatTurnQueries = {
     // prompt, and its Provider then failed to resolve.
     const visible = await listScopedByIds(db, "agent", ids, {
       orgId,
-      wsId: workspaceId,
+      workspaceId,
     });
 
     // Returned in assignment order so the prompt lists sub-agents the way the

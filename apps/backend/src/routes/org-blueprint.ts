@@ -19,7 +19,7 @@ import {
 } from "@platypus/schemas";
 import { and, eq, inArray } from "drizzle-orm";
 import { requireAuth } from "../middleware/authentication.ts";
-import { requireOrgAccess } from "../middleware/authorization.ts";
+import { orgScopeOf, requireOrgAccess } from "../middleware/authorization.ts";
 import type { Variables } from "../server.ts";
 import { applyBlueprintsToWorkspace } from "../services/blueprint-apply.ts";
 import { isBlueprintReferencedByLiveInvitation } from "../services/blueprint-guard.ts";
@@ -225,7 +225,7 @@ orgBlueprint.post(
   requireOrgAccess(["admin"]),
   sValidator("json", blueprintCreateSchema),
   async (c) => {
-    const orgId = c.req.param("orgId")!;
+    const { orgId } = orgScopeOf(c);
     const {
       name,
       description,
@@ -323,7 +323,7 @@ orgBlueprint.post(
 
 /** List Blueprints, each with its items (admin only) */
 orgBlueprint.get("/", requireAuth, requireOrgAccess(["admin"]), async (c) => {
-  const orgId = c.req.param("orgId")!;
+  const { orgId } = orgScopeOf(c);
   const blueprints = await db
     .select()
     .from(blueprintTable)
@@ -345,7 +345,7 @@ orgBlueprint.get(
   requireAuth,
   requireOrgAccess(["admin"]),
   async (c) => {
-    const orgId = c.req.param("orgId")!;
+    const { orgId } = orgScopeOf(c);
     const blueprintId = c.req.param("blueprintId");
     const [record] = await db
       .select()
@@ -375,7 +375,7 @@ orgBlueprint.put(
   requireOrgAccess(["admin"]),
   sValidator("json", blueprintUpdateSchema),
   async (c) => {
-    const orgId = c.req.param("orgId")!;
+    const { orgId } = orgScopeOf(c);
     const blueprintId = c.req.param("blueprintId");
     const {
       name,
@@ -494,7 +494,7 @@ orgBlueprint.delete(
   requireAuth,
   requireOrgAccess(["admin"]),
   async (c) => {
-    const orgId = c.req.param("orgId")!;
+    const { orgId } = orgScopeOf(c);
     const blueprintId = c.req.param("blueprintId");
 
     // A Blueprint cannot be deleted while a live pending invitation references
@@ -540,7 +540,7 @@ orgBlueprint.post(
   requireOrgAccess(["admin"]),
   sValidator("json", blueprintApplySchema),
   async (c) => {
-    const orgId = c.req.param("orgId")!;
+    const { orgId } = orgScopeOf(c);
     const blueprintId = c.req.param("blueprintId");
     const { workspaceId } = c.req.valid("json");
 

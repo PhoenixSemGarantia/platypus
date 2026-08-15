@@ -85,7 +85,7 @@ export function createKanbanTools(
     return { ...result.card, ...(url && { url }) };
   };
 
-  const listAgents = createListAgentsTool({ orgId, wsId: workspaceId });
+  const listAgents = createListAgentsTool({ orgId, workspaceId });
 
   const listBoards = tool({
     description: "List all kanban boards in the current workspace.",

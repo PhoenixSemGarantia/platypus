@@ -7,6 +7,7 @@ import {
   attachment as attachmentTable,
 } from "../db/schema.ts";
 import { db } from "../index.ts";
+import type { ScopeContext } from "../scope.ts";
 import { ConflictError, LockedError, NotFoundError } from "../errors.ts";
 import { isResourceListedInBlueprint } from "./blueprint-guard.ts";
 
@@ -80,9 +81,6 @@ const REGISTRY: Record<ScopedResourceType, RegistryEntry> = {
   provider: { table: providerTable, label: "Provider", noun: "provider" },
 };
 
-/** The Workspace a Scoped resource is resolved relative to. */
-export type ScopeContext = { orgId: string; wsId: string };
-
 type Database = typeof db;
 
 /**
@@ -107,14 +105,14 @@ const isAttached = async (
   database: Database,
   type: ScopedResourceType,
   id: string,
-  wsId: string,
+  workspaceId: string,
 ): Promise<boolean> => {
   const [attached] = await database
     .select({ id: attachmentTable.id })
     .from(attachmentTable)
     .where(
       and(
-        eq(attachmentTable.workspaceId, wsId),
+        eq(attachmentTable.workspaceId, workspaceId),
         eq(attachmentTable.resourceType, type),
         eq(attachmentTable.resourceId, id),
       ),
@@ -144,7 +142,7 @@ export const resolveScoped = async <T extends ScopedResourceType>(
       and(
         eq(table.id, id),
         or(
-          eq(table.workspaceId, ctx.wsId),
+          eq(table.workspaceId, ctx.workspaceId),
           eq(table.organizationId, ctx.orgId),
         ),
       ),
@@ -156,13 +154,13 @@ export const resolveScoped = async <T extends ScopedResourceType>(
   // Classified by which scope the row actually carries, not by elimination: a row
   // holding both columns would otherwise fall through to "workspace" and be
   // visible here on the strength of its organizationId alone.
-  if (row.workspaceId === ctx.wsId) {
+  if (row.workspaceId === ctx.workspaceId) {
     return { row, scope: "workspace" };
   }
   if (!isSharedRow(row, ctx.orgId)) return null;
 
   // A Shared resource is visible here only through an Attachment (ADR-0007).
-  if (!(await isAttached(database, type, id, ctx.wsId))) return null;
+  if (!(await isAttached(database, type, id, ctx.workspaceId))) return null;
   return { row, scope: "organization" };
 };
 
@@ -188,7 +186,7 @@ export const resolveScopedByName = async <T extends ScopedResourceType>(
   const workspaceRows = await database
     .select()
     .from(table)
-    .where(and(eq(table.workspaceId, ctx.wsId), eq(table.name, name)))
+    .where(and(eq(table.workspaceId, ctx.workspaceId), eq(table.name, name)))
     .limit(1);
   const workspaceRow = workspaceRows[0] as RowOf[T] | undefined;
   if (workspaceRow) return { row: workspaceRow, scope: "workspace" };
@@ -210,7 +208,8 @@ export const resolveScopedByName = async <T extends ScopedResourceType>(
   const orgRow = orgRows[0] as RowOf[T] | undefined;
   if (!orgRow) return null;
 
-  if (!(await isAttached(database, type, orgRow.id, ctx.wsId))) return null;
+  if (!(await isAttached(database, type, orgRow.id, ctx.workspaceId)))
+    return null;
   return { row: orgRow, scope: "organization" };
 };
 
@@ -233,7 +232,7 @@ export const listScoped = async <T extends ScopedResourceType>(
     .from(table)
     .where(
       and(
-        eq(table.workspaceId, ctx.wsId),
+        eq(table.workspaceId, ctx.workspaceId),
         ids ? inArray(table.id, ids) : undefined,
       ),
     );
@@ -251,7 +250,7 @@ export const listScoped = async <T extends ScopedResourceType>(
       and(
         eq(attachmentTable.resourceId, table.id),
         eq(attachmentTable.resourceType, type),
-        eq(attachmentTable.workspaceId, ctx.wsId),
+        eq(attachmentTable.workspaceId, ctx.workspaceId),
       ),
     )
     .where(
