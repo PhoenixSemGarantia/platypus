@@ -12,15 +12,16 @@ import {
   mcpUpdateSchema,
   mcpTestSchema,
 } from "@platypus/schemas";
-import { eq, and } from "drizzle-orm";
 import { requireAuth } from "../middleware/authentication.ts";
 import {
   orgCredentialsVisible,
+  orgScopeOf,
   requireOrgAccess,
 } from "../middleware/authorization.ts";
 import { scrubDeletedAgentReference } from "../services/agent-references.ts";
 import {
   listOrgScoped,
+  orgScopedWhere,
   requireOrgScoped,
   resolveOrgScoped,
   requireSharedDeletable,
@@ -52,7 +53,7 @@ orgMcp.post(
   requireOrgAccess(["admin"]),
   sValidator("json", mcpCreateSchema),
   async (c) => {
-    const orgId = c.req.param("orgId")!;
+    const { orgId } = orgScopeOf(c);
     const data = c.req.valid("json");
 
     // A duplicate name surfaces as a Postgres unique violation, mapped to 409
@@ -72,7 +73,7 @@ orgMcp.post(
 
 /** List org-scoped MCPs */
 orgMcp.get("/", requireAuth, requireOrgAccess(), async (c) => {
-  const orgId = c.req.param("orgId")!;
+  const { orgId } = orgScopeOf(c);
   const results = await listOrgScoped(db, "mcp", orgId);
   // This route admits any Organization member — a Shared MCP has to be listable
   // to be granted. Only an Org Admin sees its request credentials (ADR-0006).
@@ -84,7 +85,7 @@ orgMcp.get("/", requireAuth, requireOrgAccess(), async (c) => {
 
 /** Get an org-scoped MCP by ID */
 orgMcp.get("/:mcpId", requireAuth, requireOrgAccess(), async (c) => {
-  const orgId = c.req.param("orgId")!;
+  const { orgId } = orgScopeOf(c);
   const mcpId = c.req.param("mcpId");
   const record = await requireOrgScoped(db, "mcp", mcpId, orgId);
   // See the list route: request credentials are Org-Admin-only (ADR-0006).
@@ -99,7 +100,7 @@ orgMcp.put(
   requireOrgAccess(["admin"]),
   sValidator("json", mcpUpdateSchema),
   async (c) => {
-    const orgId = c.req.param("orgId")!;
+    const { orgId } = orgScopeOf(c);
     const mcpId = c.req.param("mcpId");
     const data = c.req.valid("json");
 
@@ -121,7 +122,7 @@ orgMcp.put(
         }),
         updatedAt: new Date(),
       })
-      .where(and(eq(mcpTable.id, mcpId), eq(mcpTable.organizationId, orgId)))
+      .where(orgScopedWhere("mcp", mcpId, orgId))
       .returning();
     if (record.length === 0) {
       throw new NotFoundError("MCP not found");
@@ -136,7 +137,7 @@ orgMcp.delete(
   requireAuth,
   requireOrgAccess(["admin"]),
   async (c) => {
-    const orgId = c.req.param("orgId")!;
+    const { orgId } = orgScopeOf(c);
     const mcpId = c.req.param("mcpId");
 
     // A Shared resource cannot be deleted while anything still points at it —
@@ -149,7 +150,7 @@ orgMcp.delete(
     const result = await db.transaction(async (tx) => {
       const rows = await tx
         .delete(mcpTable)
-        .where(and(eq(mcpTable.id, mcpId), eq(mcpTable.organizationId, orgId)))
+        .where(orgScopedWhere("mcp", mcpId, orgId))
         .returning();
       if (rows.length > 0) {
         await scrubDeletedAgentReference(tx, "toolSetIds", mcpId);
@@ -172,11 +173,14 @@ orgMcp.post(
   async (c) => {
     const data = c.req.valid("json");
 
+    // Read outside the try: the catch below turns anything thrown into a 400
+    // "connection failed", which is the wrong answer for a misconfigured route.
+    const { orgId } = orgScopeOf(c);
+
     let mcpClient;
     try {
       // For OAuth, use authProvider with stored tokens
       if (data.authType === "OAuth" && data.mcpId) {
-        const orgId = c.req.param("orgId")!;
         const mcpRecord = await resolveOrgScoped(db, "mcp", data.mcpId, orgId);
 
         if (!mcpRecord) {
@@ -245,7 +249,7 @@ orgMcp.post(
   requireAuth,
   requireOrgAccess(["admin"]),
   async (c) => {
-    const orgId = c.req.param("orgId")!;
+    const { orgId } = orgScopeOf(c);
     const mcpId = c.req.param("mcpId");
 
     let mcpRecord = await resolveOrgScoped(db, "mcp", mcpId, orgId);
@@ -273,7 +277,7 @@ orgMcp.post(
       await db
         .update(mcpTable)
         .set({ ...OAUTH_TOKEN_CLEAR_FIELDS, updatedAt: new Date() })
-        .where(eq(mcpTable.id, mcpId));
+        .where(orgScopedWhere("mcp", mcpId, orgId));
       mcpRecord = { ...mcpRecord, ...OAUTH_TOKEN_CLEAR_FIELDS };
     }
 
@@ -310,13 +314,13 @@ orgMcp.post(
   requireAuth,
   requireOrgAccess(["admin"]),
   async (c) => {
-    const orgId = c.req.param("orgId")!;
+    const { orgId } = orgScopeOf(c);
     const mcpId = c.req.param("mcpId");
 
     const record = await db
       .update(mcpTable)
       .set({ ...OAUTH_TOKEN_CLEAR_FIELDS, updatedAt: new Date() })
-      .where(and(eq(mcpTable.id, mcpId), eq(mcpTable.organizationId, orgId)))
+      .where(orgScopedWhere("mcp", mcpId, orgId))
       .returning();
 
     if (record.length === 0) {

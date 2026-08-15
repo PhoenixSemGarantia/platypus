@@ -3,15 +3,15 @@ import { sValidator } from "@hono/standard-validator";
 import { db } from "../index.ts";
 import { agent as agentTable } from "../db/schema.ts";
 import { agentUpdateSchema } from "@platypus/schemas";
-import { eq, and } from "drizzle-orm";
 import { dedupeArray } from "../utils.ts";
 import { requireAuth } from "../middleware/authentication.ts";
-import { requireOrgAccess } from "../middleware/authorization.ts";
+import { orgScopeOf, requireOrgAccess } from "../middleware/authorization.ts";
 import { findNonSharedReferences } from "../services/agent-scope-validation.ts";
 import { SUB_AGENT_SELF_ASSIGNMENT_ERROR } from "../services/sub-agent-validation.ts";
 import { scrubDeletedAgentReference } from "../services/agent-references.ts";
 import {
   listOrgScoped,
+  orgScopedWhere,
   requireOrgScoped,
   requireSharedDeletable,
 } from "../services/scoped-resource.ts";
@@ -38,7 +38,7 @@ function agentWithAvatarUrl(
 
 /** List org-scoped Agents */
 orgAgent.get("/", requireAuth, requireOrgAccess(), async (c) => {
-  const orgId = c.req.param("orgId")!;
+  const { orgId } = orgScopeOf(c);
   const baseUrl = getOrigin(c);
   const results = await listOrgScoped(db, "agent", orgId);
   return c.json({
@@ -48,7 +48,7 @@ orgAgent.get("/", requireAuth, requireOrgAccess(), async (c) => {
 
 /** Get an org-scoped Agent by ID */
 orgAgent.get("/:agentId", requireAuth, requireOrgAccess(), async (c) => {
-  const orgId = c.req.param("orgId")!;
+  const { orgId } = orgScopeOf(c);
   const agentId = c.req.param("agentId");
   const baseUrl = getOrigin(c);
   const record = await requireOrgScoped(db, "agent", agentId, orgId);
@@ -62,7 +62,7 @@ orgAgent.put(
   requireOrgAccess(["admin"]),
   sValidator("json", agentUpdateSchema),
   async (c) => {
-    const orgId = c.req.param("orgId")!;
+    const { orgId } = orgScopeOf(c);
     const agentId = c.req.param("agentId");
     const data = c.req.valid("json");
     const baseUrl = getOrigin(c);
@@ -98,9 +98,7 @@ orgAgent.put(
     const record = await db
       .update(agentTable)
       .set({ ...data, updatedAt: new Date() })
-      .where(
-        and(eq(agentTable.id, agentId), eq(agentTable.organizationId, orgId)),
-      )
+      .where(orgScopedWhere("agent", agentId, orgId))
       .returning();
     if (record.length === 0) {
       throw new NotFoundError("Agent not found");
@@ -115,7 +113,7 @@ orgAgent.post(
   requireAuth,
   requireOrgAccess(["admin"]),
   async (c) => {
-    const orgId = c.req.param("orgId")!;
+    const { orgId } = orgScopeOf(c);
     const agentId = c.req.param("agentId");
     const baseUrl = getOrigin(c);
 
@@ -130,9 +128,7 @@ orgAgent.post(
     const record = await db
       .update(agentTable)
       .set({ avatarKey: result.key, updatedAt: new Date() })
-      .where(
-        and(eq(agentTable.id, agentId), eq(agentTable.organizationId, orgId)),
-      )
+      .where(orgScopedWhere("agent", agentId, orgId))
       .returning();
     return c.json(agentWithAvatarUrl(record[0], baseUrl));
   },
@@ -144,7 +140,7 @@ orgAgent.delete(
   requireAuth,
   requireOrgAccess(["admin"]),
   async (c) => {
-    const orgId = c.req.param("orgId")!;
+    const { orgId } = orgScopeOf(c);
     const agentId = c.req.param("agentId");
     const baseUrl = getOrigin(c);
 
@@ -155,9 +151,7 @@ orgAgent.delete(
     const record = await db
       .update(agentTable)
       .set({ avatarKey: null, updatedAt: new Date() })
-      .where(
-        and(eq(agentTable.id, agentId), eq(agentTable.organizationId, orgId)),
-      )
+      .where(orgScopedWhere("agent", agentId, orgId))
       .returning();
     return c.json(agentWithAvatarUrl(record[0], baseUrl));
   },
@@ -169,7 +163,7 @@ orgAgent.delete(
   requireAuth,
   requireOrgAccess(["admin"]),
   async (c) => {
-    const orgId = c.req.param("orgId")!;
+    const { orgId } = orgScopeOf(c);
     const agentId = c.req.param("agentId");
 
     // A Shared resource cannot be deleted while anything still points at it —
@@ -182,9 +176,7 @@ orgAgent.delete(
     const result = await db.transaction(async (tx) => {
       const rows = await tx
         .delete(agentTable)
-        .where(
-          and(eq(agentTable.id, agentId), eq(agentTable.organizationId, orgId)),
-        )
+        .where(orgScopedWhere("agent", agentId, orgId))
         .returning();
       if (rows.length > 0) {
         await scrubDeletedAgentReference(tx, "subAgentIds", agentId);

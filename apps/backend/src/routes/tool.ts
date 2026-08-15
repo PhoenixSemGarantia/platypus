@@ -6,6 +6,7 @@ import { requireAuth } from "../middleware/authentication.ts";
 import {
   requireOrgAccess,
   requireWorkspaceAccess,
+  workspaceScopeOf,
 } from "../middleware/authorization.ts";
 import { listScoped } from "../services/scoped-resource.ts";
 import type { Variables } from "../server.ts";
@@ -19,8 +20,6 @@ tool.get(
   requireOrgAccess(),
   requireWorkspaceAccess,
   async (c) => {
-    const orgId = c.req.param("orgId")!;
-    const workspaceId = c.req.param("workspaceId")!;
     // Get static tools. Each set is annotated with the `plugin` that
     // contributed it (ADR-0013 observability); the core-internal `sandbox` set is
     // a static registration (not a plugin contribution), so it reads as
@@ -44,7 +43,7 @@ tool.get(
     // The MCPs this Workspace may actually use: its own, plus the Shared
     // (org-scoped) ones attached to it (ADR-0007) — the same set `GET /mcps`
     // lists, resolved through the same authority.
-    const mcps = await listScoped(db, "mcp", { orgId, wsId: workspaceId });
+    const mcps = await listScoped(db, "mcp", workspaceScopeOf(c));
     const mcpList = mcps.map(({ row }) => ({
       id: row.id,
       name: row.name,

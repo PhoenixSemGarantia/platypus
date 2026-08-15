@@ -9,8 +9,8 @@ import {
   listScoped,
   resolveScopedByName,
   workspaceMutationLockedMessage,
-  type ScopeContext,
 } from "../services/scoped-resource.ts";
+import type { ScopeContext } from "../scope.ts";
 
 // Field constraints come from the shared schema so the agent-facing tool can
 // never drift from the bounds the HTTP routes and the web form enforce.
@@ -29,7 +29,7 @@ export function createSkillManagementTools(
   orgId: string,
   frontendUrl: string | undefined,
 ): Record<string, Tool> {
-  const ctx: ScopeContext = { orgId, wsId: workspaceId };
+  const ctx: ScopeContext = { orgId, workspaceId };
 
   const listSkills = tool({
     description:
