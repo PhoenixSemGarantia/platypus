@@ -754,6 +754,31 @@ describe("ProviderForm Web-search backend selector", () => {
     expect(screen.queryByText(/Native web search is off/)).toBeNull();
   });
 
+  // Turning the switch off is exactly what its own description tells a vLLM /
+  // Ollama Operator to do. With no backend selected there is nothing the warning
+  // could be about, and "this backend" names something that is not there.
+  it("says nothing about a backend that is not selected when the switch is off", () => {
+    webBackendCatalog = CATALOG;
+    renderWithAdvancedOpen({ nativeSearchEnabled: false });
+
+    expect(webBackendSelect()).not.toBeNull();
+    expect(screen.queryByText(/Native web search is off/)).toBeNull();
+  });
+
+  it("says nothing about an absent backend where the switch is not shown", () => {
+    webBackendCatalog = CATALOG;
+    renderWithAdvancedOpen({
+      providerType: "Bedrock",
+      nativeSearchEnabled: false,
+    } as Partial<Provider>);
+
+    expect(webBackendSelect()).not.toBeNull();
+    expect(screen.queryByText(/Native web search is off/)).toBeNull();
+    expect(
+      screen.queryByText(/set back on through the Provider API/),
+    ).toBeNull();
+  });
+
   // The recovery path for a stale id on a deployment where nothing is installed:
   // choosing None empties `webBackend`, which is the same value the field's own
   // visibility condition reads. Unlatched, the control unmounted here — mid-
