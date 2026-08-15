@@ -4,7 +4,7 @@ import type {
 } from "@platypuschat/plugin-sdk";
 import { PLUGIN_API_VERSION } from "@platypuschat/plugin-sdk";
 import {
-  SshSandboxBackend,
+  createSshSandboxBackend,
   sshSandboxConfigSchema,
   sshSandboxCredentialsSchema,
   type SshSandboxConfig,
@@ -28,7 +28,7 @@ const sshBackend: SandboxBackendContribution<
   name: "SSH (Remote Host)",
   configSchema: sshSandboxConfigSchema,
   credentialsSchema: sshSandboxCredentialsSchema,
-  create: (config, credentials) => new SshSandboxBackend(config, credentials),
+  create: (config, credentials) => createSshSandboxBackend(config, credentials),
 };
 
 export const plugin: PlatypusPlugin = {

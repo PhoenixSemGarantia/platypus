@@ -2,6 +2,20 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { PassThrough } from "node:stream";
 
 // ---------------------------------------------------------------------------
+// This suite covers the Docker *transport* only: container/volume lifecycle,
+// the tar builder, idempotent teardown, and that dockerode is driven with the
+// argv it was handed. The five-tool contract those primitives sit under —
+// line counting, truncation flags, the timeout clamp, the unique-`oldString`
+// rule, the find(1) argv and its output parser — belongs to
+// `createPosixSandbox` and is tested once in `src/sandbox/posix.test.ts`.
+// Duplicating any of it here would just give the same rule two homes.
+//
+// The tests still drive the composed backend (`createDockerSandboxBackend`)
+// rather than the transport in isolation, because what reaches dockerode is
+// only interesting once core has resolved the path and built the argv.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
 // Mock dockerode. The default export is a class; calling `new Docker()` must
 // return our fake docker handle. We pull state out of `mockState` so tests can
 // configure per-call behaviour.
@@ -256,15 +270,17 @@ vi.mock("../../logger.ts", () => ({
 
 // Import AFTER vi.mock so the adapter binds to our mocked dockerode.
 import {
-  DockerSandboxBackend,
+  createDockerSandboxBackend,
   buildSingleFileTar,
   dockerSandboxConfigSchema,
 } from "./backend.ts";
 import { logger } from "../../logger.ts";
 import {
+  MAX_READ_BYTES,
   MAX_SHELL_OUTPUT_BYTES,
   SANDBOX_WORKSPACE_ROOT,
 } from "../../sandbox/index.ts";
+import { buildFindArgs } from "../../sandbox/posix.ts";
 import type { SandboxContext } from "../../sandbox/types.ts";
 
 const ctx: SandboxContext = {
@@ -342,13 +358,13 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-describe("DockerSandboxBackend — provisioning", () => {
+describe("DockerSandboxTransport — provisioning", () => {
   it("provisions a new container when none exists", async () => {
     setupFreshProvision();
     // Plus an exec for the actual tool call.
     queueExec({ stdout: "hi", exitCode: 0 });
 
-    const backend = new DockerSandboxBackend({}, {});
+    const backend = createDockerSandboxBackend({}, {});
     await backend.shellExec(ctx, { command: "echo hi" });
 
     expect(mockState.pullCalls).toEqual(["debian:stable-slim"]);
@@ -366,7 +382,7 @@ describe("DockerSandboxBackend — provisioning", () => {
     setupFreshProvision();
     queueExec({ exitCode: 0 });
 
-    const backend = new DockerSandboxBackend({}, {});
+    const backend = createDockerSandboxBackend({}, {});
     await backend.shellExec(ctx, { command: "true" });
 
     const opts = mockState.createContainerCalls[0];
@@ -398,7 +414,7 @@ describe("DockerSandboxBackend — provisioning", () => {
     );
     queueExec({ stdout: "ok", exitCode: 0 });
 
-    const backend = new DockerSandboxBackend({}, {});
+    const backend = createDockerSandboxBackend({}, {});
     await backend.shellExec(ctx, { command: "true" });
 
     expect(mockState.createContainerCalls).toHaveLength(0);
@@ -414,7 +430,7 @@ describe("DockerSandboxBackend — provisioning", () => {
     );
     queueExec({ exitCode: 0 });
 
-    const backend = new DockerSandboxBackend({}, {});
+    const backend = createDockerSandboxBackend({}, {});
     await backend.shellExec(ctx, { command: "true" });
 
     expect(mockState.existingContainer.start).toHaveBeenCalledTimes(1);
@@ -427,7 +443,7 @@ describe("DockerSandboxBackend — provisioning", () => {
     queueExec({ exitCode: 0 });
     queueExec({ exitCode: 0 });
 
-    const backend = new DockerSandboxBackend({}, {});
+    const backend = createDockerSandboxBackend({}, {});
     await Promise.all([
       backend.shellExec(ctx, { command: "a" }),
       backend.shellExec(ctx, { command: "b" }),
@@ -437,12 +453,12 @@ describe("DockerSandboxBackend — provisioning", () => {
   });
 });
 
-describe("DockerSandboxBackend — argv safety", () => {
+describe("DockerSandboxTransport — argv safety", () => {
   it("fsRead passes shell-metachar path as literal argv", async () => {
     setupFreshProvision();
     queueExec({ stdout: "data", exitCode: 0 });
 
-    const backend = new DockerSandboxBackend({}, {});
+    const backend = createDockerSandboxBackend({}, {});
     const malicious = `foo";rm -rf /`;
     await backend.fsRead(ctx, { path: malicious });
 
@@ -451,43 +467,38 @@ describe("DockerSandboxBackend — argv safety", () => {
     expect(last.Cmd).toEqual(["cat", "--", `/workspace/${malicious}`]);
   });
 
-  it("fsList simple glob uses -name", async () => {
+  it("fsRead bounds the cat output at the cap core asked for", async () => {
+    // `cat` will happily emit a gigabyte; the stdout cap is what keeps a huge
+    // file from being buffered whole. Whether a filled buffer counts as
+    // truncated is core's rule, tested in sandbox/posix.test.ts.
     setupFreshProvision();
-    queueExec({ stdout: "", exitCode: 0 });
+    queueExec({ stdout: "a".repeat(MAX_READ_BYTES + 5_000), exitCode: 0 });
 
-    const backend = new DockerSandboxBackend({}, {});
-    await backend.fsList(ctx, { glob: "*.ts" });
+    const backend = createDockerSandboxBackend({}, {});
+    const res = await backend.fsRead(ctx, { path: "big.txt" });
 
-    const last = mockState.execCalls.at(-1) as { Cmd: string[] };
-    const idx = last.Cmd.indexOf("-name");
-    expect(idx).toBeGreaterThan(-1);
-    expect(last.Cmd[idx + 1]).toBe("*.ts");
+    expect(res.content).toHaveLength(MAX_READ_BYTES);
   });
 
-  it("fsList glob with slash uses -path */<glob>", async () => {
-    setupFreshProvision();
+  it("fsList hands core's find argv to dockerode unmodified", async () => {
+    // Pre-warm with a running container so the find exec is the only one and
+    // execCalls[0] is unambiguous.
+    mockState.existingContainer = makeFakeContainer();
+    mockState.containerInspects.push(() =>
+      Promise.resolve({ State: { Running: true } }),
+    );
     queueExec({ stdout: "", exitCode: 0 });
 
-    const backend = new DockerSandboxBackend({}, {});
-    await backend.fsList(ctx, { glob: "src/*.ts" });
-
-    const last = mockState.execCalls.at(-1) as { Cmd: string[] };
-    const idx = last.Cmd.indexOf("-path");
-    expect(idx).toBeGreaterThan(-1);
-    expect(last.Cmd[idx + 1]).toBe("*/src/*.ts");
-  });
-
-  it("fsList glob with ** collapses ** to * for find", async () => {
-    setupFreshProvision();
-    queueExec({ stdout: "", exitCode: 0 });
-
-    const backend = new DockerSandboxBackend({}, {});
+    const backend = createDockerSandboxBackend({}, {});
     await backend.fsList(ctx, { glob: "**/*.ts" });
 
-    const last = mockState.execCalls.at(-1) as { Cmd: string[] };
-    const idx = last.Cmd.indexOf("-path");
-    expect(idx).toBeGreaterThan(-1);
-    expect(last.Cmd[idx + 1]).toBe("*/*/*.ts");
+    // What the glob rules *are* is core's business (posix.test.ts). What this
+    // asserts is that the transport adds no shell and re-quotes nothing: the
+    // argv core built arrives at the daemon element for element.
+    const call = mockState.execCalls[0] as { Cmd: string[] };
+    expect(call.Cmd).toEqual(
+      buildFindArgs(SANDBOX_WORKSPACE_ROOT, { glob: "**/*.ts" }),
+    );
   });
 
   it("fsWrite create-mode probes with [test, -e, <path>] and throws if exists", async () => {
@@ -495,7 +506,7 @@ describe("DockerSandboxBackend — argv safety", () => {
     // probe — file exists (exit 0).
     queueExec({ exitCode: 0 });
 
-    const backend = new DockerSandboxBackend({}, {});
+    const backend = createDockerSandboxBackend({}, {});
     await expect(
       backend.fsWrite(ctx, {
         path: "foo",
@@ -516,7 +527,7 @@ describe("DockerSandboxBackend — argv safety", () => {
       Promise.resolve({ State: { Running: true } }),
     );
 
-    const backend = new DockerSandboxBackend({}, {});
+    const backend = createDockerSandboxBackend({}, {});
     await backend.fsWrite(ctx, {
       path: "foo.txt",
       content: "hello",
@@ -529,7 +540,7 @@ describe("DockerSandboxBackend — argv safety", () => {
   });
 });
 
-describe("DockerSandboxBackend — tar builder", () => {
+describe("DockerSandboxTransport — tar builder", () => {
   it("buildSingleFileTar produces a parseable ustar archive", () => {
     const content = Buffer.from("hello world", "utf8");
     const tar = buildSingleFileTar("a/b.txt", content);
@@ -559,13 +570,13 @@ describe("DockerSandboxBackend — tar builder", () => {
   });
 });
 
-describe("DockerSandboxBackend — destroy() idempotence", () => {
+describe("DockerSandboxTransport — destroy() idempotence", () => {
   it("swallows 404 on stop and proceeds to remove + volume remove", async () => {
     mockState.existingContainer = makeFakeContainer();
     mockState.containerStop = () =>
       Promise.reject(makeStatusError("no such container", 404));
 
-    const backend = new DockerSandboxBackend({}, {});
+    const backend = createDockerSandboxBackend({}, {});
     await expect(backend.destroy(ctx)).resolves.toBeUndefined();
     expect(logger.warn).not.toHaveBeenCalled();
   });
@@ -575,7 +586,7 @@ describe("DockerSandboxBackend — destroy() idempotence", () => {
     mockState.containerStop = () =>
       Promise.reject(makeStatusError("already stopped", 304));
 
-    const backend = new DockerSandboxBackend({}, {});
+    const backend = createDockerSandboxBackend({}, {});
     await expect(backend.destroy(ctx)).resolves.toBeUndefined();
     expect(logger.warn).not.toHaveBeenCalled();
   });
@@ -587,7 +598,7 @@ describe("DockerSandboxBackend — destroy() idempotence", () => {
     mockState.volumeRemove = () =>
       Promise.reject(makeStatusError("not found", 404));
 
-    const backend = new DockerSandboxBackend({}, {});
+    const backend = createDockerSandboxBackend({}, {});
     await expect(backend.destroy(ctx)).resolves.toBeUndefined();
     expect(logger.warn).not.toHaveBeenCalled();
   });
@@ -607,7 +618,7 @@ describe("DockerSandboxBackend — destroy() idempotence", () => {
       return Promise.resolve(undefined);
     };
 
-    const backend = new DockerSandboxBackend({}, {});
+    const backend = createDockerSandboxBackend({}, {});
     await backend.destroy(ctx);
 
     expect(logger.warn).toHaveBeenCalledTimes(1);
@@ -616,13 +627,13 @@ describe("DockerSandboxBackend — destroy() idempotence", () => {
   });
 });
 
-describe("DockerSandboxBackend — shellExec output handling", () => {
+describe("DockerSandboxTransport — shellExec output handling", () => {
   it("times out: returns exitCode 124 and destroys the stream", async () => {
     setupFreshProvision();
     // Long-running exec — close after 200ms; timeout will be 20ms.
     queueExec({ closeDelayMs: 200, exitCode: 0 });
 
-    const backend = new DockerSandboxBackend({}, {});
+    const backend = createDockerSandboxBackend({}, {});
     const res = await backend.shellExec(ctx, {
       command: "sleep 5",
       timeoutMs: 20,
@@ -636,7 +647,7 @@ describe("DockerSandboxBackend — shellExec output handling", () => {
     const huge = "a".repeat(MAX_SHELL_OUTPUT_BYTES + 5_000);
     queueExec({ stdout: huge, exitCode: 0 });
 
-    const backend = new DockerSandboxBackend({}, {});
+    const backend = createDockerSandboxBackend({}, {});
     const res = await backend.shellExec(ctx, { command: "yes" });
 
     expect(res.stdout.length).toBe(MAX_SHELL_OUTPUT_BYTES);
@@ -644,42 +655,12 @@ describe("DockerSandboxBackend — shellExec output handling", () => {
   });
 });
 
-describe("DockerSandboxBackend — fsEdit error cases", () => {
-  it("throws when oldString is missing from file", async () => {
-    setupFreshProvision();
-    queueExec({ stdout: "the original content here", exitCode: 0 });
-
-    const backend = new DockerSandboxBackend({}, {});
-    await expect(
-      backend.fsEdit(ctx, {
-        path: "file.txt",
-        oldString: "does-not-appear",
-        newString: "x",
-      }),
-    ).rejects.toThrow(/oldString not found/);
-  });
-
-  it("throws when oldString is not unique", async () => {
-    setupFreshProvision();
-    queueExec({ stdout: "abc abc", exitCode: 0 });
-
-    const backend = new DockerSandboxBackend({}, {});
-    await expect(
-      backend.fsEdit(ctx, {
-        path: "file.txt",
-        oldString: "abc",
-        newString: "x",
-      }),
-    ).rejects.toThrow(/not unique/);
-  });
-});
-
-describe("DockerSandboxBackend — host reachability (ADR-0005)", () => {
+describe("DockerSandboxTransport — host reachability (ADR-0005)", () => {
   it("applies configured extraHosts to HostConfig.ExtraHosts", async () => {
     setupFreshProvision();
     queueExec({ exitCode: 0 });
 
-    const backend = new DockerSandboxBackend(
+    const backend = createDockerSandboxBackend(
       { extraHosts: ["host.docker.internal:host-gateway"] },
       {},
     );
@@ -694,7 +675,7 @@ describe("DockerSandboxBackend — host reachability (ADR-0005)", () => {
     setupFreshProvision();
     queueExec({ exitCode: 0 });
 
-    const backend = new DockerSandboxBackend(
+    const backend = createDockerSandboxBackend(
       { networks: ["primary", "secondary", "tertiary"] },
       {},
     );
@@ -717,7 +698,7 @@ describe("DockerSandboxBackend — host reachability (ADR-0005)", () => {
     setupFreshProvision();
     queueExec({ exitCode: 0 });
 
-    const backend = new DockerSandboxBackend({ networks: ["only"] }, {});
+    const backend = createDockerSandboxBackend({ networks: ["only"] }, {});
     await backend.shellExec(ctx, { command: "true" });
 
     expect(mockState.createContainerCalls[0].HostConfig?.NetworkMode).toBe(
