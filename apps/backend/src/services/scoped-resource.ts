@@ -1,4 +1,4 @@
-import { and, eq, or, inArray, isNull } from "drizzle-orm";
+import { and, eq, or, inArray, isNull, type SQL } from "drizzle-orm";
 import {
   agent as agentTable,
   skill as skillTable,
@@ -12,18 +12,21 @@ import { ConflictError, LockedError, NotFoundError } from "../errors.ts";
 import { isResourceListedInBlueprint } from "./blueprint-guard.ts";
 
 /**
- * The read side of the **Scoped resource** (CONTEXT.md): an Agent, Skill, MCP,
- * or Provider whose row lives at exactly one scope — a Workspace or the
- * Organization, mutually exclusive (ADR-0007). Resolved relative to a
- * Workspace it yields a `(row, scope)` pair: Workspace-scoped rows are visible
- * directly; Organization-scoped (Shared) rows are visible only where an
- * **Attachment** exists, and are locked against Workspace-surface mutation.
+ * The **Scoped resource** (CONTEXT.md): an Agent, Skill, MCP, or Provider whose
+ * row lives at exactly one scope — a Workspace or the Organization, mutually
+ * exclusive (ADR-0007). Resolved relative to a Workspace it yields a
+ * `(row, scope)` pair: Workspace-scoped rows are visible directly;
+ * Organization-scoped (Shared) rows are visible only where an **Attachment**
+ * exists, and are locked against Workspace-surface mutation.
  *
  * The Organization surface asks a narrower question — "is this a Shared
  * resource of this Organization?" — with no Workspace and so no Attachment in
- * play. `resolveOrgScoped`/`requireOrgScoped`/`listOrgScoped` answer it, and
- * take a bare `orgId` rather than a {@link ScopeContext} for exactly that
- * reason.
+ * play. `resolveOrgScoped`/`requireOrgScoped`/`listOrgScoped`/`listOrgScopedIds`
+ * answer it for reads, and take a bare `orgId` rather than a
+ * {@link ScopeContext} for exactly that reason; {@link orgScopedWhere} answers
+ * it for writes, so an `UPDATE`/`DELETE` on the Organization surface matches the
+ * same rows a read would. `isNull(workspaceId)` — what actually makes a row
+ * Shared — is spelled once here, in {@link sharedWhere}, rather than in each route.
  *
  * Collapses the "resolve → null-check → org-scope-403" branch that the
  * dual-scope resource routes each re-implemented. `resolveScoped`/
@@ -81,7 +84,68 @@ const REGISTRY: Record<ScopedResourceType, RegistryEntry> = {
   provider: { table: providerTable, label: "Provider", noun: "provider" },
 };
 
+/** The registry's key set, for the runtime guard below. */
+const SCOPED_RESOURCE_TYPES = new Set<string>(Object.keys(REGISTRY));
+
+/**
+ * Whether an untrusted string names a Scoped-resource type — for the routes
+ * that take a `resourceType` from a query param or a request body, which
+ * otherwise each re-list the four names beside their own copy of the registry.
+ * The value is attacker-supplied and ends up keying the registry, so membership
+ * is a real lookup rather than an `in` that would walk the prototype chain.
+ */
+export const isScopedResourceType = (
+  value: string | undefined,
+): value is ScopedResourceType =>
+  value !== undefined && SCOPED_RESOURCE_TYPES.has(value);
+
 type Database = typeof db;
+
+/**
+ * `and()` is typed to tolerate `undefined` operands and so widens to
+ * `SQL | undefined`. Every condition composed below is concrete, and a
+ * `.where(undefined)` would match the whole table — an unfiltered `UPDATE` or
+ * `DELETE` on the Organization surface. Asserting once here keeps that shape out
+ * of the predicates' return types, so no caller can be handed it.
+ */
+const allOf = (...conditions: (SQL | undefined)[]): SQL => and(...conditions)!;
+
+/**
+ * {@link isSharedRow} as SQL: at this Organization, and at no Workspace. The one
+ * place that condition is written — every query in this module, read or write,
+ * composes it.
+ */
+const sharedWhere = (table: ScopedTable, orgId: string): SQL =>
+  allOf(eq(table.organizationId, orgId), isNull(table.workspaceId));
+
+/**
+ * The `WHERE` clause matching a single **Shared resource** of this Organization
+ * — the write-side counterpart to {@link resolveOrgScoped}. An `UPDATE` or
+ * `DELETE` on the Organization surface passes it straight to `.where(...)`, so a
+ * write matches exactly the rows a read would rather than a hand-rolled
+ * `eq(organizationId)` that omits the Workspace check.
+ */
+export const orgScopedWhere = (
+  type: ScopedResourceType,
+  id: string,
+  orgId: string,
+): SQL => {
+  const { table } = REGISTRY[type];
+  return allOf(eq(table.id, id), sharedWhere(table, orgId));
+};
+
+/**
+ * {@link orgScopedWhere} over a set of ids — for the callers that validate a
+ * batch of references in one query rather than a row at a time.
+ */
+export const orgScopedWhereIn = (
+  type: ScopedResourceType,
+  ids: string[],
+  orgId: string,
+): SQL => {
+  const { table } = REGISTRY[type];
+  return allOf(inArray(table.id, ids), sharedWhere(table, orgId));
+};
 
 /**
  * Whether a row is a **Shared resource** of this Organization: org-scoped, and at
@@ -89,7 +153,8 @@ type Database = typeof db;
  * on write, not by a database constraint, so "has this organizationId" is not on
  * its own enough — a row holding both belongs to its Workspace and must not reach
  * another one on the strength of the org column. Absent rows are not Shared, so a
- * dangling id fails this too.
+ * dangling id fails this too. {@link sharedWhere} is the same rule as SQL, for
+ * the rows this module has yet to fetch.
  *
  * Exported because the Promotion guard (`findNonSharedReferences`) asks the same
  * question of rows it fetched itself.
@@ -191,19 +256,13 @@ export const resolveScopedByName = async <T extends ScopedResourceType>(
   const workspaceRow = workspaceRows[0] as RowOf[T] | undefined;
   if (workspaceRow) return { row: workspaceRow, scope: "workspace" };
 
-  // `isNull(workspaceId)` is what makes the row Shared: the scope columns are
-  // mutually exclusive on write, not by a database constraint, so a row carrying
-  // both must not reach another Workspace through that Workspace's Attachment.
+  // Only a genuinely Shared row answers here: a row carrying both scope columns
+  // belongs to its Workspace and must not reach another one through that
+  // Workspace's Attachment (see {@link sharedWhere}).
   const orgRows = await database
     .select()
     .from(table)
-    .where(
-      and(
-        eq(table.organizationId, ctx.orgId),
-        isNull(table.workspaceId),
-        eq(table.name, name),
-      ),
-    )
+    .where(and(sharedWhere(table, ctx.orgId), eq(table.name, name)))
     .limit(1);
   const orgRow = orgRows[0] as RowOf[T] | undefined;
   if (!orgRow) return null;
@@ -238,10 +297,9 @@ export const listScoped = async <T extends ScopedResourceType>(
     );
 
   // Shared rows appear in a Workspace only where attached (ADR-0007) — gate by
-  // an inner join on the Attachment table. `isNull(workspaceId)` is what makes
-  // the row org-scoped: the scope columns are mutually exclusive on write, not by
-  // a database constraint, so a row carrying both must not reach another
-  // Workspace through that Workspace's Attachment.
+  // an inner join on the Attachment table. Only genuinely Shared rows qualify:
+  // one carrying both scope columns belongs to its Workspace and must not reach
+  // another one through that Workspace's Attachment (see {@link sharedWhere}).
   const attachedRows = await database
     .select()
     .from(table)
@@ -255,8 +313,7 @@ export const listScoped = async <T extends ScopedResourceType>(
     )
     .where(
       and(
-        eq(table.organizationId, ctx.orgId),
-        isNull(table.workspaceId),
+        sharedWhere(table, ctx.orgId),
         ids ? inArray(table.id, ids) : undefined,
       ),
     );
@@ -300,12 +357,9 @@ export const listScopedByIds = <T extends ScopedResourceType>(
  * and so no Attachment to gate on. Returns `null` when the id is not a Shared
  * resource of this Organization. Never throws.
  *
- * `isNull(workspaceId)` carries the same defence `listScoped` applies to its
- * Organization half: the scope columns are mutually exclusive on write, not by a
- * database constraint, and a row carrying both belongs to its Workspace — it is
- * not Shared, and does not answer here. The org routes' own `UPDATE`/`DELETE`
- * clauses still match on `organizationId` alone; no route can write both columns,
- * so that gap is unreachable rather than closed.
+ * Reads {@link orgScopedWhere} — the same predicate the Organization surface's
+ * `UPDATE`/`DELETE` clauses match on, so a write can never reach a row this
+ * lookup would refuse.
  */
 export const resolveOrgScoped = async <T extends ScopedResourceType>(
   database: Database,
@@ -318,13 +372,7 @@ export const resolveOrgScoped = async <T extends ScopedResourceType>(
   const rows = await database
     .select()
     .from(table)
-    .where(
-      and(
-        eq(table.id, id),
-        eq(table.organizationId, orgId),
-        isNull(table.workspaceId),
-      ),
-    )
+    .where(orgScopedWhere(type, id, orgId))
     .limit(1);
   return (rows[0] as RowOf[T] | undefined) ?? null;
 };
@@ -361,8 +409,31 @@ export const listOrgScoped = async <T extends ScopedResourceType>(
   const rows = await database
     .select()
     .from(table)
-    .where(and(eq(table.organizationId, orgId), isNull(table.workspaceId)));
+    .where(sharedWhere(table, orgId));
   return rows as RowOf[T][];
+};
+
+/**
+ * The subset of `ids` that are Shared resources of this Organization, as a set
+ * of ids — for callers validating a list of references (a Blueprint's items)
+ * rather than reading rows, which can compare it against what they asked for and
+ * report the rest as blockers. Never throws; no query runs for an empty `ids`,
+ * which would otherwise reach the database as `IN ()`.
+ */
+export const listOrgScopedIds = async (
+  database: Database,
+  type: ScopedResourceType,
+  ids: string[],
+  orgId: string,
+): Promise<Set<string>> => {
+  if (ids.length === 0) return new Set();
+  const { table } = REGISTRY[type];
+
+  const rows = await database
+    .select({ id: table.id })
+    .from(table)
+    .where(orgScopedWhereIn(type, ids, orgId));
+  return new Set(rows.map((r) => r.id));
 };
 
 /**
