@@ -3,11 +3,6 @@ import { sValidator } from "@hono/standard-validator";
 import { z } from "zod";
 import { db } from "../index.ts";
 import { chat as chatTable } from "../db/schema.ts";
-import {
-  NotFoundError as ChatTurnNotFoundError,
-  ValidationError,
-} from "../services/chat-execution.ts";
-import { FileValidationError } from "../services/file-gate.ts";
 import { NotFoundError } from "../errors.ts";
 import { chatSubmitSchema, chatUpdateSchema } from "@platypus/schemas";
 import { and, count, desc, eq, or, sql } from "drizzle-orm";
@@ -143,33 +138,22 @@ chat.post(
       workspaceId: scope.workspaceId,
     });
 
-    try {
-      return await agentRunner.stream({
-        scope,
-        input,
-        sink,
-        options: {
-          // c.req.raw.signal is intentionally NOT passed: chat runs
-          // continue server-side regardless of the client connection.
-          // The client cancels via POST /chat/:chatId/cancel.
-          origin: getOrigin(c),
-          frontendUrl: process.env.FRONTEND_URL,
-        },
-      });
-    } catch (error) {
-      // A rejected attachment (issue #328) fails before the sink persists, so
-      // the chat is never bricked; surface it as a 400 naming the file(s).
-      if (error instanceof FileValidationError) {
-        return c.json({ message: error.message, files: error.files }, 400);
-      }
-      if (error instanceof ValidationError) {
-        return c.json({ message: error.message }, 400);
-      }
-      if (error instanceof ChatTurnNotFoundError) {
-        return c.json({ message: error.message }, 404);
-      }
-      throw error;
-    }
+    // A rejected attachment (issue #328), an unresolved Agent/Provider/model,
+    // or a missing Workspace throws before the sink persists anything, so the
+    // chat is never bricked — the central `onError` (ADR-0010) maps the typed
+    // error to its HTTP status.
+    return await agentRunner.stream({
+      scope,
+      input,
+      sink,
+      options: {
+        // c.req.raw.signal is intentionally NOT passed: chat runs
+        // continue server-side regardless of the client connection.
+        // The client cancels via POST /chat/:chatId/cancel.
+        origin: getOrigin(c),
+        frontendUrl: process.env.FRONTEND_URL,
+      },
+    });
   },
 );
 

@@ -81,3 +81,21 @@ service or the error seam, is what answers the caller.
 
 This is the same move `workspaceConfigAccess` made, not a new one — the amendment
 records it as one case, not two independent decisions.
+
+## Amendment — `FileValidationError` → 400 with `files` (#501)
+
+The Chat-turn path had drifted from this ADR: `chat-execution.ts` carried its own
+module-private `NotFoundError`/`ValidationError` (name-identical to, but a different class
+from, the ones here), invisible to `mapError`, so only the chat route's own `try`/`catch`
+kept them working — any other caller of `prepareChatTurn` (a future Gateway or Trigger)
+would have gotten a 500 from this seam instead of the right status. `file-gate.ts`'s
+`FileValidationError` was similarly kept standalone with a comment blaming an import cycle
+that importing it into `mapError` (rather than the reverse) does not have.
+
+The fix restores the seam rather than special-casing around it: `chat-execution.ts` now
+throws this module's `NotFoundError`/`ValidationError`, and `mapError` gained a
+`FileValidationError` case. `FileValidationError` itself stays defined in `file-gate.ts` — it
+groups `FileRejection`s (a file-domain type) into its message, which this module has no
+reason to know about — but `mapError`'s return grew an optional `files` field so the one
+`app.onError` can still carry it through. The chat route's `try`/`catch` is gone; every
+`prepareChatTurn` caller now gets the same status codes.

@@ -64,18 +64,6 @@ import {
 import type { RunPlan } from "../runs/run-plan.ts";
 import { NotFoundError, ValidationError } from "../errors.ts";
 
-// --- Errors ---
-
-/**
- * Re-exported so this module's existing callers (the chat route, tests) keep
- * resolving them from here. Both live in `../errors.ts` — the one hierarchy
- * every domain module raises, not a copy local to Chat: `ValidationError` for
- * a malformed/inconsistent request (e.g. a model id not enabled on the chosen
- * provider → 400), `NotFoundError` for a referenced record that does not
- * exist (Agent, Provider, Workspace → 404).
- */
-export { ValidationError, NotFoundError };
-
 // --- Types ---
 
 type AgentRow = typeof agentTable.$inferSelect;
@@ -636,8 +624,8 @@ export const prepareChatTurn = async (
  * if any attached file (fresh upload or history) is neither natively accepted,
  * text-like, nor a document extraction can convert to text (#342 — a freshly
  * uploaded document is extracted here to prove it, so a scanned PDF is refused
- * before it can enter history). Throws `FileValidationError`, which the chat
- * route maps to a 400 naming the offending file(s).
+ * before it can enter history). Throws `FileValidationError`, which the
+ * central `onError` (ADR-0010) maps to a 400 naming the offending file(s).
  *
  * A no-op when the turn carries no file parts (the common case, including all
  * headless runs), so it adds no lookups there. If model resolution itself fails
