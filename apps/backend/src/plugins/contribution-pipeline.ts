@@ -150,7 +150,7 @@ export const registerContributions = <TRegistration>(
 
     // Trimmed before namespacing: the id is half of a composed
     // `${manifest.name}.${id}` that gets persisted (into `agent.toolSetIds`,
-    // `sandbox.backend`, `provider.webBackend`), and the other half is held to a
+    // `sandbox.backend`, `provider.searchSource`), and the other half is held to a
     // url-safe slug for exactly that reason.
     const id = contributionId(rawId.trim());
 

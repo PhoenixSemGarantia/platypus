@@ -369,7 +369,7 @@ export interface WebBackendExecutors {
 /**
  * A single Web-search-backend contribution — the fourth Extension point, filling
  * core's request-gated web-search toggle slot (ADR-0014). `backend` is the
- * discriminator stored in the `provider.webBackend` column (auto-namespaced for
+ * discriminator stored in the `provider.searchSource` column (auto-namespaced for
  * third parties, flat for core, per ADR-0013); `name` is the display label shown
  * in the catalog and the Provider selector.
  *

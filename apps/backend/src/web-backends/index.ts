@@ -68,7 +68,7 @@ const READ_URL_DESCRIPTION =
 const WEB_BACKEND_TOOL_METADATA = { [WEB_BACKEND_TOOL_MARKER]: true };
 
 // The Web-search-backend instance of the shared Extension-point registry, keyed
-// by the discriminator stored in `provider.webBackend`.
+// by the discriminator stored in `provider.searchSource`.
 const WEB_BACKENDS = createContributionRegistry<WebBackendRegistration>({
   noun: "Web backend",
 });

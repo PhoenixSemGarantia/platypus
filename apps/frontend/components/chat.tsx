@@ -33,6 +33,8 @@ import {
   ToolSet,
   Skill,
   providerHasNativeSearch,
+  SEARCH_SOURCE_NATIVE,
+  SEARCH_SOURCE_NONE,
 } from "@platypus/schemas";
 import { type PlatypusUIMessage } from "@platypus/backend/src/types";
 import useSWR from "swr";
@@ -415,10 +417,11 @@ export const Chat = ({
   // tools. Hidden when nothing is resolved yet — we can't search without a
   // model. (#167)
   //
-  // Two ways to be capable, mirroring `resolveSearchMode`'s order: a configured
-  // Web-search backend (ADR-0014), which takes precedence, or the provider's own
-  // native search. So a vLLM or Bedrock Provider — no native search of any kind —
-  // gains the toggle as soon as a backend is selected on it.
+  // Mirrors `resolveSearchMode`'s own precedence: `searchSource` of "none"
+  // serves nothing, a value naming a Web-search backend (ADR-0014) serves that
+  // backend, and "native" serves the provider's own search if it has one. So a
+  // vLLM or Bedrock Provider — no native search of any kind — gains the toggle
+  // as soon as a backend is selected on it.
   //
   // The capability test is `providerHasNativeSearch`, shared with the backend's
   // injection gate, rather than a local `!== "Bedrock"`: the gate is the
@@ -427,18 +430,15 @@ export const Chat = ({
   // tools. Bedrock is not the only case — OpenAI's search is Responses-API
   // only, so a chat-completions endpoint (vLLM, llama.cpp) has none either.
   //
-  // `nativeSearchEnabled` gates both paths, not just the native one — its name
-  // predates web backends and it is currently the master "search allowed here"
-  // switch. The Provider form says so on the backend selector.
-  //
   // A configured backend is trusted on the stored id alone: no catalog fetch, no
   // liveness check. An id whose plugin has since been dropped degrades to no
   // tools server-side with a warn line, which is the documented posture.
   const canSearch =
     !!resolvedProvider &&
-    resolvedProvider.nativeSearchEnabled !== false &&
-    (providerHasNativeSearch(resolvedProvider) ||
-      Boolean(resolvedProvider.webBackend));
+    resolvedProvider.searchSource !== SEARCH_SOURCE_NONE &&
+    (resolvedProvider.searchSource === SEARCH_SOURCE_NATIVE
+      ? providerHasNativeSearch(resolvedProvider)
+      : Boolean(resolvedProvider.searchSource));
 
   // The media types the currently-selected model ingests natively (issue #328),
   // used to warn about incompatible attachments. Empty when nothing resolves yet.

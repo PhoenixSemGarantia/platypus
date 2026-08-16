@@ -17,6 +17,8 @@ import {
   providerCreateSchema,
   providerUpdateSchema,
   providerHasNativeSearch,
+  SEARCH_SOURCE_NONE,
+  SEARCH_SOURCE_NATIVE,
   isPresentableUrl,
   type Provider,
   classifyFile,
@@ -333,22 +335,22 @@ describe("Provider Create Schema", () => {
     memoryExtractionModelId: "gpt-4",
   };
 
-  it("defaults nativeSearchEnabled to true when omitted", () => {
+  it("defaults searchSource to native when omitted", () => {
     const result = providerCreateSchema.safeParse(baseProvider);
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.nativeSearchEnabled).toBe(true);
+      expect(result.data.searchSource).toBe(SEARCH_SOURCE_NATIVE);
     }
   });
 
-  it("preserves nativeSearchEnabled when explicitly set to false", () => {
+  it("preserves searchSource when explicitly set to none", () => {
     const result = providerCreateSchema.safeParse({
       ...baseProvider,
-      nativeSearchEnabled: false,
+      searchSource: SEARCH_SOURCE_NONE,
     });
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.nativeSearchEnabled).toBe(false);
+      expect(result.data.searchSource).toBe(SEARCH_SOURCE_NONE);
     }
   });
 
@@ -377,46 +379,39 @@ describe("Provider Create Schema", () => {
     ).toBe(false);
   });
 
-  it("round-trips webBackend through create and update", () => {
+  it("round-trips a backend id through searchSource on create and update", () => {
     // Free text, deliberately unvalidated against the plugin registry — the
     // valid set is whichever plugins the deployment loaded (ADR-0014).
     const created = providerCreateSchema.safeParse({
       ...baseProvider,
-      webBackend: "acme.searx",
+      searchSource: "acme.searx",
     });
     expect(created.success).toBe(true);
     if (created.success) {
-      expect(created.data.webBackend).toBe("acme.searx");
+      expect(created.data.searchSource).toBe("acme.searx");
     }
 
     const cleared = providerUpdateSchema.safeParse({
       ...baseProvider,
-      webBackend: null,
+      searchSource: SEARCH_SOURCE_NONE,
     });
     expect(cleared.success).toBe(true);
     if (cleared.success) {
-      expect(cleared.data.webBackend).toBeNull();
-    }
-
-    // Absent is the pre-existing-row case: no default, no coercion to null.
-    const omitted = providerCreateSchema.safeParse(baseProvider);
-    expect(omitted.success).toBe(true);
-    if (omitted.success) {
-      expect(omitted.data.webBackend).toBeUndefined();
+      expect(cleared.data.searchSource).toBe(SEARCH_SOURCE_NONE);
     }
   });
 
-  it("normalises an empty webBackend to null and bounds its length", () => {
-    // A form select's "None" option yields `""`. Normalised rather than rejected,
-    // so the column holds one representation of "no backend" and choosing None is
-    // not a 400.
+  it("normalises an empty searchSource to none and bounds its length", () => {
+    // A form select's "None" option, or a pre-collapse row written by hand,
+    // could still submit `""`. Normalised rather than rejected, so the column
+    // holds one representation of "no search" and choosing None is not a 400.
     const empty = providerUpdateSchema.safeParse({
       ...baseProvider,
-      webBackend: "",
+      searchSource: "",
     });
     expect(empty.success).toBe(true);
     if (empty.success) {
-      expect(empty.data.webBackend).toBeNull();
+      expect(empty.data.searchSource).toBe(SEARCH_SOURCE_NONE);
     }
 
     // Bounded because the value is free text that reaches a log line on every
@@ -424,15 +419,33 @@ describe("Provider Create Schema", () => {
     expect(
       providerCreateSchema.safeParse({
         ...baseProvider,
-        webBackend: "x".repeat(200),
+        searchSource: "x".repeat(200),
       }).success,
     ).toBe(true);
     expect(
       providerCreateSchema.safeParse({
         ...baseProvider,
-        webBackend: "x".repeat(201),
+        searchSource: "x".repeat(201),
       }).success,
     ).toBe(false);
+  });
+
+  // The pre-collapse `nativeSearchEnabled` / `webBackend` pair is gone from the
+  // request shape entirely, not aliased onto `searchSource`: the Provider API is
+  // reachable only with a session cookie, so its one writer is the Provider form
+  // shipped alongside it, and that always sends `searchSource`.
+  it("ignores the pre-collapse search fields rather than mapping them", () => {
+    const result = providerCreateSchema.safeParse({
+      ...baseProvider,
+      nativeSearchEnabled: false,
+      webBackend: "acme.searx",
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.searchSource).toBe(SEARCH_SOURCE_NATIVE);
+      expect(result.data).not.toHaveProperty("nativeSearchEnabled");
+      expect(result.data).not.toHaveProperty("webBackend");
+    }
   });
 });
 

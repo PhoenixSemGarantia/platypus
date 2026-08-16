@@ -39,7 +39,7 @@ describe("createContributionRegistry", () => {
   it("does not resolve Object.prototype members as registered entries", () => {
     // Every one of these ids reaches a lookup from request data — `toolSetId`
     // from `agent.toolSetIds`, `backend` from a save-route body and from the
-    // `sandbox.backend` / `provider.webBackend` columns. A plain-object store
+    // `sandbox.backend` / `provider.searchSource` columns. A plain-object store
     // answered `"toString" in store` with true and handed back
     // `Object.prototype.toString`: truthy, with no `tools` and no
     // `configSchema`, so a Chat turn silently resolved no tools and the save

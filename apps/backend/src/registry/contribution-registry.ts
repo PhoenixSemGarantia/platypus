@@ -44,7 +44,7 @@ export interface ContributionRegistryOptions {
  *
  * A `Map`, not an object literal: every id reaches these lookups from request
  * data (`agent.toolSetIds`, a save-route body, the `sandbox.backend` and
- * `provider.webBackend` columns), and a plain object answers `"toString" in
+ * `provider.searchSource` columns), and a plain object answers `"toString" in
  * store` with `true` and hands back `Object.prototype.toString` — an entry the
  * caller then trips over far from the lookup. A `Map` has no inherited keys, so
  * an unregistered id is unregistered whatever it is called.
