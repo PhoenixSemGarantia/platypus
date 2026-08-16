@@ -61,6 +61,27 @@ This narrows, but does not reverse, "validation stays inline" above. Validation 
 belongs to a single surface still answers inline; only a rule shared by more than one
 surface earns the seam.
 
+## Amendment — the org/workspace access _decision_ moves behind an interface (#499)
+
+"Authorization is unchanged: middleware still decides actor access and returns its own
+403s inline" above is narrowed, not reversed. `requireOrgAccess` and
+`requireWorkspaceAccess` (`middleware/authorization.ts`) fused the membership/workspace
+query, the JS-side ownership branch, and the `c.json({ error }, status)` write into one
+function — the same query-and-branch-and-respond shape `workspaceConfigAccess` had
+already moved past, returning `{ allowed } | { allowed: false, reason }` instead.
+
+The query and the branch are now `resolveOrgMembership` / `resolveWorkspaceAccess`: pure
+functions returning the same `{ allowed, membership }` / `{ allowed, isWorkspaceOwner }`
+or `{ allowed: false, reason }` shape `workspaceConfigAccess` uses, unit-tested against an
+in-memory fake executor built on real `eq`/`and` conditions rather than the route suite's
+no-op-operator mock. Where the
+403 (or the cross-org 404) is written stays in the middleware, which now only maps a
+`reason` to a status and message — so the line above still holds: middleware, not a
+service or the error seam, is what answers the caller.
+
+This is the same move `workspaceConfigAccess` made, not a new one — the amendment
+records it as one case, not two independent decisions.
+
 ## Amendment — `FileValidationError` → 400 with `files` (#501)
 
 The Chat-turn path had drifted from this ADR: `chat-execution.ts` carried its own
