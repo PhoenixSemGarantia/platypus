@@ -172,10 +172,42 @@ Add an entry to `contributes.webBackends`. A `WebBackendContribution` declares:
 There is no `configSchema` and no `credentialsSchema` here, unlike a Sandbox
 backend. A Sandbox has a per-Workspace row to hang settings on; a Web-search
 backend does not — a Provider stores only which backend it selected. Your API
-key and endpoint come from **deploy-time Plugin config**, so they are
-deployment-wide: one SearXNG instance, one key, every Organization. If a backend
-genuinely needs different credentials per Organization, that is a gap to report
-rather than something to work around by reading environment variables directly.
+key and endpoint come from **deploy-time Plugin config**.
+
+That config block is one block per Plugin, but it is handed to you alongside the
+request context on every turn, so you can serve different Organizations
+different upstreams. Key your own config by `orgId` or `workspaceId` and choose
+inside the factory:
+
+```jsonc
+// PLATYPUS_PLUGIN_CONFIG
+{
+  "acme-search": {
+    "config": {
+      "endpoints": {
+        "org-dmz-team": "https://searx.dmz.internal",
+        "default": "https://searx.internal",
+      },
+    },
+  },
+}
+```
+
+```ts
+createExecutors(ctx, plugin) {
+  const endpoint =
+    plugin.config.endpoints[ctx.orgId] ?? plugin.config.endpoints.default;
+  // ...
+}
+```
+
+<Callout type="warning">
+  Reaching for `process.env` inside a backend to get per-tenant endpoints or
+  keys is the trap. Values read that way skip the boot-time validation that
+  makes a bad key fail loudly at startup instead of silently serving no search
+  results mid-turn. Put every value in your Plugin's config block and key it by
+  `orgId` or `workspaceId` as above.
+</Callout>
 
 Then list your plugin in `PLATYPUS_PLUGINS`. List membership **is** the enable
 switch — leave the plugin out and the backend never registers, so it vanishes
