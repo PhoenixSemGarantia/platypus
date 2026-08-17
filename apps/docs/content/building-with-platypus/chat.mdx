@@ -64,6 +64,10 @@ or a **Web-search backend** an Org Admin selected on that Provider, which takes
 precedence when set. Either way the pages used appear as **Sources** under the
 reply.
 
+Where the Provider uses a backend rather than the vendor's own search, turning
+**Search** on may also hand the model a page reader for that turn — see [what a
+backend grants](/concepts/providers#web-search).
+
 The toggle is only there when the resolved Provider can search. It is **absent**
 when:
 
@@ -82,10 +86,11 @@ when:
   next one; turn it off yourself if you don't want it.
 </Callout>
 
-Search is a Provider setting, not a tool you grant. An Agent that should read
-specific pages instead wants the **Web Fetch** Tool set — see
-[Tool sets](/building-with-platypus/tool-sets). Which search a Provider uses is
-in [Providers & models](/concepts/providers#web-search).
+Search is a Provider setting, not a tool you grant. An Agent that should be able
+to read specific pages at any time wants the **Web Fetch** Tool set — see [Tool
+sets](/building-with-platypus/tool-sets) — which stays available every turn,
+whereas a backend's page reader exists only on a turn you searched. Which search
+a Provider uses is in [Providers & models](/concepts/providers#web-search).
 
 ## Voice input
 

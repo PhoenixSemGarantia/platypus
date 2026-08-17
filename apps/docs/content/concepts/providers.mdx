@@ -143,6 +143,18 @@ the Operator added. Selecting a backend gives the Search toggle to Providers
 that never had it otherwise: a self-hosted vLLM or LiteLLM endpoint, or
 Bedrock.
 
+<Callout type="warning">
+  **Selecting a backend can grant page reading as well as search.** A backend
+  supplies its own search, and optionally a page reader; where it supplies both,
+  a searching turn on that Provider lets the model fetch pages by URL. The
+  vendors' built-in search does not — it returns results only. There is no
+  separate setting for it: the reader comes with the backend, so the decision is
+  which backend you select. What a fetch may reach is bounded by [the egress
+  guard](/self-hosting/configuration#the-egress-guard), and a backend's reader
+  ignores `robots.txt` — whereas the **Web Fetch** Tool set honours it unless an
+  Operator has turned that off.
+</Callout>
+
 Three things the field tells you about a selection:
 
 - **A selection whose plugin is gone** stays in the list, marked **(not
@@ -159,7 +171,7 @@ Three things the field tells you about a selection:
 Results are cited the same way whichever search ran: the pages used appear as
 **Sources** under the reply. Adding a backend to a deployment is an Operator task
 — see [Extending → Web-search
-backends](/extending#web-search-backends).
+backends](/extending/web-search-backends).
 
 ## Security guardrails
 
