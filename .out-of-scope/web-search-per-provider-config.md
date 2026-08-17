@@ -125,3 +125,13 @@ sentence was corrected when this decision was recorded.
 
 - #519 — "[Web-search backend] Credentials are deployment-wide — is a
   per-Provider config knob worth adding?"
+- #520 — "[Web-search backend] Should a backend be able to declare extra
+  `web_search` / `read_url` parameters that core merges onto the fixed schema?"
+  Half of that issue asked for Operator-set search policy (region, category set)
+  that varies per Provider, which is this decision again wearing a different
+  parameter's clothes. Per-Organization and per-Workspace policy already work
+  through the pattern above; the leftover per-_Provider_ axis would need somewhere
+  to store the Operator's choice, which is the column this file rejects. The
+  other half of #520 — parameters the _model_ passes on a given turn — is a
+  distinct concept recorded in
+  [web-search-declared-tool-params.md](./web-search-declared-tool-params.md).
