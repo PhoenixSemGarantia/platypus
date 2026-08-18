@@ -132,6 +132,14 @@ The Org-Admin action that re-scopes a Workspace-private resource to Organization
 A named, Organization-scoped macro that, applied to a Workspace, both creates the Attachments for a chosen set of Shared resources (Tier 1) and sets the Workspace's pointer-settings — task/memory Providers and a default Context (Tier 2) — in one step. Run once at provisioning (or re-run on demand), never a live link. A Tier 2 Provider must also be one the Blueprint attaches. Editing a Blueprint affects only later applications; already-provisioned Workspaces are unchanged. The primary tool for provisioning a ready-to-use Workspace during onboarding.
 _Avoid_: template, policy, group.
 
+**Invitation**:
+An Organization's record of the decision that one named person may hold an account and join it, carrying an optional Workspace name and an ordered set of Blueprints. Redeemable exactly once, before it expires; redemption or acceptance joins the person to the Organization and provisions their Workspace.
+_Avoid_: invite request, membership request, allowlist entry.
+
+**Invitation link**:
+The single-use URL that redeems an Invitation, bearing a token minted with it. Held by whoever the Invitation's sender passes it to — the link, not the address on the Invitation, is what binds a redemption to it.
+_Avoid_: magic link, signup link, activation link.
+
 **Gateway** (Messaging gateway):
 A decoupled, stateful app — deployed alongside the frontend and backend — that bridges external chat Surfaces to Platypus, relaying messages both ways. Holds the long-lived per-Surface connections and hosts Gateway adapters; the backend itself stays messaging-agnostic. Platypus, not the Gateway, is the identity authority.
 _Avoid_: bot, bridge, connector.
@@ -172,6 +180,7 @@ The record binding a Conversation locus to a Chat (which carries the Workspace +
 - An **Agent**, **Skill**, **MCP**, or **Provider** is a **Scoped resource**: its row carries either an `organizationId` or a `workspaceId`, never both. Resolved relative to a **Workspace**, an Organization-scoped one is a **Shared resource**, visible only through an **Attachment**; a Sandbox-backed **Tool set** instead rebinds to the invoking **Workspace**'s **Sandbox** at Chat-turn time.
 - A **Blueprint** names a set of **Shared resources** and, applied to a **Workspace**, creates their **Attachments** in one step.
 - **Workspaces** are created only by **Org Admins** — directly, or auto-provisioned for a member when they accept an invitation. An invitation carries an ordered set of zero-or-more **Blueprints**; on accept they are applied to the new Workspace in order (Attachments union; later Blueprints win on any single-valued pointer-setting). Members do not create their own Workspaces.
+- An **Invitation** is redeemed through its **Invitation link**, which creates the account and joins the Organization in one act; a person who already holds an account instead accepts the Invitation in-app. Where the Operator requires invitations, redemption is the only way an account comes into existence — admission is the **Operator**'s to constrain, never an **Org Admin**'s to widen.
 - Authority over configuration runs **Operator** → **Org Admin** → **Workspace Owner**; each tier is bounded by the tier above it.
 - A **Gateway** hosts many **Gateway adapters**, one per **Surface**. A message on a **Surface** carries a **Sender** and arrives at a **Conversation locus**.
 - A **Sender** resolves to a **User** through an **Identity link** (authorizes); a **Conversation locus** resolves to a **Chat** through a **Conversation binding** (routes). The two are separate because in a shared room "who spoke" and "where it happened" diverge; a direct message collapses them 1:1.
