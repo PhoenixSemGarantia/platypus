@@ -135,3 +135,8 @@ sentence was corrected when this decision was recorded.
   other half of #520 — parameters the _model_ passes on a given turn — is a
   distinct concept recorded in
   [web-search-declared-tool-params.md](./web-search-declared-tool-params.md).
+- #521 — "[Web-search backend] Should a Workspace have a call budget for
+  `web_search`, or for tool calls generally?" Not a request for this column, but
+  it rested on it: a per-Workspace budget needs a per-tenant key to protect, and
+  with credentials deployment-wide there is nothing to attribute. Recorded in
+  [web-search-call-budget.md](./web-search-call-budget.md).
