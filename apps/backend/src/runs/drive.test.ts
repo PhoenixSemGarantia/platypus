@@ -440,7 +440,127 @@ describe("driveChat", () => {
     expect(result.status).toBe("succeeded");
     expect(outcome[0].status).toBe("succeeded");
   });
+
+  // The regression from issue #552. An abort closes the SDK's stream rather
+  // than failing it, so `onError` never fires and the client's branch used to
+  // end clean: the answer stopped mid-word and the composer simply reset, with
+  // nothing anywhere saying a bound had been hit.
+  it("tells the client why a timed-out run stopped", async () => {
+    const { run } = startRecordedRun({
+      perRunTimeoutMs: 20,
+      perStepTimeoutMs: 60_000,
+    });
+    const drive = driveChat({
+      plan: planOf(textThenEndOnAbort(run.handle.signal)),
+      run,
+      modelMessages: [{ role: "user", content: "hi" }],
+    });
+
+    const chunks = await collect(drive.response);
+    for await (const _ of drive.snapshots) void _;
+    await drive.done;
+
+    const errors = chunks.filter((c) => c.type === "error");
+    expect(errors).toHaveLength(1);
+    expect(errors[0].errorText).toMatch(/time limit/);
+    // The partial answer is still delivered — the notice is appended to it,
+    // not substituted for it.
+    expect(chunks.some((c) => c.type === "text-delta")).toBe(true);
+  });
+
+  it("names the idle bound when it was the per-step timeout that fired", async () => {
+    const { run } = startRecordedRun({
+      perStepTimeoutMs: 20,
+      perRunTimeoutMs: 60_000,
+    });
+    const drive = driveChat({
+      plan: planOf(textThenEndOnAbort(run.handle.signal)),
+      run,
+      modelMessages: [{ role: "user", content: "hi" }],
+    });
+
+    const chunks = await collect(drive.response);
+    for await (const _ of drive.snapshots) void _;
+    await drive.done;
+
+    const errors = chunks.filter((c) => c.type === "error");
+    expect(errors).toHaveLength(1);
+    expect(errors[0].errorText).toMatch(/stopped sending output/);
+  });
+
+  // A user who pressed stop knows why it stopped. Telling them again would
+  // dress their own action up as a failure.
+  it("stays silent when the run was cancelled rather than timed out", async () => {
+    const { run } = startRecordedRun({
+      perStepTimeoutMs: 60_000,
+      perRunTimeoutMs: 60_000,
+    });
+    const drive = driveChat({
+      plan: planOf(textThenEndOnAbort(run.handle.signal)),
+      run,
+      modelMessages: [{ role: "user", content: "hi" }],
+    });
+    setTimeout(() => runRegistry.cancel(run.handle.runId), 20);
+
+    const chunks = await collect(drive.response);
+    for await (const _ of drive.snapshots) void _;
+    const result = await drive.done;
+
+    expect(chunks.some((c) => c.type === "error")).toBe(false);
+    expect(result.status).toBe("cancelled");
+  });
+
+  it("adds nothing to a run that finished normally", async () => {
+    const { run } = startRecordedRun();
+    const drive = driveChat({
+      plan: planOf(modelOf(text("t1", "Hi"))),
+      run,
+      modelMessages: [{ role: "user", content: "hi" }],
+    });
+
+    const chunks = await collect(drive.response);
+    for await (const _ of drive.snapshots) void _;
+    await drive.done;
+
+    expect(chunks.some((c) => c.type === "error")).toBe(false);
+  });
 });
+
+/** Drain a UI message stream branch into an array of its chunks. */
+const collect = async <T>(stream: ReadableStream<T>): Promise<T[]> => {
+  const out: T[] = [];
+  for await (const chunk of stream as unknown as AsyncIterable<T>) {
+    out.push(chunk);
+  }
+  return out;
+};
+
+/**
+ * A model that streams a partial answer and then goes quiet until the run is
+ * aborted — a provider that stalls mid-answer, which is the shape both
+ * timeouts exist to catch.
+ */
+function textThenEndOnAbort(signal: AbortSignal) {
+  return new MockLanguageModelV3({
+    doStream: () =>
+      Promise.resolve({
+        stream: new ReadableStream<LanguageModelV3StreamPart>({
+          start(controller) {
+            controller.enqueue({ type: "stream-start", warnings: [] });
+            controller.enqueue({ type: "text-start", id: "t1" });
+            controller.enqueue({
+              type: "text-delta",
+              id: "t1",
+              delta: "Partial",
+            });
+            signal.addEventListener("abort", () => controller.close(), {
+              once: true,
+            });
+          },
+        }),
+      }),
+  });
+}
 
 const errorParts = (message: string): LanguageModelV3StreamPart[] => [
   { type: "stream-start", warnings: [] },

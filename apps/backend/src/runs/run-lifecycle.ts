@@ -33,6 +33,13 @@ export type RunLifecycle = {
   setStats: (next: RunStats) => void;
   /** `onStepFinish` for `streamText` / `generateText`. */
   onStep: (step: RunStep) => void;
+  /**
+   * `onChunk` for `streamText`. Tells the idle timer the provider is still
+   * talking, so a step that streams for longer than the per-step bound is not
+   * mistaken for a stall (issue #552). Nothing is logged or accumulated here:
+   * it runs once per streamed chunk.
+   */
+  onStreamChunk: () => void;
   /** Tool-call boundary handler for `wrapToolsWithActivity`. */
   onActivity: (event: ToolActivityEvent) => void;
   /** Terminate once, with the outcome. Repeat calls are no-ops. */
@@ -180,6 +187,7 @@ export const startRun = (params: {
       stats = next;
     },
     onStep,
+    onStreamChunk: () => handle.noteActivity(),
     onActivity,
     finish,
     statusFromSignal,

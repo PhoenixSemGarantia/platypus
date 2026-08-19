@@ -13,16 +13,47 @@ import type { RunId } from "./types.ts";
  */
 export class TimeoutError extends Error {
   readonly kind: "step" | "run";
+  /** The bound that was exceeded, so a caller can say it without re-reading
+   *  the configuration that set it. */
+  readonly limitMs: number;
 
-  constructor(message: string, kind: "step" | "run") {
+  constructor(message: string, kind: "step" | "run", limitMs: number) {
     super(message);
     this.name = "TimeoutError";
     this.kind = kind;
+    this.limitMs = limitMs;
   }
 }
 
+/** A duration as a reader would say it: "90 seconds", "2 minutes". */
+const humanizeMs = (ms: number): string => {
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 120) return `${seconds} second${seconds === 1 ? "" : "s"}`;
+  const minutes = Math.round(seconds / 60);
+  return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+};
+
+/**
+ * A timeout in the terms the person who was waiting understands.
+ *
+ * `TimeoutError.message` names the run id and a millisecond bound — right for a
+ * log line, wrong for the one sentence a user gets when their answer stops
+ * mid-word. Both timeouts are reported, because a user cannot tell them apart
+ * from the outside and the remedy differs: a stalled provider versus a run that
+ * was simply too long.
+ */
+export const describeTimeout = (error: TimeoutError): string =>
+  error.kind === "step"
+    ? `The model stopped sending output for ${humanizeMs(error.limitMs)}, so the run was stopped. Anything it had already written is kept above.`
+    : `The run hit its ${humanizeMs(error.limitMs)} time limit and was stopped. Anything already written is kept above.`;
+
 export type RegisterOptions = {
-  /** Per-step (between-step) idle timeout. Defaults to 2 minutes. */
+  /**
+   * Idle timeout: how long the run may show no sign of life at all — no
+   * streamed chunk, no step boundary, no tool-call edge — before it is
+   * aborted. Not a ceiling on how long one step may take. Defaults to 2
+   * minutes.
+   */
   perStepTimeoutMs?: number;
   /** Wall-clock timeout for the whole run. Defaults to 10 minutes. */
   perRunTimeoutMs?: number;
@@ -49,10 +80,24 @@ export type RunHandle = {
   /** Reset the per-step timer (e.g. when a step makes progress). */
   bumpStep(): void;
   /**
+   * Record a sign of life from the model mid-step — one streamed chunk.
+   *
+   * The per-step bound is an IDLE timeout: "has the provider stopped talking to
+   * us?", not "has this step taken too long?". Only `bumpStep` fires at step
+   * boundaries, so without this a single step that streams for longer than the
+   * bound is aborted while it is still producing output. That is what cut long
+   * answers and long tool-call arguments off mid-stream (issue #552).
+   *
+   * Deliberately does not touch the timer. This is called once per streamed
+   * chunk — thousands of times in a long answer — so it only stamps a
+   * timestamp, and the timer re-arms itself from that stamp when it fires.
+   */
+  noteActivity(): void;
+  /**
    * Suspend the per-step stall timer for the duration of a tool call.
    *
-   * The per-step timeout answers "has the model stopped making progress
-   * between steps?", and a tool that is still executing is not that. Holds
+   * The per-step timeout answers "has anything happened lately?", and a tool
+   * that is still executing produces no chunks to say so. Holds
    * nest, so parallel tool calls are counted; the timer re-arms when the last
    * one releases. The per-RUN timeout is deliberately untouched, so a tool that
    * never returns is still bounded.
@@ -74,6 +119,9 @@ type Entry = {
   finished: boolean;
   /** Tool calls currently in flight; the step timer is off while this is > 0. */
   holds: number;
+  /** When this run last showed a sign of life — a step boundary, a tool-call
+   *  edge, or a streamed chunk. The per-step bound is measured from here. */
+  lastActivityAt: number;
 };
 
 export class RunRegistry {
@@ -97,16 +145,32 @@ export class RunRegistry {
       onTimeout: options.onTimeout,
       finished: false,
       holds: 0,
+      lastActivityAt: Date.now(),
     };
 
     const fireTimeout = (kind: "step" | "run") => {
       if (entry.finished) return;
+      // A step timer that wakes to find recent activity is not looking at a
+      // stall: re-arm for the remainder of the idle window instead of aborting
+      // a run that is still streaming. Re-arming here rather than on every
+      // chunk keeps the hot path to one timestamp write.
+      if (kind === "step") {
+        const idleMs = Date.now() - entry.lastActivityAt;
+        if (idleMs < entry.perStepTimeoutMs) {
+          entry.stepTimer = setTimeout(
+            () => fireTimeout("step"),
+            entry.perStepTimeoutMs - idleMs,
+          );
+          return;
+        }
+      }
       entry.finished = true;
       const error = new TimeoutError(
         kind === "step"
           ? `Run '${runId}' exceeded per-step timeout of ${perStepTimeoutMs}ms`
           : `Run '${runId}' exceeded per-run timeout of ${perRunTimeoutMs}ms`,
         kind,
+        kind === "step" ? perStepTimeoutMs : perRunTimeoutMs,
       );
       if (entry.stepTimer) clearTimeout(entry.stepTimer);
       if (entry.runTimer) clearTimeout(entry.runTimer);
@@ -125,6 +189,9 @@ export class RunRegistry {
     const armStep = (e: Entry) => {
       if (e.stepTimer) clearTimeout(e.stepTimer);
       e.stepTimer = undefined;
+      // Every path through here is itself a sign of life (a step finished, a
+      // tool call started or returned), so the idle window restarts from now.
+      e.lastActivityAt = Date.now();
       if (e.holds > 0) return;
       e.stepTimer = setTimeout(() => fireTimeout("step"), e.perStepTimeoutMs);
     };
@@ -136,6 +203,11 @@ export class RunRegistry {
         const e = this.entries.get(runId);
         if (!e || e.finished) return;
         armStep(e);
+      },
+      noteActivity: () => {
+        const e = this.entries.get(runId);
+        if (!e || e.finished) return;
+        e.lastActivityAt = Date.now();
       },
       holdStep: () => {
         const e = this.entries.get(runId);

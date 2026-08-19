@@ -105,6 +105,22 @@ run sooner.
 | `TRIGGER_PER_STEP_TIMEOUT_MS` | Idle timeout between steps of a Trigger run; a step that makes no progress aborts it. | `600000` (10 minutes)  | No       |
 | `TRIGGER_PER_RUN_TIMEOUT_MS`  | Wall-clock timeout for an entire Trigger run.                                         | `3600000` (60 minutes) | No       |
 
+## Chat
+
+Timeouts that bound an interactive Chat turn. The idle timeout measures silence
+from the provider — no streamed output of any kind — so a long answer or a long
+tool call never trips it; only a provider that stops responding does. Raise the
+wall-clock timeout if your Agents run long multi-step turns that people wait
+through.
+
+| Variable                   | Purpose                                                                                                 | Default                | Required |
+| -------------------------- | ------------------------------------------------------------------------------------------------------- | ---------------------- | -------- |
+| `CHAT_PER_STEP_TIMEOUT_MS` | Idle timeout for a Chat turn; the run is stopped after this long with no streamed output from the model. | `120000` (2 minutes)   | No       |
+| `CHAT_PER_RUN_TIMEOUT_MS`  | Wall-clock timeout for an entire Chat turn.                                                             | `1800000` (30 minutes) | No       |
+
+When either bound stops a turn, the reason is shown in the chat rather than the
+answer simply ending.
+
 ## Tools
 
 | Variable                        | Purpose                                                                                                                                   | Default                 | Required |

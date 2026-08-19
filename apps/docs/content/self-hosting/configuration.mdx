@@ -323,7 +323,9 @@ These rarely need changing but exist when you need them — see the
   affect Trigger schedules, which carry their own per-Trigger timezone chosen in
   the Trigger form, and it does not affect log timestamps.
 - **Schedulers & runs** — concurrency caps and per-run / per-step timeouts for
-  scheduled and triggered agent executions.
+  scheduled and triggered agent executions, and for interactive Chat turns. The
+  per-step bound is an idle timeout: it measures how long the model has sent
+  nothing at all, so a slow-but-working answer never trips it.
 
 ## Where the exhaustive lists live
 
