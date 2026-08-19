@@ -15,6 +15,7 @@ import {
 } from "./no-progress.ts";
 import { buildModelInvocation, type RunPlan } from "./run-plan.ts";
 import type { RunLifecycle } from "./run-lifecycle.ts";
+import { describeTimeout, TimeoutError } from "./run-registry.ts";
 import type { RunStep } from "./run-stats.ts";
 import { computeStats } from "./run-stats.ts";
 import {
@@ -271,6 +272,11 @@ const runStreamedDrive = (
       onStepFinish?.(step);
       run.onStep(step);
     },
+    // The only thing that proves a long-running step is still alive. Without
+    // it the idle timer sees a silent gap for the whole of a long answer.
+    onChunk: () => {
+      run.onStreamChunk();
+    },
     onToolExecutionEnd: (ctx) => {
       onToolExecutionEnd?.(ctx);
     },
@@ -347,6 +353,43 @@ const runStreamedDrive = (
   return { snapshots, done };
 };
 
+/**
+ * Appends the reason an aborted run stopped to the client's branch of the
+ * stream.
+ *
+ * An abort is not an error as far as the SDK is concerned: `streamText` closes
+ * the stream on `isAbortError` rather than failing it, so `onError` never runs
+ * and no error part is written. The client sees a clean end — the answer stops
+ * mid-word, the submit button comes back, and nothing says why. That is how a
+ * per-step timeout looked like no failure at all (issue #552).
+ *
+ * Only a timeout is reported. A cancellation reaches here the same way, but the
+ * user pressed stop themselves and does not need to be told.
+ */
+const withAbortNotice = (
+  run: RunLifecycle,
+): TransformStream<
+  InferUIMessageChunk<PlatypusUIMessage>,
+  InferUIMessageChunk<PlatypusUIMessage>
+> =>
+  new TransformStream({
+    transform(chunk, controller) {
+      controller.enqueue(chunk);
+    },
+    flush(controller) {
+      const reason: unknown = run.handle.signal.reason;
+      if (!(reason instanceof TimeoutError)) return;
+      logger.warn(
+        { runId: run.handle.runId, kind: reason.kind },
+        "Reporting run timeout to the client",
+      );
+      controller.enqueue({
+        type: "error",
+        errorText: describeTimeout(reason),
+      });
+    },
+  });
+
 export type ChatDrive = StreamedCore & {
   /** The client stream branch. Always present: a Chat turn is the shape that
    *  has one. */
@@ -374,7 +417,10 @@ export const driveChat = (opts: ChatDriveOptions): ChatDrive => {
     },
     (ui) => {
       const [client, serverSide] = ui.tee();
-      response = client;
+      // Only the client branch carries the notice: the run itself already
+      // records the timeout through `statusFromSignal`, so adding it to the
+      // server-side drain would report the same failure twice.
+      response = client.pipeThrough(withAbortNotice(opts.run));
       return serverSide;
     },
   );

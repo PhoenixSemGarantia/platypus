@@ -4,6 +4,7 @@ import {
   TimeoutError,
   DEFAULT_PER_STEP_TIMEOUT_MS,
   DEFAULT_PER_RUN_TIMEOUT_MS,
+  describeTimeout,
 } from "./run-registry.ts";
 
 describe("RunRegistry", () => {
@@ -221,5 +222,107 @@ describe("RunRegistry", () => {
     expect(registry.has("x")).toBe(true);
     registry.unregister("x");
     expect(registry.has("x")).toBe(false);
+  });
+
+  // The per-step bound measures silence, not elapsed time. A step that streams
+  // for longer than the bound is still working; only one that goes quiet for
+  // the whole window is a stall. This is the regression from issue #552, where
+  // a single long answer was aborted mid-stream at exactly the bound.
+  describe("per-step timeout as an idle timeout", () => {
+    it("noteActivity keeps a step alive far past the per-step bound", () => {
+      const onTimeout = vi.fn();
+      const handle = registry.register("idle-1", {
+        perStepTimeoutMs: 1000,
+        perRunTimeoutMs: 1_000_000,
+        onTimeout,
+      });
+
+      // Ten times the bound, streaming steadily throughout, with no step ever
+      // finishing — exactly the shape of one long answer.
+      for (let i = 0; i < 20; i++) {
+        vi.advanceTimersByTime(500);
+        handle.noteActivity();
+      }
+
+      expect(onTimeout).not.toHaveBeenCalled();
+      expect(handle.signal.aborted).toBe(false);
+    });
+
+    it("still fires once activity stops for the whole window", () => {
+      const onTimeout = vi.fn();
+      const handle = registry.register("idle-2", {
+        perStepTimeoutMs: 1000,
+        perRunTimeoutMs: 1_000_000,
+        onTimeout,
+      });
+
+      vi.advanceTimersByTime(900);
+      handle.noteActivity();
+      // Silence from here. The timer that was armed at registration wakes at
+      // 1000ms, finds 100ms of idle, and re-arms for the remaining 900ms.
+      vi.advanceTimersByTime(1000);
+
+      expect(onTimeout).toHaveBeenCalledTimes(1);
+      expect((onTimeout.mock.calls[0][0] as TimeoutError).kind).toBe("step");
+      expect(handle.signal.aborted).toBe(true);
+    });
+
+    it("noteActivity does not defer the per-run bound", () => {
+      const onTimeout = vi.fn();
+      const handle = registry.register("idle-3", {
+        perStepTimeoutMs: 1000,
+        perRunTimeoutMs: 5000,
+        onTimeout,
+      });
+      for (let i = 0; i < 12; i++) {
+        vi.advanceTimersByTime(500);
+        handle.noteActivity();
+      }
+
+      // A run that streams forever is still bounded — that is the whole point
+      // of keeping the two timers independent.
+      expect(
+        onTimeout.mock.calls.some(
+          (call) => (call[0] as TimeoutError).kind === "run",
+        ),
+      ).toBe(true);
+    });
+
+    it("noteActivity on an unknown or finished run is a no-op", () => {
+      const handle = registry.register("idle-4", { perStepTimeoutMs: 1000 });
+      registry.unregister("idle-4");
+      expect(() => handle.noteActivity()).not.toThrow();
+    });
+  });
+
+  describe("describeTimeout", () => {
+    it("names the idle window for a step timeout", () => {
+      const text = describeTimeout(
+        new TimeoutError("internal wording", "step", 2 * 60 * 1000),
+      );
+      expect(text).toContain("2 minutes");
+      expect(text).toContain("stopped sending output");
+      // The internal message names a run id and a millisecond figure; neither
+      // belongs in front of a user.
+      expect(text).not.toContain("internal wording");
+      expect(text).not.toContain("120000");
+    });
+
+    it("names the wall-clock bound for a run timeout", () => {
+      const text = describeTimeout(
+        new TimeoutError("internal", "run", 30 * 60 * 1000),
+      );
+      expect(text).toContain("30 minutes");
+      expect(text).toContain("time limit");
+    });
+
+    it("uses seconds below the two-minute mark", () => {
+      expect(describeTimeout(new TimeoutError("i", "step", 45_000))).toContain(
+        "45 seconds",
+      );
+      expect(describeTimeout(new TimeoutError("i", "step", 1000))).toContain(
+        "1 second",
+      );
+    });
   });
 });

@@ -1538,8 +1538,9 @@ describe("model output ceiling", () => {
 // Smoke test the TimeoutError export so the type stays public-importable
 describe("AgentRunner timeout types", () => {
   it("TimeoutError remains an Error subclass", () => {
-    const e = new TimeoutError("x", "run");
+    const e = new TimeoutError("x", "run", 1000);
     expect(e).toBeInstanceOf(Error);
     expect(e.kind).toBe("run");
+    expect(e.limitMs).toBe(1000);
   });
 });
