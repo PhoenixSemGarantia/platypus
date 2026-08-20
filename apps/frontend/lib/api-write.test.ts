@@ -288,7 +288,7 @@ describe("writeEntity — outcomes", () => {
     expect(result).toEqual({ outcome: "notFound", message: "Not found" });
   });
 
-  it("maps 403 (LockedError) to a locked outcome", async () => {
+  it("maps a 403 with a message (LockedError or an authorization refusal) to a forbidden outcome, passing the message through", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
@@ -309,8 +309,27 @@ describe("writeEntity — outcomes", () => {
     );
 
     expect(result).toEqual({
-      outcome: "locked",
+      outcome: "forbidden",
       message: "This resource is managed at the organization level",
+    });
+  });
+
+  it("maps a 403 with an empty body to a forbidden outcome with the neutral default message", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(mockResponse(403, {})));
+
+    const result = await writeEntity(
+      BACKEND_URL,
+      "agents",
+      { orgId: "org1" },
+      {
+        id: "a1",
+        data: { name: "x" },
+      },
+    );
+
+    expect(result).toEqual({
+      outcome: "forbidden",
+      message: "You do not have permission to do this.",
     });
   });
 

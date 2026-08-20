@@ -66,6 +66,8 @@ import { canManageSharedResource } from "@/lib/authorization";
 import { NoProvidersEmptyState } from "@/components/no-providers-empty-state";
 import { AttachSharedResourceDialog } from "@/components/attach-shared-resource-dialog";
 import { scopedPath, writeEntity, type Scope } from "@/lib/api-write";
+import { applyDeleteOutcome } from "@/lib/apply-write-outcome";
+import { useDetachDialog } from "@/hooks/use-detach-dialog";
 
 // The Agent is shown either in a Workspace, where it may be a workspace-scoped
 // Agent or an attached org-scoped (Shared) Agent rendered with an Organization
@@ -104,10 +106,8 @@ export const AgentsList = ({
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [attachOpen, setAttachOpen] = useState(false);
-  const [selectedOrgAgent, setSelectedOrgAgent] =
-    useState<AgentWithScope | null>(null);
+  const orgAgentDetach = useDetachDialog<AgentWithScope>();
   const [detaching, setDetaching] = useState(false);
-  const [detachError, setDetachError] = useState<string | null>(null);
   const [agentToPromote, setAgentToPromote] = useState<AgentWithScope | null>(
     null,
   );
@@ -197,19 +197,24 @@ export const AgentsList = ({
       const outcome = await writeEntity(backendUrl, "agents", scope, {
         id: agentToDelete.id,
       });
-      if (outcome.outcome === "success") {
-        mutate();
-        setDeleteDialogOpen(false);
-        setAgentToDelete(null);
-      } else if (outcome.outcome === "locked") {
-        // Guidance, not a failure — the backend's message already says
-        // where the Shared resource is actually managed (#570).
-        setDeleteDialogOpen(false);
-        setAgentToDelete(null);
-        toast.info(outcome.message);
-      } else {
-        setDeleteError(outcome.message);
-      }
+      await applyDeleteOutcome(outcome, {
+        mutate: () => mutate(),
+        onSuccess: () => {
+          setDeleteDialogOpen(false);
+          setAgentToDelete(null);
+        },
+        onError: (message, result) => {
+          if (result.outcome === "forbidden") {
+            // Guidance, not a failure — the backend's message already says
+            // where the Shared resource is actually managed (#570).
+            setDeleteDialogOpen(false);
+            setAgentToDelete(null);
+            toast.info(message);
+          } else {
+            setDeleteError(message);
+          }
+        },
+      });
     } finally {
       setDeleting(false);
     }
@@ -289,7 +294,7 @@ export const AgentsList = ({
   const detachOrgAgent = async (agentId: string) => {
     if (!backendUrl) return;
     setDetaching(true);
-    setDetachError(null);
+    orgAgentDetach.setError(null);
     try {
       const outcome = await writeEntity(
         backendUrl,
@@ -300,10 +305,10 @@ export const AgentsList = ({
         },
       );
       if (outcome.outcome === "success") {
-        setSelectedOrgAgent(null);
+        orgAgentDetach.close();
         await mutate();
       } else {
-        setDetachError(outcome.message);
+        orgAgentDetach.setError(outcome.message);
       }
     } finally {
       setDetaching(false);
@@ -343,10 +348,7 @@ export const AgentsList = ({
               </DropdownMenuItem>
               <DropdownMenuItem
                 className="cursor-pointer"
-                onSelect={() => {
-                  setDetachError(null);
-                  setSelectedOrgAgent(agent);
-                }}
+                onSelect={() => orgAgentDetach.open(agent)}
               >
                 <Unlink /> Detach
               </DropdownMenuItem>
@@ -597,37 +599,28 @@ export const AgentsList = ({
       )}
 
       <Dialog
-        open={!!selectedOrgAgent}
+        open={!!orgAgentDetach.selected}
         onOpenChange={(open) => {
-          if (!open) {
-            setSelectedOrgAgent(null);
-            setDetachError(null);
-          }
+          if (!open) orgAgentDetach.close();
         }}
       >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Detach shared agent</DialogTitle>
             <DialogDescription>
-              Detach <strong>{selectedOrgAgent?.name}</strong> from this
+              Detach <strong>{orgAgentDetach.selected?.name}</strong> from this
               workspace? The shared agent itself is not deleted; it just stops
               appearing here.
             </DialogDescription>
           </DialogHeader>
-          {detachError && (
-            <p className="text-sm text-destructive">{detachError}</p>
+          {orgAgentDetach.error && (
+            <p className="text-sm text-destructive">{orgAgentDetach.error}</p>
           )}
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setSelectedOrgAgent(null);
-                setDetachError(null);
-              }}
-            >
+            <Button variant="outline" onClick={orgAgentDetach.close}>
               Close
             </Button>
-            {canManageShared && selectedOrgAgent && (
+            {canManageShared && orgAgentDetach.selected && (
               <Button asChild variant="ghost">
                 <Link href={`/${orgId}/settings/agents`}>
                   <ExternalLink className="size-4" />
@@ -635,11 +628,11 @@ export const AgentsList = ({
                 </Link>
               </Button>
             )}
-            {selectedOrgAgent && (
+            {orgAgentDetach.selected && (
               <Button
                 variant="destructive"
                 disabled={detaching}
-                onClick={() => detachOrgAgent(selectedOrgAgent.id)}
+                onClick={() => detachOrgAgent(orgAgentDetach.selected!.id)}
               >
                 <Unlink className="size-4" />
                 Detach

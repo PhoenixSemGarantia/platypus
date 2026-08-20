@@ -52,6 +52,11 @@ import useSWR, { useSWRConfig } from "swr";
 import { fetcher, joinUrl } from "@/lib/utils";
 import { canSubmitForm, retractFieldError } from "@/lib/form-errors";
 import { writeEntity, writeAt, errorMessage } from "@/lib/api-write";
+import {
+  applyWriteOutcome,
+  applyDeleteOutcome,
+  toastGuidanceOrError,
+} from "@/lib/apply-write-outcome";
 import { findModelOption, getModelOptions } from "@/lib/model-config";
 import { resolveModel } from "@/lib/resolve-model";
 import {
@@ -383,9 +388,23 @@ const AgentForm = ({
         data: payload,
       });
 
-      switch (result.outcome) {
-        case "success": {
-          const savedAgentId = result.data.id || agentId;
+      await applyWriteOutcome(result, {
+        mutate,
+        setValidationErrors,
+        onInvalid: (fieldErrors) => {
+          setValidationErrors(fieldErrors);
+          // Surface a user-visible signal even when the failure maps to a
+          // field without an inline error, so a rejected save is never
+          // silent (#331).
+          toast.error(
+            Object.keys(fieldErrors).length > 0
+              ? "Please fix the highlighted fields and try again"
+              : "Failed to save agent",
+          );
+        },
+        onError: toastGuidanceOrError,
+        onSuccess: async (data) => {
+          const savedAgentId = data.id || agentId;
 
           // The Agent itself already saved, so a failed avatar write is a
           // partial success, not a reason to block navigation — surface a
@@ -419,34 +438,9 @@ const AgentForm = ({
             }
           }
 
-          result.revalidateKeys.forEach((key) => mutate(key));
           router.push(doneHref);
-          break;
-        }
-        case "invalid":
-          setValidationErrors(result.fieldErrors);
-          // Surface a user-visible signal even when the failure maps to a
-          // field without an inline error, so a rejected save is never
-          // silent (#331).
-          toast.error(
-            Object.keys(result.fieldErrors).length > 0
-              ? "Please fix the highlighted fields and try again"
-              : "Failed to save agent",
-          );
-          break;
-        case "conflict":
-          setValidationErrors({ name: result.message });
-          break;
-        case "locked":
-          // Guidance, not a failure — the backend's message already says
-          // where the Shared resource is actually managed (#570).
-          toast.info(result.message);
-          break;
-        case "notFound":
-        case "error":
-          toast.error(result.message);
-          break;
-      }
+        },
+      });
     } catch (error) {
       console.error("Error saving agent:", error);
       toast.error("Failed to save agent");
@@ -464,20 +458,15 @@ const AgentForm = ({
       id: agentId,
     });
 
-    if (result.outcome === "success") {
-      result.revalidateKeys.forEach((key) => mutate(key));
-      router.push(doneHref);
-    } else if (result.outcome === "locked") {
-      // Guidance, not a failure — the backend's message already says where
-      // the Shared resource is actually managed (#570).
-      toast.info(result.message);
-      setIsDeleting(false);
-      setIsDeleteDialogOpen(false);
-    } else {
-      toast.error(result.message);
-      setIsDeleting(false);
-      setIsDeleteDialogOpen(false);
-    }
+    await applyDeleteOutcome(result, {
+      mutate,
+      onSuccess: () => router.push(doneHref),
+      onError: (message, outcome) => {
+        toastGuidanceOrError(message, outcome);
+        setIsDeleting(false);
+        setIsDeleteDialogOpen(false);
+      },
+    });
   };
 
   if (providersLoading || agentLoading) {

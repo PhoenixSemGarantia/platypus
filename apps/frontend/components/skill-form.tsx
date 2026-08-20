@@ -23,6 +23,11 @@ import useSWR, { useSWRConfig } from "swr";
 import { fetcher, joinUrl } from "@/lib/utils";
 import { canSubmitForm, retractFieldError } from "@/lib/form-errors";
 import { writeEntity } from "@/lib/api-write";
+import {
+  applyWriteOutcome,
+  applyDeleteOutcome,
+  toastGuidanceOrError,
+} from "@/lib/apply-write-outcome";
 import { toast } from "sonner";
 import { useBackendUrl } from "@/app/client-context";
 import { useAuth } from "@/components/auth-provider";
@@ -152,30 +157,12 @@ const SkillForm = ({
       data: payload,
     });
 
-    switch (result.outcome) {
-      case "success":
-        result.revalidateKeys.forEach((key) => globalMutate(key));
-        router.push(returnPath);
-        break;
-      case "invalid":
-        setValidationErrors(result.fieldErrors);
-        if (Object.keys(result.fieldErrors).length === 0) {
-          toast.error(result.message);
-        }
-        break;
-      case "conflict":
-        setValidationErrors({ name: result.message });
-        break;
-      case "locked":
-        // Guidance, not a failure — the backend's message already says
-        // where the Shared resource is actually managed (#570).
-        toast.info(result.message);
-        break;
-      case "notFound":
-      case "error":
-        toast.error(result.message);
-        break;
-    }
+    await applyWriteOutcome(result, {
+      mutate: globalMutate,
+      setValidationErrors,
+      onSuccess: () => router.push(returnPath),
+      onError: toastGuidanceOrError,
+    });
 
     setIsSubmitting(false);
   };
@@ -190,19 +177,21 @@ const SkillForm = ({
       id: skillId,
     });
 
-    if (result.outcome === "success") {
-      result.revalidateKeys.forEach((key) => globalMutate(key));
-      router.push(returnPath);
-    } else if (result.outcome === "locked") {
-      // Guidance, not a failure — the backend's message already says where
-      // the Shared resource is actually managed (#570).
-      toast.info(result.message);
-      setIsDeleting(false);
-      setIsDeleteDialogOpen(false);
-    } else {
-      setDeleteError(result.message);
-      setIsDeleting(false);
-    }
+    await applyDeleteOutcome(result, {
+      mutate: globalMutate,
+      onSuccess: () => router.push(returnPath),
+      onError: (message, outcome) => {
+        if (outcome.outcome === "forbidden") {
+          // Guidance, not a failure — the backend's message already says
+          // where the Shared resource is actually managed (#570).
+          toast.info(message);
+          setIsDeleteDialogOpen(false);
+        } else {
+          setDeleteError(message);
+        }
+        setIsDeleting(false);
+      },
+    });
   };
 
   return (

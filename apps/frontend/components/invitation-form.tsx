@@ -17,6 +17,7 @@ import useSWR, { useSWRConfig } from "swr";
 import { fetcher, joinUrl } from "@/lib/utils";
 import { canSubmitForm, retractFieldError } from "@/lib/form-errors";
 import { writeEntity } from "@/lib/api-write";
+import { applyWriteOutcome } from "@/lib/apply-write-outcome";
 import { useBackendUrl } from "@/app/client-context";
 import { useAuth } from "@/components/auth-provider";
 import type { Blueprint } from "@platypus/schemas";
@@ -95,32 +96,26 @@ export function InvitationForm({ orgId, onSuccess }: InvitationFormProps) {
       },
     );
 
-    switch (result.outcome) {
-      case "success":
-        result.revalidateKeys.forEach((key) => globalMutate(key));
+    await applyWriteOutcome(result, {
+      mutate: globalMutate,
+      setValidationErrors,
+      conflictField: "email",
+      onInvalid: (fieldErrors, message) => {
+        setValidationErrors(fieldErrors);
+        toast.error(
+          Object.keys(fieldErrors).length > 0
+            ? "Please fix the errors in the form"
+            : message,
+        );
+      },
+      onSuccess: () => {
         toast.success("Invitation created");
         setEmail("");
         setWorkspaceName("");
         setBlueprintIds([]);
         onSuccess?.();
-        break;
-      case "invalid":
-        setValidationErrors(result.fieldErrors);
-        toast.error(
-          Object.keys(result.fieldErrors).length > 0
-            ? "Please fix the errors in the form"
-            : result.message,
-        );
-        break;
-      case "conflict":
-        setValidationErrors({ email: result.message });
-        break;
-      case "locked":
-      case "notFound":
-      case "error":
-        toast.error(result.message);
-        break;
-    }
+      },
+    });
 
     setIsSubmitting(false);
   };

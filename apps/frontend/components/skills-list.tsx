@@ -61,6 +61,8 @@ import {
   SharedWithBadge,
 } from "@/components/manage-sharing";
 import { scopedPath, writeEntity, type Scope } from "@/lib/api-write";
+import { applyDeleteOutcome } from "@/lib/apply-write-outcome";
+import { useDetachDialog } from "@/hooks/use-detach-dialog";
 
 // The list serves two surfaces: a Workspace (workspaceId provided) where it
 // shows workspace-scoped Skills plus attached org-scoped Shared Skills as
@@ -117,10 +119,8 @@ export const SkillsList = ({
   );
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const [selectedOrgSkill, setSelectedOrgSkill] =
-    useState<SkillWithScope | null>(null);
+  const orgSkillDetach = useDetachDialog<SkillWithScope>();
   const [detaching, setDetaching] = useState(false);
-  const [detachError, setDetachError] = useState<string | null>(null);
   const [attachOpen, setAttachOpen] = useState(false);
   const [skillToPromote, setSkillToPromote] = useState<SkillWithScope | null>(
     null,
@@ -217,19 +217,24 @@ export const SkillsList = ({
       const outcome = await writeEntity(backendUrl, "skills", scope, {
         id: skillToDelete.id,
       });
-      if (outcome.outcome === "success") {
-        await mutate();
-        setDeleteDialogOpen(false);
-        setSkillToDelete(null);
-      } else if (outcome.outcome === "locked") {
-        // Guidance, not a failure — the backend's message already says
-        // where the Shared resource is actually managed (#570).
-        setDeleteDialogOpen(false);
-        setSkillToDelete(null);
-        toast.info(outcome.message);
-      } else {
-        setDeleteError(outcome.message);
-      }
+      await applyDeleteOutcome(outcome, {
+        mutate: () => mutate(),
+        onSuccess: () => {
+          setDeleteDialogOpen(false);
+          setSkillToDelete(null);
+        },
+        onError: (message, result) => {
+          if (result.outcome === "forbidden") {
+            // Guidance, not a failure — the backend's message already says
+            // where the Shared resource is actually managed (#570).
+            setDeleteDialogOpen(false);
+            setSkillToDelete(null);
+            toast.info(message);
+          } else {
+            setDeleteError(message);
+          }
+        },
+      });
     } finally {
       setDeleting(false);
     }
@@ -238,7 +243,7 @@ export const SkillsList = ({
   const detachOrgSkill = async (skillId: string) => {
     if (!backendUrl || !workspaceId) return;
     setDetaching(true);
-    setDetachError(null);
+    orgSkillDetach.setError(null);
     try {
       const outcome = await writeEntity(
         backendUrl,
@@ -249,10 +254,10 @@ export const SkillsList = ({
         },
       );
       if (outcome.outcome === "success") {
-        setSelectedOrgSkill(null);
+        orgSkillDetach.close();
         await mutate();
       } else {
-        setDetachError(outcome.message);
+        orgSkillDetach.setError(outcome.message);
       }
     } finally {
       setDetaching(false);
@@ -302,10 +307,7 @@ export const SkillsList = ({
                 <Item
                   variant="outline"
                   className="h-full cursor-pointer"
-                  onClick={() => {
-                    setDetachError(null);
-                    setSelectedOrgSkill(skill);
-                  }}
+                  onClick={() => orgSkillDetach.open(skill)}
                 >
                   <ItemContent>
                     <div className="flex items-center gap-2">
@@ -453,49 +455,42 @@ export const SkillsList = ({
       )}
 
       <Dialog
-        open={!!selectedOrgSkill}
+        open={!!orgSkillDetach.selected}
         onOpenChange={(open) => {
-          if (!open) {
-            setSelectedOrgSkill(null);
-            setDetachError(null);
-          }
+          if (!open) orgSkillDetach.close();
         }}
       >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Organization Skill</DialogTitle>
             <DialogDescription>
-              The skill <strong>{selectedOrgSkill?.name}</strong> is managed at
-              the organization level. It can only be edited from the
+              The skill <strong>{orgSkillDetach.selected?.name}</strong> is
+              managed at the organization level. It can only be edited from the
               organization settings.
             </DialogDescription>
           </DialogHeader>
-          {detachError && (
-            <p className="text-sm text-destructive">{detachError}</p>
+          {orgSkillDetach.error && (
+            <p className="text-sm text-destructive">{orgSkillDetach.error}</p>
           )}
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setSelectedOrgSkill(null);
-                setDetachError(null);
-              }}
-            >
+            <Button variant="outline" onClick={orgSkillDetach.close}>
               Close
             </Button>
-            {canAttach && selectedOrgSkill && (
+            {canAttach && orgSkillDetach.selected && (
               <Button
                 variant="destructive"
                 disabled={detaching}
-                onClick={() => detachOrgSkill(selectedOrgSkill.id)}
+                onClick={() => detachOrgSkill(orgSkillDetach.selected!.id)}
               >
                 <Unlink className="size-4" />
                 Detach
               </Button>
             )}
-            {canAttach && selectedOrgSkill && (
+            {canAttach && orgSkillDetach.selected && (
               <Button asChild>
-                <Link href={`/${orgId}/settings/skills/${selectedOrgSkill.id}`}>
+                <Link
+                  href={`/${orgId}/settings/skills/${orgSkillDetach.selected.id}`}
+                >
                   <ExternalLink className="size-4" />
                   Org settings
                 </Link>
