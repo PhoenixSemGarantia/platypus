@@ -34,6 +34,10 @@ A configurable preset that pins a Provider, model, Instructions, generation para
 **Sub-Agent**:
 An Agent referenced by a parent Agent and exposed to it as a delegate Tool. Invoking it starts a run in its own right — bounded by the same per-step and per-run timeouts the parent turn was started under, and cancelled when the parent is — but never a Chat: nothing about a delegated run is persisted.
 
+**Turn resolution**:
+The phase of a **Chat turn** before the model request is sent: the **Tool session** is opened, Skills, Memories and **Contexts** are loaded, **File parts** are resolved to bytes or **Extracted text**, and the **System prompt** is rendered. Ends where the **Drive** begins, so the two are sequential and together are the whole of what a User waits for. Surfaced to Users as "Preparation".
+_Avoid_: setup, initialisation, warmup, preflight.
+
 **Drive**:
 Running a resolved turn's model loop inside a registered run, through to a terminal status. Takes one of three shapes according to who is waiting on it: an interactive **Chat turn**, a delegated **Sub-Agent**, or a headless Trigger. Whichever shape, the drive owns the model invocation and its stop conditions, the succeeded / failed / cancelled decision, and recording an **Output ceiling** cutoff; the entry point that asked for it keeps only the result shape it hands back to its own caller.
 _Avoid_: driver, run executor, generation loop.
@@ -58,8 +62,12 @@ The total token capacity of a `(Provider, model)` pair, declared by an Org Admin
 _Avoid_: context size, token limit, max tokens (that names an output cap).
 
 **Context occupancy**:
-How full a model's **Context window** was on the most recent Chat turn — the input-token count the vendor reported for the last model call of that turn, inclusive of cached tokens. A last value, not a running total: the conversation is re-sent in full on every Chat turn, so occupancy replaces rather than accumulates. Unknown where the Provider reports no token usage, in which case Platypus estimates nothing. Distinct from token **usage**, which is the count of tokens billed across a turn or run and legitimately is a sum.
+How full a model's **Context window** was on the most recent Chat turn — the input-token count the vendor reported for the last model call of that turn, inclusive of cached tokens. A last value, not a running total: the conversation is re-sent in full on every Chat turn, so occupancy replaces rather than accumulates. Unknown where the Provider reports no token usage, in which case Platypus estimates nothing. Distinct from **Token usage**, which is the count of tokens billed across a turn or run and legitimately is a sum.
 _Avoid_: context size, context usage, tokens used, running total.
+
+**Token usage**:
+The tokens a **Chat turn** or run was billed for — the vendor's reported input and output counts folded across every model call the turn made. A sum, and legitimately one: each call is billed separately. Distinct from **Context occupancy**, which is a single call's input count and never accumulates — on a long tool-using turn the two differ by roughly an order of magnitude. Counts only: no Provider declares what a model costs per token, so Platypus states no monetary figure anywhere.
+_Avoid_: tokens used (ambiguous between this and **Context occupancy** — name which one), cost, spend, context usage.
 
 **Output ceiling**:
 The most a `(Provider, model)` pair may produce in a single reply, declared by an Org Admin on the Provider's model entry and surfaced as **Max output tokens**. Unlike the **Context window** it is enforced: it is sent as the output limit on every **Chat turn** and delegated **Sub-Agent** run against that model. The Provider's own one-shot executions — Chat metadata and memory extraction, which run against its pointer-settings — do not carry it. Optional; a model without one is sent no limit at all, leaving the vendor's own default in force, which on Bedrock is far below the model's real capability. Bounds a reply, never the conversation.
@@ -171,11 +179,13 @@ The record binding a Conversation locus to a Chat (which carries the Workspace +
 - An **Organization** has many **Workspaces**.
 - A **Workspace** has many **Chats**, **Agents**, **MCPs**, and **Skills**, and zero-or-one **Sandbox**.
 - A **Chat** is produced by a sequence of **Chat turns**.
+- A **Chat turn** runs in two sequential phases: **Turn resolution** assembles what the turn needs, then the **Drive** runs the model loop. A slow turn is slow in one phase or the other, and they are attributed separately.
 - A **Chat turn** uses either an **Agent** or a direct **Provider** + model selection.
 - A **Chat turn** renders one **System prompt**, whose first fragment is the **Instructions** of the selected **Agent** — or of the **Chat** itself, where no Agent is selected.
 - An **Agent** references one **Provider**, zero-or-more **Tool sets** (static or **MCP**-backed), zero-or-more **Skills**, and zero-or-more **Sub-Agents**.
 - A **Provider** belongs to either an **Organization** (shared) or a **Workspace** (private).
 - Each model a **Provider** exposes may declare a **Context window**. A **Chat turn** against that model yields a **Context occupancy**, measured from the tokens the vendor reports and meaningful only where a **Context window** was declared.
+- A **Chat turn** also yields a **Token usage**, folded across its model calls. Both come from the same vendor-reported figures and neither substitutes for the other: occupancy answers how full the window got, usage answers how much the turn was billed.
 - Each model a **Provider** exposes may also declare an **Output ceiling**, which a **Chat turn** — or a **Sub-Agent** run — against that model is generated under. Independent of the **Context window**: one bounds the reply and is enforced, the other describes the whole capacity and is not.
 - An **Agent**, **Skill**, **MCP**, or **Provider** is a **Scoped resource**: its row carries either an `organizationId` or a `workspaceId`, never both. Resolved relative to a **Workspace**, an Organization-scoped one is a **Shared resource**, visible only through an **Attachment**; a Sandbox-backed **Tool set** instead rebinds to the invoking **Workspace**'s **Sandbox** at Chat-turn time.
 - A **Blueprint** names a set of **Shared resources** and, applied to a **Workspace**, creates their **Attachments** in one step.
