@@ -45,7 +45,7 @@ const McpList = ({
   // Add scope to the MCP type for this component
   type McpWithScope = MCP & { scope?: "organization" | "workspace" };
 
-  const { user, isOrgAdmin, actor, workspaceDelegation } = useAuth();
+  const { user, actor, workspaceDelegation } = useAuth();
   const backendUrl = useBackendUrl();
   const [selectedOrgMcp, setSelectedOrgMcp] = useState<McpWithScope | null>(
     null,
@@ -275,7 +275,7 @@ const McpList = ({
                 Detach
               </Button>
             )}
-            {isOrgAdmin && (
+            {canAttach && (
               <Button asChild>
                 <Link href={`/${orgId}/settings/mcp/${selectedOrgMcp?.id}`}>
                   <ExternalLink className="size-4" />

@@ -3,8 +3,14 @@ import {
   type Actor,
   canAccessOrganization,
   canAccessWorkspace,
+  canConfigureSandbox,
   canConfigureWorkspaceResource,
+  canCreateWorkspace,
+  canListOrgMembers,
+  canManageOrgSharedResource,
   canManageSharedResource,
+  canManageWorkspaceDelegation,
+  canSendChatMessages,
   isOperator,
   resolveActor,
 } from "./authorization";
@@ -22,7 +28,7 @@ describe("resolveActor", () => {
       resolveActor({
         isOperator: true,
         orgRole: "member",
-        isWorkspaceOwner: false,
+        ownsWorkspace: false,
       }),
     ).toBe("operator");
   });
@@ -32,7 +38,7 @@ describe("resolveActor", () => {
       resolveActor({
         isOperator: false,
         orgRole: "admin",
-        isWorkspaceOwner: false,
+        ownsWorkspace: false,
       }),
     ).toBe("org-admin");
   });
@@ -42,7 +48,7 @@ describe("resolveActor", () => {
       resolveActor({
         isOperator: false,
         orgRole: "member",
-        isWorkspaceOwner: true,
+        ownsWorkspace: true,
       }),
     ).toBe("workspace-owner");
   });
@@ -52,7 +58,7 @@ describe("resolveActor", () => {
       resolveActor({
         isOperator: false,
         orgRole: "member",
-        isWorkspaceOwner: false,
+        ownsWorkspace: false,
       }),
     ).toBe("org-member");
   });
@@ -62,7 +68,7 @@ describe("resolveActor", () => {
       resolveActor({
         isOperator: false,
         orgRole: null,
-        isWorkspaceOwner: false,
+        ownsWorkspace: false,
       }),
     ).toBe("org-member");
   });
@@ -150,6 +156,49 @@ describe("canConfigureWorkspaceResource — credential delegation (ADR-0006)", (
     expect(
       canConfigureWorkspaceResource("org-admin", "sandbox", false),
     ).toEqual({ allowed: true });
+  });
+});
+
+describe.each([
+  ["canManageOrgSharedResource", canManageOrgSharedResource],
+  ["canConfigureSandbox", canConfigureSandbox],
+  ["canListOrgMembers", canListOrgMembers],
+  ["canCreateWorkspace", canCreateWorkspace],
+  ["canManageWorkspaceDelegation", canManageWorkspaceDelegation],
+] as const)("%s — Org-Admin-tier, no Workspace requirement", (_name, fn) => {
+  it("the Operator is allowed", () => {
+    expect(fn("operator")).toEqual({ allowed: true });
+  });
+
+  it("the Org Admin is allowed", () => {
+    expect(fn("org-admin")).toEqual({ allowed: true });
+  });
+
+  it("the Workspace Owner is refused", () => {
+    expect(fn("workspace-owner")).toEqual({
+      allowed: false,
+      reason: "not-org-admin",
+    });
+  });
+
+  it("a plain Org member is refused", () => {
+    expect(fn("org-member")).toEqual({
+      allowed: false,
+      reason: "not-org-admin",
+    });
+  });
+});
+
+describe("canSendChatMessages", () => {
+  it("the literal Workspace owner is allowed", () => {
+    expect(canSendChatMessages(true)).toEqual({ allowed: true });
+  });
+
+  it("a non-owner is refused, regardless of admin tier", () => {
+    expect(canSendChatMessages(false)).toEqual({
+      allowed: false,
+      reason: "not-owner",
+    });
   });
 });
 

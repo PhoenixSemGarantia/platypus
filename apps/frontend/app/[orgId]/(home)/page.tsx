@@ -8,6 +8,7 @@ import useSWR from "swr";
 import { fetcher, joinUrl } from "@/lib/utils";
 import { useBackendUrl } from "@/app/client-context";
 import { useAuth } from "@/components/auth-provider";
+import { canCreateWorkspace } from "@/lib/authorization";
 import {
   Empty,
   EmptyContent,
@@ -26,7 +27,8 @@ export default function OrgPage({
 }) {
   const { orgId } = use(params);
   const backendUrl = useBackendUrl();
-  const { user, isOrgAdmin, isAuthLoading } = useAuth();
+  const { user, actor, isAuthLoading } = useAuth();
+  const canCreate = canCreateWorkspace(actor).allowed;
 
   const { data: workspacesData } = useSWR<{
     results: Workspace[];
@@ -39,7 +41,7 @@ export default function OrgPage({
 
   // Wait for the org-membership fetch too, not just workspaces. Switching orgs
   // clears orgMembership and re-fetches it; if workspaces resolve first,
-  // isOrgAdmin is briefly false and the admin-only "Add workspace" button would
+  // canCreate is briefly false and the admin-only "Add workspace" button would
   // render late, shifting the toolbar. Gating on isAuthLoading keeps the button
   // row hidden until admin status is known so it appears fully formed.
   const isReady = !!workspacesData && !isAuthLoading;
@@ -54,7 +56,7 @@ export default function OrgPage({
           <WorkspaceList orgId={orgId} />
           <div className="flex items-center gap-2">
             {/* ADR-0008: Workspace creation is org-admin-only. */}
-            {isOrgAdmin && (
+            {canCreate && (
               <Button asChild>
                 <Link href={`/${orgId}/create`}>
                   <Plus className="size-4" /> Add workspace
@@ -76,7 +78,7 @@ export default function OrgPage({
             </EmptyMedia>
             <EmptyTitle>No workspaces found</EmptyTitle>
             <EmptyDescription>
-              {isOrgAdmin
+              {canCreate
                 ? "Create your first workspace in this organization to start building agents."
                 : "You don't have a workspace yet. An organization admin can provision one for you."}
             </EmptyDescription>
@@ -84,7 +86,7 @@ export default function OrgPage({
           <EmptyContent>
             <div className="flex items-center gap-2">
               {/* ADR-0008: Workspace creation is org-admin-only. */}
-              {isOrgAdmin && (
+              {canCreate && (
                 <Button asChild className="flex-1">
                   <Link href={`/${orgId}/create`}>
                     <Plus className="h-4 w-4" /> Create workspace

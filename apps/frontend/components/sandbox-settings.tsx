@@ -8,6 +8,7 @@ import { Box, Plus, Trash2, X } from "lucide-react";
 import { type Sandbox } from "@platypus/schemas";
 
 import { useAuth } from "@/components/auth-provider";
+import { canConfigureSandbox } from "@/lib/authorization";
 import { useBackendUrl } from "@/app/client-context";
 import { fetcher, joinUrl } from "@/lib/utils";
 import { writeAt } from "@/lib/api-write";
@@ -225,8 +226,10 @@ const SandboxSettings = ({
   orgId: string;
   workspaceId: string;
 }) => {
-  const { user, isOrgAdmin } = useAuth();
+  const { user, actor } = useAuth();
   const backendUrl = useBackendUrl();
+  // Credential- and reach-bearing sandbox config is admin-managed (ADR-0006).
+  const canConfigure = canConfigureSandbox(actor).allowed;
 
   const sandboxUrl = joinUrl(
     backendUrl,
@@ -260,7 +263,7 @@ const SandboxSettings = ({
 
   // Operator network allowlist — admin-only endpoint (ADR-0005).
   const { data: networksData } = useSWR<{ results: string[] }>(
-    backendUrl && user && isOrgAdmin ? `${sandboxUrl}/networks` : null,
+    backendUrl && user && canConfigure ? `${sandboxUrl}/networks` : null,
     fetcher,
   );
   const allowedNetworks = networksData?.results ?? [];
@@ -390,7 +393,7 @@ const SandboxSettings = ({
 
     // Non-admin owners may only change name + userEnv (ADR-0006); everything
     // else is admin-controlled and ignored server-side, so we don't send it.
-    const payload = isOrgAdmin
+    const payload = canConfigure
       ? {
           ...(isCreate ? { workspaceId } : {}),
           name: formData.name,
@@ -575,14 +578,14 @@ const SandboxSettings = ({
           </EmptyMedia>
           <EmptyTitle>No sandbox configured</EmptyTitle>
           <EmptyDescription>
-            {!isOrgAdmin
+            {!canConfigure
               ? "No sandbox is configured for this workspace. Ask an organization admin to set one up."
               : noBackends
                 ? "No sandbox backends are registered on this server. Add @platypus/docker to PLATYPUS_PLUGINS (or register another backend) and restart the backend."
                 : "Configure a sandbox to run agent code in an isolated environment."}
           </EmptyDescription>
         </EmptyHeader>
-        {isOrgAdmin && (
+        {canConfigure && (
           <EmptyContent>
             <Button
               onClick={() => setIsConfiguring(true)}
@@ -627,11 +630,11 @@ const SandboxSettings = ({
                 clearError("backend");
                 setFormData((prev) => ({ ...prev, backend: value }));
               }}
-              disabled={isSubmitting || !isOrgAdmin}
+              disabled={isSubmitting || !canConfigure}
             >
               <SelectTrigger
                 id="backend"
-                disabled={isSubmitting || !isOrgAdmin}
+                disabled={isSubmitting || !canConfigure}
               >
                 <SelectValue placeholder="Select a backend" />
               </SelectTrigger>
@@ -648,7 +651,7 @@ const SandboxSettings = ({
             </Select>
             <FieldDescription>
               The runtime that hosts the sandbox environment.
-              {!isOrgAdmin && " Managed by an organization admin."}
+              {!canConfigure && " Managed by an organization admin."}
             </FieldDescription>
             {validationErrors.backend && (
               <FieldError>{validationErrors.backend}</FieldError>
@@ -656,7 +659,7 @@ const SandboxSettings = ({
           </Field>
 
           {/* Host reachability (ADR-0005) — admin-only, docker backend only. */}
-          {isOrgAdmin && isDocker && (
+          {canConfigure && isDocker && (
             <>
               <Field data-invalid={!!validationErrors.networks}>
                 <FieldLabel>Networks</FieldLabel>
@@ -729,7 +732,7 @@ const SandboxSettings = ({
           )}
 
           {/* SSH connection (ADR-0012) — admin-only, ssh backend only. */}
-          {isOrgAdmin && isSsh && (
+          {canConfigure && isSsh && (
             <>
               <Field data-invalid={!!validationErrors.config}>
                 <FieldLabel htmlFor="ssh-host">Host</FieldLabel>
@@ -900,7 +903,7 @@ const SandboxSettings = ({
           )}
 
           {/* Admin-managed env (ADR-0006). */}
-          {isOrgAdmin && (
+          {canConfigure && (
             <Field data-invalid={!!validationErrors.adminEnv}>
               <FieldLabel>Admin environment variables</FieldLabel>
               <FieldDescription>
@@ -936,7 +939,7 @@ const SandboxSettings = ({
             </FieldDescription>
             {/* Admin keys are shown read-only so the owner knows which names
                 are reserved (values are never returned to non-admins). */}
-            {!isOrgAdmin && formData.adminEnv.length > 0 && (
+            {!canConfigure && formData.adminEnv.length > 0 && (
               <div className="mb-2">
                 <p className="text-xs text-muted-foreground mb-1">
                   Managed by admin (read-only):
@@ -981,7 +984,7 @@ const SandboxSettings = ({
         </Button>
 
         {hasSandbox ? (
-          isOrgAdmin && (
+          canConfigure && (
             <Button
               className="cursor-pointer"
               variant="outline"

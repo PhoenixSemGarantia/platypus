@@ -23,6 +23,7 @@ import useSWR from "swr";
 import { fetcher, joinUrl } from "@/lib/utils";
 import { useBackendUrl } from "@/app/client-context";
 import { useAuth } from "@/components/auth-provider";
+import { canManageOrgSharedResource } from "@/lib/authorization";
 import {
   ManageAttachmentsDialog,
   SharedWithBadge,
@@ -35,7 +36,8 @@ import { scopedPath, writeEntity, type Scope } from "@/lib/api-write";
 // the way a Shared Agent is created; it is then edited, shared, and deleted
 // here on the Organization surface — in Workspaces it is locked.
 export const OrgAgentsList = ({ orgId }: { orgId: string }) => {
-  const { user, isOrgAdmin } = useAuth();
+  const { user, actor } = useAuth();
+  const canManage = canManageOrgSharedResource(actor).allowed;
   const backendUrl = useBackendUrl();
   const [agentToDelete, setAgentToDelete] = useState<Agent | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -150,7 +152,7 @@ export const OrgAgentsList = ({ orgId }: { orgId: string }) => {
                 <ItemDescription className="text-xs line-clamp-3">
                   {agent.description}
                 </ItemDescription>
-                {isOrgAdmin && (
+                {canManage && (
                   <div className="mt-1">
                     <SharedWithBadge
                       orgId={orgId}
@@ -160,7 +162,7 @@ export const OrgAgentsList = ({ orgId }: { orgId: string }) => {
                   </div>
                 )}
               </ItemContent>
-              {isOrgAdmin && (
+              {canManage && (
                 <ItemActions>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
