@@ -65,6 +65,7 @@ import useSWR, { useSWRConfig } from "swr";
 import { cn, fetcher, joinUrl } from "@/lib/utils";
 import { canSubmitForm, retractFieldError } from "@/lib/form-errors";
 import { writeEntity } from "@/lib/api-write";
+import { applyWriteOutcome } from "@/lib/apply-write-outcome";
 import {
   getModelConfigs,
   defaultPassthroughFileTypes,
@@ -833,10 +834,21 @@ const ProviderForm = ({
         aliasRepoints?: unknown;
       }>(backendUrl, "providers", scope, { id: providerId, data: payload });
 
-      switch (result.outcome) {
-        case "success":
-          reportAliasRepoints(result.data.aliasRepoints);
-          result.revalidateKeys.forEach((key) => globalMutate(key));
+      await applyWriteOutcome(result, {
+        mutate: globalMutate,
+        setValidationErrors,
+        onConflict: (message) => setError(message),
+        onError: (message, outcome) => {
+          if (outcome.outcome === "forbidden") {
+            // Guidance, not a failure — the backend's message already says
+            // where the Shared resource is actually managed (#570).
+            toast.info(message);
+          } else {
+            toast.error(message);
+          }
+        },
+        onSuccess: (data) => {
+          reportAliasRepoints(data.aliasRepoints);
           if (formScope === "workspace") {
             router.push(
               `/${orgId}/workspace/${workspaceId}/settings/providers`,
@@ -844,26 +856,8 @@ const ProviderForm = ({
           } else {
             router.push(`/${orgId}/settings/providers`);
           }
-          break;
-        case "invalid":
-          setValidationErrors(result.fieldErrors);
-          if (Object.keys(result.fieldErrors).length === 0) {
-            toast.error(result.message);
-          }
-          break;
-        case "conflict":
-          setError(result.message);
-          break;
-        case "locked":
-          // Guidance, not a failure — the backend's message already says
-          // where the Shared resource is actually managed (#570).
-          toast.info(result.message);
-          break;
-        case "notFound":
-        case "error":
-          toast.error(result.message);
-          break;
-      }
+        },
+      });
     } catch (error) {
       console.error("Error saving provider:", error);
       toast.error("Failed to save provider");
@@ -890,24 +884,29 @@ const ProviderForm = ({
       id: providerId,
     });
 
-    if (result.outcome === "success") {
-      result.revalidateKeys.forEach((key) => globalMutate(key));
-      if (formScope === "workspace") {
-        router.push(`/${orgId}/workspace/${workspaceId}/settings/providers`);
-      } else {
-        router.push(`/${orgId}/settings/providers`);
-      }
-    } else if (result.outcome === "locked") {
-      // Guidance, not a failure — the backend's message already says where
-      // the Shared resource is actually managed (#570).
-      toast.info(result.message);
-      setIsDeleting(false);
-      setIsDeleteDialogOpen(false);
-    } else {
-      toast.error(result.message);
-      setIsDeleting(false);
-      setIsDeleteDialogOpen(false);
-    }
+    await applyWriteOutcome(result, {
+      mutate: globalMutate,
+      setValidationErrors: () => {},
+      conflictField: null,
+      onSuccess: () => {
+        if (formScope === "workspace") {
+          router.push(`/${orgId}/workspace/${workspaceId}/settings/providers`);
+        } else {
+          router.push(`/${orgId}/settings/providers`);
+        }
+      },
+      onError: (message, outcome) => {
+        if (outcome.outcome === "forbidden") {
+          // Guidance, not a failure — the backend's message already says
+          // where the Shared resource is actually managed (#570).
+          toast.info(message);
+        } else {
+          toast.error(message);
+        }
+        setIsDeleting(false);
+        setIsDeleteDialogOpen(false);
+      },
+    });
   };
 
   if (isLoading) {

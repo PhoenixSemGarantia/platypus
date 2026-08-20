@@ -19,6 +19,7 @@ import { type Organization } from "@platypus/schemas";
 import { fetcher, joinUrl } from "@/lib/utils";
 import { canSubmitForm, retractFieldError } from "@/lib/form-errors";
 import { writeEntity } from "@/lib/api-write";
+import { applyWriteOutcome } from "@/lib/apply-write-outcome";
 import { useBackendUrl } from "@/app/client-context";
 import { useAuth } from "@/components/auth-provider";
 import { Trash2 } from "lucide-react";
@@ -100,32 +101,19 @@ const OrganizationForm = ({ classNames, orgId }: OrganizationFormProps) => {
       { id: orgId, data: payload },
     );
 
-    switch (result.outcome) {
-      case "success":
-        result.revalidateKeys.forEach((key) => globalMutate(key));
+    await applyWriteOutcome(result, {
+      mutate: globalMutate,
+      setValidationErrors,
+      onSuccess: (data) => {
         if (orgId) {
           toast.success("Organization updated");
           router.refresh();
         } else {
           toast.success("Organization created");
-          router.push(`/${result.data.id}`);
+          router.push(`/${data.id}`);
         }
-        break;
-      case "invalid":
-        setValidationErrors(result.fieldErrors);
-        if (Object.keys(result.fieldErrors).length === 0) {
-          toast.error(result.message);
-        }
-        break;
-      case "conflict":
-        setValidationErrors({ name: result.message });
-        break;
-      case "locked":
-      case "notFound":
-      case "error":
-        toast.error(result.message);
-        break;
-    }
+      },
+    });
 
     setIsSubmitting(false);
   };
@@ -141,15 +129,20 @@ const OrganizationForm = ({ classNames, orgId }: OrganizationFormProps) => {
       { id: orgId },
     );
 
-    if (result.outcome === "success") {
-      result.revalidateKeys.forEach((key) => globalMutate(key));
-      toast.success("Organization deleted");
-      window.location.href = `/`;
-    } else {
-      toast.error(result.message);
-      setIsDeleting(false);
-      setIsDeleteDialogOpen(false);
-    }
+    await applyWriteOutcome(result, {
+      mutate: globalMutate,
+      setValidationErrors: () => {},
+      conflictField: null,
+      onSuccess: () => {
+        toast.success("Organization deleted");
+        window.location.href = `/`;
+      },
+      onError: (message) => {
+        toast.error(message);
+        setIsDeleting(false);
+        setIsDeleteDialogOpen(false);
+      },
+    });
   };
 
   return (

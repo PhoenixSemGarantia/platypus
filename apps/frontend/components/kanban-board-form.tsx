@@ -13,6 +13,7 @@ import { useBackendUrl } from "@/app/client-context";
 import { joinUrl } from "@/lib/utils";
 import { canSubmitForm, retractFieldError } from "@/lib/form-errors";
 import { writeEntity } from "@/lib/api-write";
+import { applyWriteOutcome } from "@/lib/apply-write-outcome";
 import { KANBAN_LABEL_COLORS, type KanbanLabel } from "@platypus/schemas";
 import { toast } from "sonner";
 
@@ -91,38 +92,23 @@ export function KanbanBoardForm({
       },
     );
 
-    switch (result.outcome) {
-      case "success":
-        result.revalidateKeys.forEach((key) => mutate(key));
+    await applyWriteOutcome(result, {
+      mutate,
+      setValidationErrors,
+      onSuccess: async (data) => {
         if (isEditing) {
           toast.success("Board updated");
           onSuccess?.();
         } else {
           const stateUrl = joinUrl(
             backendUrl,
-            `/organizations/${orgId}/workspaces/${workspaceId}/boards/${result.data.id}/state`,
+            `/organizations/${orgId}/workspaces/${workspaceId}/boards/${data.id}/state`,
           );
-          await mutate(stateUrl, { board: result.data, columns: [] }, false);
-          router.push(
-            `/${orgId}/workspace/${workspaceId}/boards/${result.data.id}`,
-          );
+          await mutate(stateUrl, { board: data, columns: [] }, false);
+          router.push(`/${orgId}/workspace/${workspaceId}/boards/${data.id}`);
         }
-        break;
-      case "invalid":
-        setValidationErrors(result.fieldErrors);
-        if (Object.keys(result.fieldErrors).length === 0) {
-          toast.error(result.message);
-        }
-        break;
-      case "conflict":
-        setValidationErrors({ name: result.message });
-        break;
-      case "locked":
-      case "notFound":
-      case "error":
-        toast.error(result.message);
-        break;
-    }
+      },
+    });
 
     setIsSubmitting(false);
   };

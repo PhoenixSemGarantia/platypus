@@ -24,8 +24,15 @@ export interface WriteOptions<TData> {
  * The outcomes the backend's central `onError` (ADR-0010) can produce for a
  * write, plus the field-level shape `sValidator` returns for a 400 before it
  * ever reaches that seam. A caller destructures `outcome` and TypeScript
- * won't let it skip a case, so the four failure modes this ticket exists to
+ * won't let it skip a case, so the five failure modes this ticket exists to
  * stop callers from re-deriving from a raw status code can't be missed.
+ *
+ * `forbidden` covers every 403, whether it's a `LockedError` (resource-state,
+ * ADR-0010) or a middleware authorization refusal (ADR-0006) — the wire
+ * envelope for both is `{ error: string }` with no field distinguishing them
+ * (see ADR-0010's "Authorization is unchanged" note), so this outcome can't
+ * claim to know which one occurred. Its default message stays neutral; a
+ * backend message (locked or otherwise) always passes through unchanged.
  */
 export type WriteOutcome<TResult> =
   | {
@@ -35,7 +42,7 @@ export type WriteOutcome<TResult> =
       readonly revalidateKeys: readonly string[];
     }
   | { readonly outcome: "notFound"; readonly message: string }
-  | { readonly outcome: "locked"; readonly message: string }
+  | { readonly outcome: "forbidden"; readonly message: string }
   | { readonly outcome: "conflict"; readonly message: string }
   | {
       readonly outcome: "invalid";
@@ -53,7 +60,7 @@ export type WriteOutcome<TResult> =
 
 const DEFAULT_MESSAGES = {
   notFound: "Not found",
-  locked: "This resource is managed at the organization level",
+  forbidden: "You do not have permission to do this.",
   conflict: "This operation conflicts with an existing resource",
   invalid: "Validation failed",
   error: "Request failed",
@@ -139,8 +146,8 @@ async function performWrite<TResult, TData>(
       };
     case 403:
       return {
-        outcome: "locked",
-        message: errorMessage(body) ?? DEFAULT_MESSAGES.locked,
+        outcome: "forbidden",
+        message: errorMessage(body) ?? DEFAULT_MESSAGES.forbidden,
       };
     case 409:
       return {

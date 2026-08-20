@@ -32,6 +32,7 @@ import {
 import { AttachSharedResourceDialog } from "./attach-shared-resource-dialog";
 import { useState } from "react";
 import { scopedPath, writeEntity, type Scope } from "@/lib/api-write";
+import { useDetachDialog } from "@/hooks/use-detach-dialog";
 
 const ProvidersList = ({
   className,
@@ -47,11 +48,9 @@ const ProvidersList = ({
 
   const { user, actor, workspaceDelegation } = useAuth();
   const backendUrl = useBackendUrl();
-  const [selectedOrgProvider, setSelectedOrgProvider] =
-    useState<ProviderWithScope | null>(null);
+  const orgProviderDetach = useDetachDialog<ProviderWithScope>();
   const [attachOpen, setAttachOpen] = useState(false);
   const [detaching, setDetaching] = useState(false);
-  const [detachError, setDetachError] = useState<string | null>(null);
 
   // Resolved once per render and reused for the list's read and every write
   // below, rather than re-deriving the Organization-vs-Workspace branch at
@@ -74,7 +73,7 @@ const ProvidersList = ({
   const detachOrgProvider = async (providerId: string) => {
     if (!backendUrl || !workspaceId) return;
     setDetaching(true);
-    setDetachError(null);
+    orgProviderDetach.setError(null);
     try {
       const outcome = await writeEntity(
         backendUrl,
@@ -85,10 +84,10 @@ const ProvidersList = ({
         },
       );
       if (outcome.outcome === "success") {
-        setSelectedOrgProvider(null);
+        orgProviderDetach.close();
         await mutate();
       } else {
-        setDetachError(outcome.message);
+        orgProviderDetach.setError(outcome.message);
       }
     } finally {
       setDetaching(false);
@@ -140,10 +139,7 @@ const ProvidersList = ({
                 asChild={!isOrgScopedInWorkspace}
                 onClick={
                   isOrgScopedInWorkspace
-                    ? () => {
-                        setDetachError(null);
-                        setSelectedOrgProvider(provider);
-                      }
+                    ? () => orgProviderDetach.open(provider)
                     : undefined
                 }
                 className={cn(isOrgScopedInWorkspace && "cursor-pointer")}
@@ -227,41 +223,36 @@ const ProvidersList = ({
         />
       )}
       <Dialog
-        open={!!selectedOrgProvider}
+        open={!!orgProviderDetach.selected}
         onOpenChange={(open) => {
-          if (!open) {
-            setSelectedOrgProvider(null);
-            setDetachError(null);
-          }
+          if (!open) orgProviderDetach.close();
         }}
       >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Organization Provider</DialogTitle>
             <DialogDescription>
-              The provider <strong>{selectedOrgProvider?.name}</strong> is
-              managed at the organization level. It can only be edited from the
-              organization settings.
+              The provider <strong>{orgProviderDetach.selected?.name}</strong>{" "}
+              is managed at the organization level. It can only be edited from
+              the organization settings.
             </DialogDescription>
           </DialogHeader>
-          {detachError && (
-            <p className="text-sm text-destructive">{detachError}</p>
+          {orgProviderDetach.error && (
+            <p className="text-sm text-destructive">
+              {orgProviderDetach.error}
+            </p>
           )}
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setSelectedOrgProvider(null);
-                setDetachError(null);
-              }}
-            >
+            <Button variant="outline" onClick={orgProviderDetach.close}>
               Close
             </Button>
-            {canAttach && selectedOrgProvider && (
+            {canAttach && orgProviderDetach.selected && (
               <Button
                 variant="destructive"
                 disabled={detaching}
-                onClick={() => detachOrgProvider(selectedOrgProvider.id)}
+                onClick={() =>
+                  detachOrgProvider(orgProviderDetach.selected!.id)
+                }
               >
                 <Unlink className="size-4" />
                 Detach
@@ -270,7 +261,7 @@ const ProvidersList = ({
             {canAttach && (
               <Button asChild>
                 <Link
-                  href={`/${orgId}/settings/providers/${selectedOrgProvider?.id}`}
+                  href={`/${orgId}/settings/providers/${orgProviderDetach.selected?.id}`}
                 >
                   <ExternalLink className="size-4" />
                   Org settings

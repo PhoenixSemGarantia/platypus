@@ -23,6 +23,7 @@ import {
   retractFieldError,
 } from "@/lib/form-errors";
 import { writeEntity, writeAt } from "@/lib/api-write";
+import { applyWriteOutcome } from "@/lib/apply-write-outcome";
 import { toast } from "sonner";
 import { useBackendUrl } from "@/app/client-context";
 import { useAuth } from "@/components/auth-provider";
@@ -188,27 +189,14 @@ const WebhookForm = ({ orgId, workspaceId, webhookId }: WebhookFormProps) => {
       { id: webhookId, data: payload },
     );
 
-    switch (result.outcome) {
-      case "success":
-        result.revalidateKeys.forEach((key) => globalMutate(key));
+    await applyWriteOutcome(result, {
+      mutate: globalMutate,
+      setValidationErrors,
+      onSuccess: () => {
         toast.success(isEditMode ? "Webhook updated" : "Webhook created");
         router.push(`/${orgId}/workspace/${workspaceId}/settings/webhooks`);
-        break;
-      case "invalid":
-        setValidationErrors(result.fieldErrors);
-        if (Object.keys(result.fieldErrors).length === 0) {
-          toast.error(result.message);
-        }
-        break;
-      case "conflict":
-        setValidationErrors({ name: result.message });
-        break;
-      case "locked":
-      case "notFound":
-      case "error":
-        toast.error(result.message);
-        break;
-    }
+      },
+    });
 
     setIsSubmitting(false);
   };
@@ -222,15 +210,20 @@ const WebhookForm = ({ orgId, workspaceId, webhookId }: WebhookFormProps) => {
       { id: webhookId },
     );
 
-    if (result.outcome === "success") {
-      result.revalidateKeys.forEach((key) => globalMutate(key));
-      toast.success("Webhook deleted");
-      router.push(`/${orgId}/workspace/${workspaceId}/settings/webhooks`);
-    } else {
-      toast.error(result.message);
-      setIsDeleting(false);
-      setIsDeleteDialogOpen(false);
-    }
+    await applyWriteOutcome(result, {
+      mutate: globalMutate,
+      setValidationErrors: () => {},
+      conflictField: null,
+      onSuccess: () => {
+        toast.success("Webhook deleted");
+        router.push(`/${orgId}/workspace/${workspaceId}/settings/webhooks`);
+      },
+      onError: (message) => {
+        toast.error(message);
+        setIsDeleting(false);
+        setIsDeleteDialogOpen(false);
+      },
+    });
   };
 
   const handleRegenerateSecret = async () => {

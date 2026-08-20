@@ -35,6 +35,7 @@ import useSWR, { useSWRConfig } from "swr";
 import { fetcher, joinUrl } from "@/lib/utils";
 import { canSubmitForm, retractFieldError } from "@/lib/form-errors";
 import { writeEntity, writeAt } from "@/lib/api-write";
+import { applyWriteOutcome } from "@/lib/apply-write-outcome";
 import { toast } from "sonner";
 import { useBackendUrl } from "@/app/client-context";
 import { useAuth } from "@/components/auth-provider";
@@ -252,29 +253,24 @@ const McpForm = ({
       { id: existingId, data: payload },
     );
 
-    switch (result.outcome) {
-      case "success":
-        result.revalidateKeys.forEach((key) => globalMutate(key));
-        return result.data.id;
-      case "invalid":
-        setValidationErrors(result.fieldErrors);
-        if (Object.keys(result.fieldErrors).length === 0) {
-          toast.error(result.message);
+    let savedId: string | null = null;
+    await applyWriteOutcome(result, {
+      mutate: globalMutate,
+      setValidationErrors,
+      onSuccess: (data) => {
+        savedId = data.id;
+      },
+      onError: (message, outcome) => {
+        if (outcome.outcome === "forbidden") {
+          // Guidance, not a failure — the backend's message already says
+          // where the Shared resource is actually managed (#570).
+          toast.info(message);
+        } else {
+          toast.error(message);
         }
-        return null;
-      case "conflict":
-        setValidationErrors({ name: result.message });
-        return null;
-      case "locked":
-        // Guidance, not a failure — the backend's message already says
-        // where the Shared resource is actually managed (#570).
-        toast.info(result.message);
-        return null;
-      case "notFound":
-      case "error":
-        toast.error(result.message);
-        return null;
-    }
+      },
+    });
+    return savedId;
   };
 
   const handleSubmit = async () => {
@@ -301,20 +297,23 @@ const McpForm = ({
       id: mcpId,
     });
 
-    if (result.outcome === "success") {
-      result.revalidateKeys.forEach((key) => globalMutate(key));
-      router.push(listPath);
-    } else if (result.outcome === "locked") {
-      // Guidance, not a failure — the backend's message already says where
-      // the Shared resource is actually managed (#570).
-      toast.info(result.message);
-      setIsDeleting(false);
-      setIsDeleteDialogOpen(false);
-    } else {
-      toast.error(result.message);
-      setIsDeleting(false);
-      setIsDeleteDialogOpen(false);
-    }
+    await applyWriteOutcome(result, {
+      mutate: globalMutate,
+      setValidationErrors: () => {},
+      conflictField: null,
+      onSuccess: () => router.push(listPath),
+      onError: (message, outcome) => {
+        if (outcome.outcome === "forbidden") {
+          // Guidance, not a failure — the backend's message already says
+          // where the Shared resource is actually managed (#570).
+          toast.info(message);
+        } else {
+          toast.error(message);
+        }
+        setIsDeleting(false);
+        setIsDeleteDialogOpen(false);
+      },
+    });
   };
 
   const handleTestConnection = async () => {

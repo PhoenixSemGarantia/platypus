@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import type { KanbanBoardState } from "@platypus/schemas";
 import { fetcher, joinUrl } from "@/lib/utils";
 import { writeEntity } from "@/lib/api-write";
+import { applyWriteOutcome } from "@/lib/apply-write-outcome";
 import { useBackendUrl } from "@/app/client-context";
 import { useAuth } from "@/components/auth-provider";
 import { BackButton } from "@/components/back-button";
@@ -45,14 +46,17 @@ const BoardSettingsPage = ({
       { id: boardId },
     );
 
-    if (result.outcome === "success") {
-      result.revalidateKeys.forEach((key) => globalMutate(key));
-      router.push(`/${orgId}/workspace/${workspaceId}`);
-    } else {
-      toast.error(result.message);
-      setIsDeleting(false);
-      setIsDeleteDialogOpen(false);
-    }
+    await applyWriteOutcome(result, {
+      mutate: globalMutate,
+      setValidationErrors: () => {},
+      conflictField: null,
+      onSuccess: () => router.push(`/${orgId}/workspace/${workspaceId}`),
+      onError: (message) => {
+        toast.error(message);
+        setIsDeleting(false);
+        setIsDeleteDialogOpen(false);
+      },
+    });
   };
 
   if (error) {

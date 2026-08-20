@@ -32,6 +32,7 @@ import {
 import { AttachSharedResourceDialog } from "./attach-shared-resource-dialog";
 import { useState } from "react";
 import { writeEntity, type Scope } from "@/lib/api-write";
+import { useDetachDialog } from "@/hooks/use-detach-dialog";
 
 const McpList = ({
   className,
@@ -47,12 +48,9 @@ const McpList = ({
 
   const { actor, workspaceDelegation } = useAuth();
   const backendUrl = useBackendUrl();
-  const [selectedOrgMcp, setSelectedOrgMcp] = useState<McpWithScope | null>(
-    null,
-  );
+  const orgMcpDetach = useDetachDialog<McpWithScope>();
   const [attachOpen, setAttachOpen] = useState(false);
   const [detaching, setDetaching] = useState(false);
-  const [detachError, setDetachError] = useState<string | null>(null);
 
   // Resolved once per render and reused for the list's read and every write
   // below, rather than re-deriving the Organization-vs-Workspace branch at
@@ -70,16 +68,16 @@ const McpList = ({
   const detachOrgMcp = async (mcpId: string) => {
     if (!backendUrl || !workspaceId) return;
     setDetaching(true);
-    setDetachError(null);
+    orgMcpDetach.setError(null);
     try {
       const outcome = await writeEntity(backendUrl, "attachments/mcp", scope, {
         id: mcpId,
       });
       if (outcome.outcome === "success") {
-        setSelectedOrgMcp(null);
+        orgMcpDetach.close();
         await mutate();
       } else {
-        setDetachError(outcome.message);
+        orgMcpDetach.setError(outcome.message);
       }
     } finally {
       setDetaching(false);
@@ -145,10 +143,7 @@ const McpList = ({
                 asChild={!isOrgScopedInWorkspace}
                 onClick={
                   isOrgScopedInWorkspace
-                    ? () => {
-                        setDetachError(null);
-                        setSelectedOrgMcp(mcp);
-                      }
+                    ? () => orgMcpDetach.open(mcp)
                     : undefined
                 }
                 className={cn(isOrgScopedInWorkspace && "cursor-pointer")}
@@ -232,41 +227,32 @@ const McpList = ({
         />
       )}
       <Dialog
-        open={!!selectedOrgMcp}
+        open={!!orgMcpDetach.selected}
         onOpenChange={(open) => {
-          if (!open) {
-            setSelectedOrgMcp(null);
-            setDetachError(null);
-          }
+          if (!open) orgMcpDetach.close();
         }}
       >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Organization MCP</DialogTitle>
             <DialogDescription>
-              The MCP server <strong>{selectedOrgMcp?.name}</strong> is managed
-              at the organization level. It can only be edited from the
+              The MCP server <strong>{orgMcpDetach.selected?.name}</strong> is
+              managed at the organization level. It can only be edited from the
               organization settings.
             </DialogDescription>
           </DialogHeader>
-          {detachError && (
-            <p className="text-sm text-destructive">{detachError}</p>
+          {orgMcpDetach.error && (
+            <p className="text-sm text-destructive">{orgMcpDetach.error}</p>
           )}
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setSelectedOrgMcp(null);
-                setDetachError(null);
-              }}
-            >
+            <Button variant="outline" onClick={orgMcpDetach.close}>
               Close
             </Button>
-            {canAttach && selectedOrgMcp && (
+            {canAttach && orgMcpDetach.selected && (
               <Button
                 variant="destructive"
                 disabled={detaching}
-                onClick={() => detachOrgMcp(selectedOrgMcp.id)}
+                onClick={() => detachOrgMcp(orgMcpDetach.selected!.id)}
               >
                 <Unlink className="size-4" />
                 Detach
@@ -274,7 +260,9 @@ const McpList = ({
             )}
             {canAttach && (
               <Button asChild>
-                <Link href={`/${orgId}/settings/mcp/${selectedOrgMcp?.id}`}>
+                <Link
+                  href={`/${orgId}/settings/mcp/${orgMcpDetach.selected?.id}`}
+                >
                   <ExternalLink className="size-4" />
                   Org settings
                 </Link>

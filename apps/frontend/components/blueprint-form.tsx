@@ -35,6 +35,7 @@ import useSWR, { useSWRConfig } from "swr";
 import { fetcher, joinUrl } from "@/lib/utils";
 import { canSubmitForm, retractFieldError } from "@/lib/form-errors";
 import { writeEntity } from "@/lib/api-write";
+import { applyWriteOutcome } from "@/lib/apply-write-outcome";
 import { useBackendUrl } from "@/app/client-context";
 import { useAuth } from "@/components/auth-provider";
 
@@ -313,26 +314,12 @@ const BlueprintForm = ({
       { id: blueprintId, data: payload },
     );
 
-    switch (result.outcome) {
-      case "success":
-        result.revalidateKeys.forEach((key) => globalMutate(key));
-        router.push(returnPath);
-        break;
-      case "invalid":
-        setValidationErrors(result.fieldErrors);
-        if (Object.keys(result.fieldErrors).length === 0) {
-          setFormError(result.message);
-        }
-        break;
-      case "conflict":
-        setValidationErrors({ name: result.message });
-        break;
-      case "locked":
-      case "notFound":
-      case "error":
-        setFormError(result.message);
-        break;
-    }
+    await applyWriteOutcome(result, {
+      mutate: globalMutate,
+      setValidationErrors,
+      onSuccess: () => router.push(returnPath),
+      onError: (message) => setFormError(message),
+    });
 
     setIsSubmitting(false);
   };
@@ -348,13 +335,16 @@ const BlueprintForm = ({
       { id: blueprintId },
     );
 
-    if (result.outcome === "success") {
-      result.revalidateKeys.forEach((key) => globalMutate(key));
-      router.push(returnPath);
-    } else {
-      setDeleteError(result.message);
-      setIsDeleting(false);
-    }
+    await applyWriteOutcome(result, {
+      mutate: globalMutate,
+      setValidationErrors: () => {},
+      conflictField: null,
+      onSuccess: () => router.push(returnPath),
+      onError: (message) => {
+        setDeleteError(message);
+        setIsDeleting(false);
+      },
+    });
   };
 
   return (

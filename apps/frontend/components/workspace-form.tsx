@@ -27,6 +27,7 @@ import { type Workspace, type Provider } from "@platypus/schemas";
 import { fetcher, joinUrl } from "@/lib/utils";
 import { canSubmitForm, retractFieldError } from "@/lib/form-errors";
 import { writeEntity } from "@/lib/api-write";
+import { applyWriteOutcome } from "@/lib/apply-write-outcome";
 import { useBackendUrl } from "@/app/client-context";
 import { useAuth } from "@/components/auth-provider";
 import {
@@ -208,32 +209,19 @@ const WorkspaceForm = ({
       { id: workspaceId, data: payload },
     );
 
-    switch (result.outcome) {
-      case "success":
-        result.revalidateKeys.forEach((key) => globalMutate(key));
+    await applyWriteOutcome(result, {
+      mutate: globalMutate,
+      setValidationErrors,
+      onSuccess: (data) => {
         if (workspaceId) {
           toast.success("Workspace updated");
           router.refresh();
         } else {
           toast.success("Workspace created");
-          router.push(`/${orgId}/workspace/${result.data.id}`);
+          router.push(`/${orgId}/workspace/${data.id}`);
         }
-        break;
-      case "invalid":
-        setValidationErrors(result.fieldErrors);
-        if (Object.keys(result.fieldErrors).length === 0) {
-          toast.error(result.message);
-        }
-        break;
-      case "conflict":
-        setValidationErrors({ name: result.message });
-        break;
-      case "locked":
-      case "notFound":
-      case "error":
-        toast.error(result.message);
-        break;
-    }
+      },
+    });
 
     setIsSubmitting(false);
   };
@@ -249,15 +237,20 @@ const WorkspaceForm = ({
       { id: workspaceId },
     );
 
-    if (result.outcome === "success") {
-      result.revalidateKeys.forEach((key) => globalMutate(key));
-      toast.success("Workspace deleted");
-      window.location.href = `/${orgId}`;
-    } else {
-      toast.error(result.message);
-      setIsDeleting(false);
-      setIsDeleteDialogOpen(false);
-    }
+    await applyWriteOutcome(result, {
+      mutate: globalMutate,
+      setValidationErrors: () => {},
+      conflictField: null,
+      onSuccess: () => {
+        toast.success("Workspace deleted");
+        window.location.href = `/${orgId}`;
+      },
+      onError: (message) => {
+        toast.error(message);
+        setIsDeleting(false);
+        setIsDeleteDialogOpen(false);
+      },
+    });
   };
 
   return (
