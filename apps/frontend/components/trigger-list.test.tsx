@@ -125,4 +125,21 @@ describe("TriggerList toggle enabled", () => {
       }),
     );
   });
+
+  it("surfaces the backend's reason and does not flip when the toggle is refused", async () => {
+    triggers = [cronTrigger];
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse(409, { error: "Trigger is running" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<TriggerList orgId="org1" workspaceId="ws1" />);
+    openMenu();
+    fireEvent.click(screen.getByText("Disable"));
+
+    await waitFor(() =>
+      expect(toastErrorSpy).toHaveBeenCalledWith("Trigger is running"),
+    );
+    expect(mutateSpy).not.toHaveBeenCalled();
+  });
 });

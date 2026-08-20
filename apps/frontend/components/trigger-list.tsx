@@ -129,6 +129,8 @@ export const TriggerList = ({
       });
       if (outcome.outcome === "success") {
         mutate();
+      } else {
+        toast.error(outcome.message);
       }
     } catch {
       toast.error("Failed to toggle trigger");
