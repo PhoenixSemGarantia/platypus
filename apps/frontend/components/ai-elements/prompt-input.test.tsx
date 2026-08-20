@@ -177,3 +177,48 @@ describe("PromptInput attachments", () => {
     expect(screen.getByText("dropped.png")).toBeInTheDocument();
   });
 });
+
+describe("PromptInputAttachment image parts", () => {
+  // issue #579: a part can carry an image media type with nothing a client
+  // can fetch (e.g. Provider-reference-only). It should render as the plain
+  // file card every non-image attachment gets, not a broken <img>.
+  it("falls back to a file attachment for an image media type with no URL", () => {
+    render(
+      <PromptInput onSubmit={vi.fn()}>
+        <PromptInputAttachment
+          data={{
+            id: "1",
+            type: "file",
+            mediaType: "image/png",
+            url: "",
+            filename: "photo.png",
+          }}
+        />
+      </PromptInput>,
+    );
+
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    expect(screen.getByText("photo.png")).toBeInTheDocument();
+  });
+
+  it("renders an image media type with a URL as an image", () => {
+    render(
+      <PromptInput onSubmit={vi.fn()}>
+        <PromptInputAttachment
+          data={{
+            id: "1",
+            type: "file",
+            mediaType: "image/png",
+            url: "https://example.com/photo.png",
+            filename: "photo.png",
+          }}
+        />
+      </PromptInput>,
+    );
+
+    expect(screen.getByRole("img")).toHaveAttribute(
+      "src",
+      "https://example.com/photo.png",
+    );
+  });
+});

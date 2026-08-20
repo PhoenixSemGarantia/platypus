@@ -8,6 +8,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { isImageAttachment } from "@/lib/message-parts";
 import { cn } from "@/lib/utils";
 import type { FileUIPart, UIMessage } from "ai";
 import type { LinkSafetyConfig } from "streamdown";
@@ -373,9 +374,7 @@ export function MessageAttachment({
   ...props
 }: MessageAttachmentProps) {
   const filename = data.filename || "";
-  const mediaType =
-    data.mediaType?.startsWith("image/") && data.url ? "image" : "file";
-  const isImage = mediaType === "image";
+  const isImage = isImageAttachment(data);
   const attachmentLabel = filename || (isImage ? "Image" : "Attachment");
 
   return (

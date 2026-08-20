@@ -85,7 +85,7 @@ export function scopedUrl(
   return joinUrl(backendUrl, scopedPath(entity, scope));
 }
 
-function errorMessage(body: unknown): string | undefined {
+export function errorMessage(body: unknown): string | undefined {
   if (body && typeof body === "object" && "error" in body) {
     const { error } = body as { error: unknown };
     if (typeof error === "string") return error;
