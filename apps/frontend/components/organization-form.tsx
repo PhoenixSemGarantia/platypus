@@ -19,7 +19,10 @@ import { type Organization } from "@platypus/schemas";
 import { fetcher, joinUrl } from "@/lib/utils";
 import { canSubmitForm, retractFieldError } from "@/lib/form-errors";
 import { writeEntity } from "@/lib/api-write";
-import { applyWriteOutcome } from "@/lib/apply-write-outcome";
+import {
+  applyWriteOutcome,
+  applyDeleteOutcome,
+} from "@/lib/apply-write-outcome";
 import { useBackendUrl } from "@/app/client-context";
 import { useAuth } from "@/components/auth-provider";
 import { Trash2 } from "lucide-react";
@@ -129,10 +132,8 @@ const OrganizationForm = ({ classNames, orgId }: OrganizationFormProps) => {
       { id: orgId },
     );
 
-    await applyWriteOutcome(result, {
+    await applyDeleteOutcome(result, {
       mutate: globalMutate,
-      setValidationErrors: () => {},
-      conflictField: null,
       onSuccess: () => {
         toast.success("Organization deleted");
         window.location.href = `/`;

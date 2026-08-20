@@ -35,7 +35,11 @@ import useSWR, { useSWRConfig } from "swr";
 import { fetcher, joinUrl } from "@/lib/utils";
 import { canSubmitForm, retractFieldError } from "@/lib/form-errors";
 import { writeEntity, writeAt } from "@/lib/api-write";
-import { applyWriteOutcome } from "@/lib/apply-write-outcome";
+import {
+  applyWriteOutcome,
+  applyDeleteOutcome,
+  toastGuidanceOrError,
+} from "@/lib/apply-write-outcome";
 import { toast } from "sonner";
 import { useBackendUrl } from "@/app/client-context";
 import { useAuth } from "@/components/auth-provider";
@@ -260,15 +264,7 @@ const McpForm = ({
       onSuccess: (data) => {
         savedId = data.id;
       },
-      onError: (message, outcome) => {
-        if (outcome.outcome === "forbidden") {
-          // Guidance, not a failure — the backend's message already says
-          // where the Shared resource is actually managed (#570).
-          toast.info(message);
-        } else {
-          toast.error(message);
-        }
-      },
+      onError: toastGuidanceOrError,
     });
     return savedId;
   };
@@ -297,19 +293,11 @@ const McpForm = ({
       id: mcpId,
     });
 
-    await applyWriteOutcome(result, {
+    await applyDeleteOutcome(result, {
       mutate: globalMutate,
-      setValidationErrors: () => {},
-      conflictField: null,
       onSuccess: () => router.push(listPath),
       onError: (message, outcome) => {
-        if (outcome.outcome === "forbidden") {
-          // Guidance, not a failure — the backend's message already says
-          // where the Shared resource is actually managed (#570).
-          toast.info(message);
-        } else {
-          toast.error(message);
-        }
+        toastGuidanceOrError(message, outcome);
         setIsDeleting(false);
         setIsDeleteDialogOpen(false);
       },

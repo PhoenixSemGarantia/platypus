@@ -23,7 +23,11 @@ import useSWR, { useSWRConfig } from "swr";
 import { fetcher, joinUrl } from "@/lib/utils";
 import { canSubmitForm, retractFieldError } from "@/lib/form-errors";
 import { writeEntity } from "@/lib/api-write";
-import { applyWriteOutcome } from "@/lib/apply-write-outcome";
+import {
+  applyWriteOutcome,
+  applyDeleteOutcome,
+  toastGuidanceOrError,
+} from "@/lib/apply-write-outcome";
 import { toast } from "sonner";
 import { useBackendUrl } from "@/app/client-context";
 import { useAuth } from "@/components/auth-provider";
@@ -157,15 +161,7 @@ const SkillForm = ({
       mutate: globalMutate,
       setValidationErrors,
       onSuccess: () => router.push(returnPath),
-      onError: (message, outcome) => {
-        if (outcome.outcome === "forbidden") {
-          // Guidance, not a failure — the backend's message already says
-          // where the Shared resource is actually managed (#570).
-          toast.info(message);
-        } else {
-          toast.error(message);
-        }
-      },
+      onError: toastGuidanceOrError,
     });
 
     setIsSubmitting(false);
@@ -181,11 +177,8 @@ const SkillForm = ({
       id: skillId,
     });
 
-    await applyWriteOutcome(result, {
+    await applyDeleteOutcome(result, {
       mutate: globalMutate,
-      setValidationErrors: () => {},
-      // No field in a delete dialog to key a conflict to.
-      conflictField: null,
       onSuccess: () => router.push(returnPath),
       onError: (message, outcome) => {
         if (outcome.outcome === "forbidden") {

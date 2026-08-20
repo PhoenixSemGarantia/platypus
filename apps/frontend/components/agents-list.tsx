@@ -66,7 +66,7 @@ import { canManageSharedResource } from "@/lib/authorization";
 import { NoProvidersEmptyState } from "@/components/no-providers-empty-state";
 import { AttachSharedResourceDialog } from "@/components/attach-shared-resource-dialog";
 import { scopedPath, writeEntity, type Scope } from "@/lib/api-write";
-import { applyWriteOutcome } from "@/lib/apply-write-outcome";
+import { applyDeleteOutcome } from "@/lib/apply-write-outcome";
 import { useDetachDialog } from "@/hooks/use-detach-dialog";
 
 // The Agent is shown either in a Workspace, where it may be a workspace-scoped
@@ -197,10 +197,8 @@ export const AgentsList = ({
       const outcome = await writeEntity(backendUrl, "agents", scope, {
         id: agentToDelete.id,
       });
-      await applyWriteOutcome(outcome, {
+      await applyDeleteOutcome(outcome, {
         mutate: () => mutate(),
-        setValidationErrors: () => {},
-        conflictField: null,
         onSuccess: () => {
           setDeleteDialogOpen(false);
           setAgentToDelete(null);

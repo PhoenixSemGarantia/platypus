@@ -52,7 +52,11 @@ import useSWR, { useSWRConfig } from "swr";
 import { fetcher, joinUrl } from "@/lib/utils";
 import { canSubmitForm, retractFieldError } from "@/lib/form-errors";
 import { writeEntity, writeAt, errorMessage } from "@/lib/api-write";
-import { applyWriteOutcome } from "@/lib/apply-write-outcome";
+import {
+  applyWriteOutcome,
+  applyDeleteOutcome,
+  toastGuidanceOrError,
+} from "@/lib/apply-write-outcome";
 import { findModelOption, getModelOptions } from "@/lib/model-config";
 import { resolveModel } from "@/lib/resolve-model";
 import {
@@ -398,15 +402,7 @@ const AgentForm = ({
               : "Failed to save agent",
           );
         },
-        onError: (message, outcome) => {
-          if (outcome.outcome === "forbidden") {
-            // Guidance, not a failure — the backend's message already says
-            // where the Shared resource is actually managed (#570).
-            toast.info(message);
-          } else {
-            toast.error(message);
-          }
-        },
+        onError: toastGuidanceOrError,
         onSuccess: async (data) => {
           const savedAgentId = data.id || agentId;
 
@@ -462,19 +458,11 @@ const AgentForm = ({
       id: agentId,
     });
 
-    await applyWriteOutcome(result, {
+    await applyDeleteOutcome(result, {
       mutate,
-      setValidationErrors: () => {},
-      conflictField: null,
       onSuccess: () => router.push(doneHref),
       onError: (message, outcome) => {
-        if (outcome.outcome === "forbidden") {
-          // Guidance, not a failure — the backend's message already says
-          // where the Shared resource is actually managed (#570).
-          toast.info(message);
-        } else {
-          toast.error(message);
-        }
+        toastGuidanceOrError(message, outcome);
         setIsDeleting(false);
         setIsDeleteDialogOpen(false);
       },

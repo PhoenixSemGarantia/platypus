@@ -23,7 +23,10 @@ import {
   retractFieldError,
 } from "@/lib/form-errors";
 import { writeEntity, writeAt } from "@/lib/api-write";
-import { applyWriteOutcome } from "@/lib/apply-write-outcome";
+import {
+  applyWriteOutcome,
+  applyDeleteOutcome,
+} from "@/lib/apply-write-outcome";
 import { toast } from "sonner";
 import { useBackendUrl } from "@/app/client-context";
 import { useAuth } from "@/components/auth-provider";
@@ -210,10 +213,8 @@ const WebhookForm = ({ orgId, workspaceId, webhookId }: WebhookFormProps) => {
       { id: webhookId },
     );
 
-    await applyWriteOutcome(result, {
+    await applyDeleteOutcome(result, {
       mutate: globalMutate,
-      setValidationErrors: () => {},
-      conflictField: null,
       onSuccess: () => {
         toast.success("Webhook deleted");
         router.push(`/${orgId}/workspace/${workspaceId}/settings/webhooks`);

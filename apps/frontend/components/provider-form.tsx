@@ -65,7 +65,11 @@ import useSWR, { useSWRConfig } from "swr";
 import { cn, fetcher, joinUrl } from "@/lib/utils";
 import { canSubmitForm, retractFieldError } from "@/lib/form-errors";
 import { writeEntity } from "@/lib/api-write";
-import { applyWriteOutcome } from "@/lib/apply-write-outcome";
+import {
+  applyWriteOutcome,
+  applyDeleteOutcome,
+  toastGuidanceOrError,
+} from "@/lib/apply-write-outcome";
 import {
   getModelConfigs,
   defaultPassthroughFileTypes,
@@ -838,15 +842,7 @@ const ProviderForm = ({
         mutate: globalMutate,
         setValidationErrors,
         onConflict: (message) => setError(message),
-        onError: (message, outcome) => {
-          if (outcome.outcome === "forbidden") {
-            // Guidance, not a failure — the backend's message already says
-            // where the Shared resource is actually managed (#570).
-            toast.info(message);
-          } else {
-            toast.error(message);
-          }
-        },
+        onError: toastGuidanceOrError,
         onSuccess: (data) => {
           reportAliasRepoints(data.aliasRepoints);
           if (formScope === "workspace") {
@@ -884,10 +880,8 @@ const ProviderForm = ({
       id: providerId,
     });
 
-    await applyWriteOutcome(result, {
+    await applyDeleteOutcome(result, {
       mutate: globalMutate,
-      setValidationErrors: () => {},
-      conflictField: null,
       onSuccess: () => {
         if (formScope === "workspace") {
           router.push(`/${orgId}/workspace/${workspaceId}/settings/providers`);
@@ -896,13 +890,7 @@ const ProviderForm = ({
         }
       },
       onError: (message, outcome) => {
-        if (outcome.outcome === "forbidden") {
-          // Guidance, not a failure — the backend's message already says
-          // where the Shared resource is actually managed (#570).
-          toast.info(message);
-        } else {
-          toast.error(message);
-        }
+        toastGuidanceOrError(message, outcome);
         setIsDeleting(false);
         setIsDeleteDialogOpen(false);
       },

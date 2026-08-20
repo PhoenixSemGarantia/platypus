@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import type { KanbanBoardState } from "@platypus/schemas";
 import { fetcher, joinUrl } from "@/lib/utils";
 import { writeEntity } from "@/lib/api-write";
-import { applyWriteOutcome } from "@/lib/apply-write-outcome";
+import { applyDeleteOutcome } from "@/lib/apply-write-outcome";
 import { useBackendUrl } from "@/app/client-context";
 import { useAuth } from "@/components/auth-provider";
 import { BackButton } from "@/components/back-button";
@@ -46,10 +46,8 @@ const BoardSettingsPage = ({
       { id: boardId },
     );
 
-    await applyWriteOutcome(result, {
+    await applyDeleteOutcome(result, {
       mutate: globalMutate,
-      setValidationErrors: () => {},
-      conflictField: null,
       onSuccess: () => router.push(`/${orgId}/workspace/${workspaceId}`),
       onError: (message) => {
         toast.error(message);

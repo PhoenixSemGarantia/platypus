@@ -83,3 +83,45 @@ export async function applyWriteOutcome<TResult>(
       return;
   }
 }
+
+export interface ApplyDeleteOutcomeOptions<TResult> {
+  /** Revalidates one SWR key — usually `useSWRConfig()`'s `mutate`. */
+  readonly mutate: (key: string) => void;
+  readonly onSuccess?: (data: TResult) => void | Promise<void>;
+  /** See `ApplyWriteOutcomeOptions.onError` — covers every delete failure. */
+  readonly onError?: (message: string, outcome: WriteOutcome<TResult>) => void;
+}
+
+/**
+ * `applyWriteOutcome` for a delete: there's no field to validate or key a
+ * conflict to (e.g. a 409 "still referenced" delete refusal), so every
+ * failure — `conflict` included — surfaces through `onError` alongside
+ * `forbidden`/`notFound`/`error`.
+ */
+export async function applyDeleteOutcome<TResult>(
+  result: WriteOutcome<TResult>,
+  options: ApplyDeleteOutcomeOptions<TResult>,
+): Promise<void> {
+  return applyWriteOutcome(result, {
+    ...options,
+    setValidationErrors: () => {},
+    conflictField: null,
+  });
+}
+
+/**
+ * The toast.info-for-forbidden, toast.error-otherwise split repeated across
+ * every form whose Shared-resource lock refusal reads as guidance, not a
+ * failure — the backend's message already says where the resource is
+ * actually managed (#570).
+ */
+export function toastGuidanceOrError(
+  message: string,
+  outcome: WriteOutcome<unknown>,
+): void {
+  if (outcome.outcome === "forbidden") {
+    toast.info(message);
+  } else {
+    toast.error(message);
+  }
+}

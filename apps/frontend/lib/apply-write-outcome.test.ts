@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { toast } from "sonner";
-import { applyWriteOutcome } from "./apply-write-outcome";
+import {
+  applyWriteOutcome,
+  applyDeleteOutcome,
+  toastGuidanceOrError,
+} from "./apply-write-outcome";
 import type { WriteOutcome } from "./api-write";
 
 vi.mock("sonner", () => ({
@@ -177,4 +181,82 @@ describe("applyWriteOutcome", () => {
       message: "Locked",
     });
   });
+});
+
+describe("applyDeleteOutcome", () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("revalidates and calls onSuccess on success", async () => {
+    const mutate = vi.fn();
+    const onSuccess = vi.fn();
+
+    await applyDeleteOutcome(
+      { outcome: "success", data: null, revalidateKeys: ["/a"] },
+      { mutate, onSuccess },
+    );
+
+    expect(mutate).toHaveBeenCalledWith("/a");
+    expect(onSuccess).toHaveBeenCalledWith(null);
+  });
+
+  it("routes a conflict (e.g. still referenced) through onError, with no field to key it to", async () => {
+    const onError = vi.fn();
+
+    await applyDeleteOutcome(
+      { outcome: "conflict", message: "Agent is in use" },
+      { mutate: vi.fn(), onError },
+    );
+
+    expect(onError).toHaveBeenCalledWith("Agent is in use", {
+      outcome: "conflict",
+      message: "Agent is in use",
+    });
+  });
+
+  it.each(["forbidden", "notFound", "error"] as const)(
+    "routes a %s outcome through onError",
+    async (outcome) => {
+      const onError = vi.fn();
+
+      await applyDeleteOutcome(
+        { outcome, message: "Nope" },
+        { mutate: vi.fn(), onError },
+      );
+
+      expect(onError).toHaveBeenCalledWith("Nope", {
+        outcome,
+        message: "Nope",
+      });
+    },
+  );
+});
+
+describe("toastGuidanceOrError", () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("shows an info toast for a forbidden outcome", () => {
+    toastGuidanceOrError("Managed at the organization level", {
+      outcome: "forbidden",
+      message: "Managed at the organization level",
+    });
+
+    expect(toast.info).toHaveBeenCalledWith(
+      "Managed at the organization level",
+    );
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it.each(["notFound", "error"] as const)(
+    "shows an error toast for a %s outcome",
+    (outcome) => {
+      toastGuidanceOrError("Nope", { outcome, message: "Nope" });
+
+      expect(toast.error).toHaveBeenCalledWith("Nope");
+      expect(toast.info).not.toHaveBeenCalled();
+    },
+  );
 });

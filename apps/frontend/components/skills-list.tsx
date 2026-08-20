@@ -61,7 +61,7 @@ import {
   SharedWithBadge,
 } from "@/components/manage-sharing";
 import { scopedPath, writeEntity, type Scope } from "@/lib/api-write";
-import { applyWriteOutcome } from "@/lib/apply-write-outcome";
+import { applyDeleteOutcome } from "@/lib/apply-write-outcome";
 import { useDetachDialog } from "@/hooks/use-detach-dialog";
 
 // The list serves two surfaces: a Workspace (workspaceId provided) where it
@@ -217,10 +217,8 @@ export const SkillsList = ({
       const outcome = await writeEntity(backendUrl, "skills", scope, {
         id: skillToDelete.id,
       });
-      await applyWriteOutcome(outcome, {
+      await applyDeleteOutcome(outcome, {
         mutate: () => mutate(),
-        setValidationErrors: () => {},
-        conflictField: null,
         onSuccess: () => {
           setDeleteDialogOpen(false);
           setSkillToDelete(null);
