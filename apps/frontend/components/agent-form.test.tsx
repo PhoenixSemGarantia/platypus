@@ -38,6 +38,9 @@ const providersResponse = { data: { results: [provider] }, isLoading: false };
 const emptyListResponse = { data: { results: [] }, isLoading: false };
 const nullResponse = { data: undefined, isLoading: false };
 
+// Set by a test that renders in edit mode (agentId="a1") before rendering.
+let agentResponse: { data: unknown; isLoading: boolean } = nullResponse;
+
 // useSWR is called for providers, skills, agents, and (when editing) the agent.
 // Key off the request URL so each call gets the right payload. A null key means
 // SWR would not fetch — mirror that by returning no data.
@@ -47,6 +50,9 @@ vi.mock("swr", () => ({
     if (!key) return nullResponse;
     if (typeof key === "string" && key.endsWith("/providers")) {
       return providersResponse;
+    }
+    if (typeof key === "string" && key.endsWith("/agents/a1")) {
+      return agentResponse;
     }
     return emptyListResponse;
   },
@@ -69,6 +75,14 @@ function renderCreateForm() {
   return render(
     <AgentForm orgId="org1" workspaceId="ws1" toolSets={[]} agents={[]} />,
   );
+}
+
+function mockSequence(...responses: Array<Partial<Response>>) {
+  const fn = vi.fn();
+  for (const response of responses) {
+    fn.mockResolvedValueOnce(response as Response);
+  }
+  return fn;
 }
 
 // --- Tests -------------------------------------------------------------------
@@ -165,5 +179,98 @@ describe("AgentForm validation error surfacing", () => {
 
     await waitFor(() => expect(toastError).toHaveBeenCalled());
     expect(saveButton).not.toBeDisabled();
+  });
+});
+
+// #595: the Agent itself already saved by the time either avatar write runs,
+// so a refused avatar write is a partial success — it must toast, not block
+// navigation or silently look like it worked.
+describe("AgentForm avatar write partial-success handling", () => {
+  beforeEach(() => {
+    push.mockReset();
+    toastError.mockReset();
+    mutate.mockReset();
+    agentResponse = nullResponse;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    agentResponse = nullResponse;
+  });
+
+  it("surfaces a toast but still navigates when the avatar upload fails after a successful agent save", async () => {
+    const file = new File(["avatar-bytes"], "avatar.png", {
+      type: "image/png",
+    });
+    const fetchMock = mockSequence(
+      { ok: true, status: 200, json: async () => ({ id: "a1" }) },
+      {
+        ok: false,
+        status: 500,
+        json: async () => ({ error: "Storage unavailable" }),
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { container } = renderCreateForm();
+    const fileInput = container.querySelector(
+      'input[type="file"]',
+    ) as HTMLInputElement;
+    fireEvent.change(fileInput, { target: { files: [file] } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(push).toHaveBeenCalledWith("/org1/workspace/ws1"),
+    );
+    expect(toastError).toHaveBeenCalledWith("Storage unavailable");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("surfaces a toast but still navigates when the avatar delete fails after a successful agent save", async () => {
+    agentResponse = {
+      data: {
+        id: "a1",
+        name: "Bot",
+        description: "A helpful bot",
+        instructions: "Be helpful",
+        providerId: "p1",
+        modelId: "gpt-4o",
+        maxSteps: 5,
+        avatarUrl: "http://cdn.test/avatar.png",
+      },
+      isLoading: false,
+    };
+    const fetchMock = mockSequence(
+      { ok: true, status: 200, json: async () => ({ id: "a1" }) },
+      {
+        ok: false,
+        status: 403,
+        json: async () => ({ error: "Avatar storage locked" }),
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <AgentForm
+        orgId="org1"
+        workspaceId="ws1"
+        toolSets={[]}
+        agents={[]}
+        agentId="a1"
+      />,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByDisplayValue("Bot")).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Remove/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Update" }));
+
+    await waitFor(() =>
+      expect(push).toHaveBeenCalledWith("/org1/workspace/ws1"),
+    );
+    expect(toastError).toHaveBeenCalledWith("Avatar storage locked");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

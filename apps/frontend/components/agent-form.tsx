@@ -51,7 +51,7 @@ import {
 import useSWR, { useSWRConfig } from "swr";
 import { fetcher, joinUrl } from "@/lib/utils";
 import { canSubmitForm, retractFieldError } from "@/lib/form-errors";
-import { writeEntity, writeAt } from "@/lib/api-write";
+import { writeEntity, writeAt, errorMessage } from "@/lib/api-write";
 import { findModelOption, getModelOptions } from "@/lib/model-config";
 import { resolveModel } from "@/lib/resolve-model";
 import {
@@ -387,15 +387,23 @@ const AgentForm = ({
         case "success": {
           const savedAgentId = result.data.id || agentId;
 
+          // The Agent itself already saved, so a failed avatar write is a
+          // partial success, not a reason to block navigation — surface a
+          // toast and continue on (#595).
           if (avatarDeleted && agentId) {
-            await writeAt(
+            const avatarOutcome = await writeAt(
               joinUrl(backendUrl, `${agentsBase}/${savedAgentId}/avatar`),
               { method: "DELETE" },
             );
+            if (avatarOutcome.outcome !== "success") {
+              toast.error(avatarOutcome.message);
+            }
           } else if (avatarFile) {
+            // Multipart upload can't go through writeAt (JSON-only body), so
+            // this call stays raw fetch — see the eslint.config.mjs exception.
             const avatarFormData = new FormData();
             avatarFormData.append("file", avatarFile);
-            await fetch(
+            const avatarResponse = await fetch(
               joinUrl(backendUrl, `${agentsBase}/${savedAgentId}/avatar`),
               {
                 method: "POST",
@@ -403,6 +411,12 @@ const AgentForm = ({
                 credentials: "include",
               },
             );
+            if (!avatarResponse.ok) {
+              const body: unknown = await avatarResponse
+                .json()
+                .catch(() => null);
+              toast.error(errorMessage(body) ?? "Failed to upload the avatar");
+            }
           }
 
           result.revalidateKeys.forEach((key) => mutate(key));
