@@ -185,6 +185,69 @@ describe("Organization Provider Routes", () => {
     });
   });
 
+  describe("PUT /:providerId", () => {
+    const updateBody = {
+      name: "Renamed",
+      providerType: "OpenAI",
+      apiKey: "sk-123",
+      modelIds: ["gpt-4"],
+      taskModelId: "gpt-4",
+      memoryExtractionModelId: "gpt-4",
+    };
+
+    it("updates an org provider and returns the row", async () => {
+      mockSession();
+      mockDb.limit.mockResolvedValueOnce([{ role: "admin" }]); // requireOrgAccess
+      // requireOrgScoped: the Provider is a Shared resource of this org
+      mockDb.limit.mockResolvedValueOnce([{ id: "p1", organizationId: orgId }]);
+      // currentProviderModels → the pre-save models, for the alias diff
+      mockDb.limit.mockResolvedValueOnce([{ modelIds: [{ id: "gpt-4" }] }]);
+
+      const updated = { id: "p1", name: "Renamed", organizationId: orgId };
+      mockDb.returning.mockResolvedValueOnce([updated]);
+
+      const res = await app.request(`${baseUrl}/p1`, {
+        method: "PUT",
+        body: JSON.stringify(updateBody),
+        headers: { "Content-Type": "application/json" },
+      });
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ...updated, aliasRepoints: [] });
+    });
+
+    // #605: the org surface used to skip this check entirely, discovering a
+    // missing Provider only when the UPDATE matched no row.
+    it("returns 404 for a provider that is not a Shared resource of this org, without touching the write", async () => {
+      mockSession();
+      mockDb.limit.mockResolvedValueOnce([{ role: "admin" }]); // requireOrgAccess
+      mockDb.limit.mockResolvedValueOnce([]); // requireOrgScoped: not found
+
+      const res = await app.request(`${baseUrl}/missing`, {
+        method: "PUT",
+        body: JSON.stringify(updateBody),
+        headers: { "Content-Type": "application/json" },
+      });
+
+      expect(res.status).toBe(404);
+      expect(mockDb.update).not.toHaveBeenCalled();
+    });
+
+    it("returns 403 for a non-admin", async () => {
+      mockSession();
+      mockDb.limit.mockResolvedValueOnce([{ role: "member" }]); // requireOrgAccess
+
+      const res = await app.request(`${baseUrl}/p1`, {
+        method: "PUT",
+        body: JSON.stringify(updateBody),
+        headers: { "Content-Type": "application/json" },
+      });
+
+      expect(res.status).toBe(403);
+      expect(mockDb.update).not.toHaveBeenCalled();
+    });
+  });
+
   describe("DELETE /:providerId", () => {
     it("deletes an org provider if admin and not attached", async () => {
       mockSession();
@@ -197,6 +260,26 @@ describe("Organization Provider Routes", () => {
       const res = await app.request(`${baseUrl}/p1`, { method: "DELETE" });
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({ message: "Provider deleted" });
+    });
+
+    it("invalidates memory embeddings before deleting, without de-migrating aliases", async () => {
+      // The delete path used to run neither helper (#605): a Provider's
+      // models — and any alias among them — vanish along with the row, so
+      // there is no surviving concrete id for de-migration to rewrite to, but
+      // stale embedding vectors computed against it must still be cleared.
+      mockSession();
+      mockDb.limit
+        .mockResolvedValueOnce([{ role: "admin" }]) // requireOrgAccess
+        .mockResolvedValueOnce([]) // attachment guard: none
+        .mockResolvedValueOnce([]); // blueprint guard: none
+      mockDb.execute.mockResolvedValueOnce({ rowCount: 0 }); // nullifyEmbeddingsForProvider
+      mockDb.returning.mockResolvedValueOnce([{ id: "p1" }]);
+
+      const res = await app.request(`${baseUrl}/p1`, { method: "DELETE" });
+
+      expect(res.status).toBe(200);
+      expect(mockDb.execute).toHaveBeenCalledTimes(1);
+      expect(mockDb.delete).toHaveBeenCalled();
     });
 
     it("returns 409 when the provider is attached to a workspace", async () => {

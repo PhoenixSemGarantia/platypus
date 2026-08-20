@@ -1,15 +1,7 @@
 import { Hono } from "hono";
 import { sValidator } from "@hono/standard-validator";
-import { nanoid } from "nanoid";
 import { db } from "../index.ts";
-import { provider as providerTable } from "../db/schema.ts";
 import { providerCreateSchema, providerUpdateSchema } from "@platypus/schemas";
-import { handleEmbeddingConfigChange } from "../services/embedding-invalidation.ts";
-import { dedupeModelConfigs } from "../services/model-capability.ts";
-import {
-  currentProviderModels,
-  deMigrateOrphanedAliases,
-} from "../services/model-alias-migration.ts";
 import { requireAuth } from "../middleware/authentication.ts";
 import {
   orgCredentialsVisible,
@@ -18,12 +10,14 @@ import {
 } from "../middleware/authorization.ts";
 import {
   listOrgScoped,
-  orgScopedWhere,
   requireOrgScoped,
-  requireSharedDeletable,
 } from "../services/scoped-resource.ts";
 import { providerReadModel } from "../services/credential-redaction.ts";
-import { NotFoundError } from "../errors.ts";
+import {
+  createProvider,
+  deleteProvider,
+  updateProvider,
+} from "../services/provider-write.ts";
 import type { Variables } from "../server.ts";
 
 const orgProvider = new Hono<{ Variables: Variables }>();
@@ -38,23 +32,8 @@ orgProvider.post(
     const { orgId } = orgScopeOf(c);
     const data = c.req.valid("json");
 
-    if (data.modelIds) {
-      data.modelIds = dedupeModelConfigs(data.modelIds);
-    }
-
-    // A duplicate name surfaces as a Postgres unique violation, mapped to 409
-    // by the central onError (ADR-0010).
-    const record = await db
-      .insert(providerTable)
-      .values({
-        id: nanoid(),
-        ...data,
-        organizationId: orgId,
-        workspaceId: null,
-      })
-      .returning();
-
-    return c.json(record[0], 201);
+    const row = await createProvider({ kind: "organization", orgId }, data);
+    return c.json(row, 201);
   },
 );
 
@@ -94,46 +73,17 @@ orgProvider.put(
     const providerId = c.req.param("providerId");
     const data = c.req.valid("json");
 
-    if (data.modelIds) {
-      data.modelIds = dedupeModelConfigs(data.modelIds);
-    }
+    // `updateProvider` now checks the Provider is a Shared resource of this
+    // Organization before touching embeddings (#605) — this route used to
+    // skip that check and discover a missing row only when the `UPDATE`
+    // matched nothing.
+    const { row, aliasRepoints } = await updateProvider(
+      { kind: "organization", orgId },
+      providerId,
+      data,
+    );
 
-    // Detect and handle embedding config changes before the update
-    await handleEmbeddingConfigChange(providerId, data);
-
-    // Snapshot the models as stored, so an alias this save removes can
-    // de-migrate its references rather than dangling them (ADR-0017).
-    const previousModels = data.modelIds
-      ? await currentProviderModels(providerId)
-      : null;
-
-    // A duplicate name surfaces as a Postgres unique violation, mapped to 409
-    // by the central onError (ADR-0010).
-    const record = await db
-      .update(providerTable)
-      .set({
-        ...data,
-        updatedAt: new Date(),
-      })
-      .where(orgScopedWhere("provider", providerId, orgId))
-      .returning();
-
-    if (record.length === 0) {
-      throw new NotFoundError("Provider not found");
-    }
-
-    // Runs AFTER the row is written: a failed update must not leave Agents
-    // repointed for an alias that still exists.
-    const aliasRepoints =
-      previousModels && data.modelIds
-        ? await deMigrateOrphanedAliases(
-            providerId,
-            previousModels,
-            data.modelIds,
-          )
-        : [];
-
-    return c.json({ ...record[0], aliasRepoints }, 200);
+    return c.json({ ...row, aliasRepoints }, 200);
   },
 );
 
@@ -146,19 +96,10 @@ orgProvider.delete(
     const { orgId } = orgScopeOf(c);
     const providerId = c.req.param("providerId");
 
-    // A Shared resource cannot be deleted while anything still points at it —
-    // an Attachment (ADR-0007) or a Blueprint (ADR-0008). Throws ConflictError
-    // → 409 via the central onError (ADR-0010).
-    await requireSharedDeletable(db, "provider", providerId);
-
-    const result = await db
-      .delete(providerTable)
-      .where(orgScopedWhere("provider", providerId, orgId))
-      .returning();
-
-    if (result.length === 0) {
-      throw new NotFoundError("Provider not found");
-    }
+    // `deleteProvider` throws ConflictError (→409) while an Attachment
+    // (ADR-0007) or Blueprint (ADR-0008) still references the Provider, then
+    // NotFoundError (→404) when the delete matches no row.
+    await deleteProvider({ kind: "organization", orgId }, providerId);
 
     return c.json({ message: "Provider deleted" });
   },

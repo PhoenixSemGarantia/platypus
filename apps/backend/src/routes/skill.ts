@@ -19,6 +19,7 @@ import {
   listScoped,
   requireScoped,
   requireWorkspaceMutable,
+  workspaceScopedWhere,
 } from "../services/scoped-resource.ts";
 import { NotFoundError } from "../errors.ts";
 import type { Variables } from "../server.ts";
@@ -149,12 +150,7 @@ skill.put(
         ...data,
         updatedAt: new Date(),
       })
-      .where(
-        and(
-          eq(skillTable.id, skillId),
-          eq(skillTable.workspaceId, scope.workspaceId),
-        ),
-      )
+      .where(workspaceScopedWhere("skill", skillId, scope.workspaceId))
       .returning();
 
     // Update agent associations if agentIds was provided
@@ -239,12 +235,7 @@ skill.delete(
 
     await db
       .delete(skillTable)
-      .where(
-        and(
-          eq(skillTable.id, skillId),
-          eq(skillTable.workspaceId, scope.workspaceId),
-        ),
-      );
+      .where(workspaceScopedWhere("skill", skillId, scope.workspaceId));
 
     return c.json({ message: "Skill deleted" });
   },
@@ -274,12 +265,7 @@ skill.post(
     const [existing] = await db
       .select()
       .from(skillTable)
-      .where(
-        and(
-          eq(skillTable.id, skillId),
-          eq(skillTable.workspaceId, workspaceId),
-        ),
-      )
+      .where(workspaceScopedWhere("skill", skillId, workspaceId))
       .limit(1);
     if (!existing) {
       throw new NotFoundError("Skill not found");
@@ -299,12 +285,7 @@ skill.post(
             workspaceId: null,
             updatedAt: new Date(),
           })
-          .where(
-            and(
-              eq(skillTable.id, skillId),
-              eq(skillTable.workspaceId, workspaceId),
-            ),
-          )
+          .where(workspaceScopedWhere("skill", skillId, workspaceId))
           .returning();
 
         if (!record) {

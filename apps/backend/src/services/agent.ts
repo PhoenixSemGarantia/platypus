@@ -1,4 +1,3 @@
-import { and, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { z } from "zod";
 import type { agentBaseSchema } from "@platypus/schemas";
@@ -7,7 +6,10 @@ import { agent as agentTable } from "../db/schema.ts";
 import { dedupeArray } from "../utils.ts";
 import type { ScopeContext } from "../scope.ts";
 import { validateSubAgentAssignment } from "./sub-agent-validation.ts";
-import { requireWorkspaceMutable } from "./scoped-resource.ts";
+import {
+  requireWorkspaceMutable,
+  workspaceScopedWhere,
+} from "./scoped-resource.ts";
 import { deleteAvatar } from "./avatar.ts";
 
 /**
@@ -128,12 +130,7 @@ export async function updateAgent(
   const [row] = await db
     .update(agentTable)
     .set({ ...data, updatedAt: new Date() })
-    .where(
-      and(
-        eq(agentTable.id, agentId),
-        eq(agentTable.workspaceId, ctx.workspaceId),
-      ),
-    )
+    .where(workspaceScopedWhere("agent", agentId, ctx.workspaceId))
     .returning();
   return { row };
 }
@@ -153,10 +150,5 @@ export async function deleteAgent(
 
   await db
     .delete(agentTable)
-    .where(
-      and(
-        eq(agentTable.id, agentId),
-        eq(agentTable.workspaceId, ctx.workspaceId),
-      ),
-    );
+    .where(workspaceScopedWhere("agent", agentId, ctx.workspaceId));
 }
