@@ -42,7 +42,7 @@ import type {
   KanbanColumn,
 } from "@platypus/schemas";
 import { cn, fetcher, joinUrl } from "@/lib/utils";
-import { writeEntity, type Scope } from "@/lib/api-write";
+import { writeEntity, writeAt, type Scope } from "@/lib/api-write";
 import { useBackendUrl } from "@/app/client-context";
 import { useAuth } from "@/components/auth-provider";
 import { KanbanColumnComponent } from "@/components/kanban-column";
@@ -417,12 +417,10 @@ export function KanbanBoard({
         if (oldIndex !== newIndex && newIndex !== -1) {
           const reordered = arrayMove(cols, oldIndex, newIndex);
           setLocalColumns(reordered);
-          const outcome = await writeEntity(
-            backendUrl,
-            `${boardPath}/columns`,
-            scope,
-            { id: "reorder", data: { columnIds: reordered.map((c) => c.id) } },
-          );
+          const outcome = await writeAt(joinUrl(baseUrl, "columns/reorder"), {
+            method: "PUT",
+            data: { columnIds: reordered.map((c) => c.id) },
+          });
           if (outcome.outcome === "success") {
             await mutate();
           } else {
@@ -529,11 +527,12 @@ export function KanbanBoard({
         });
       });
 
-      const outcome = await writeEntity(
-        backendUrl,
-        `${boardPath}/cards/${active.id}/move`,
-        scope,
-        { data: { columnId: targetColumn.id, afterCardId } },
+      const outcome = await writeAt(
+        joinUrl(baseUrl, `cards/${active.id}/move`),
+        {
+          method: "POST",
+          data: { columnId: targetColumn.id, afterCardId },
+        },
       );
       if (outcome.outcome === "success") {
         await mutate();
@@ -542,7 +541,7 @@ export function KanbanBoard({
         setLocalColumns(null);
       }
     },
-    [backendUrl, boardPath, scope, mutate, setLocalColumns],
+    [baseUrl, mutate, setLocalColumns],
   );
 
   const handleAddColumn = useCallback(() => {
@@ -678,12 +677,10 @@ export function KanbanBoard({
       if (newIndex < 0 || newIndex >= currentColumns.length) return;
       const reordered = arrayMove(currentColumns, index, newIndex);
       setLocalColumns(reordered);
-      const outcome = await writeEntity(
-        backendUrl,
-        `${boardPath}/columns`,
-        scope,
-        { id: "reorder", data: { columnIds: reordered.map((c) => c.id) } },
-      );
+      const outcome = await writeAt(joinUrl(baseUrl, "columns/reorder"), {
+        method: "PUT",
+        data: { columnIds: reordered.map((c) => c.id) },
+      });
       if (outcome.outcome === "success") {
         await mutate();
       } else {
@@ -691,7 +688,7 @@ export function KanbanBoard({
         setLocalColumns(null);
       }
     },
-    [data?.columns, backendUrl, boardPath, scope, mutate, setLocalColumns],
+    [data?.columns, baseUrl, mutate, setLocalColumns],
   );
 
   const handleCardSave = useCallback(
@@ -723,11 +720,12 @@ export function KanbanBoard({
         return;
       }
       if (targetColumnId && targetColumnId !== column.id) {
-        const moveOutcome = await writeEntity(
-          backendUrl,
-          `${boardPath}/cards/${cardId}/move`,
-          scope,
-          { data: { columnId: targetColumnId, afterCardId: null } },
+        const moveOutcome = await writeAt(
+          joinUrl(baseUrl, `cards/${cardId}/move`),
+          {
+            method: "POST",
+            data: { columnId: targetColumnId, afterCardId: null },
+          },
         );
         if (moveOutcome.outcome !== "success") {
           toast.error(moveOutcome.message);
@@ -739,7 +737,7 @@ export function KanbanBoard({
       updateCardIdParam(null);
       await mutate();
     },
-    [columns, backendUrl, boardPath, scope, mutate, updateCardIdParam],
+    [columns, backendUrl, baseUrl, boardPath, scope, mutate, updateCardIdParam],
   );
 
   const handleCardDelete = useCallback(
