@@ -12,7 +12,7 @@ import {
   mcpUpdateSchema,
   mcpTestSchema,
 } from "@platypus/schemas";
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { requireAuth } from "../middleware/authentication.ts";
 import {
   requireOrgAccess,
@@ -29,6 +29,7 @@ import {
   listScoped,
   requireScoped,
   requireWorkspaceMutable,
+  workspaceScopedWhere,
 } from "../services/scoped-resource.ts";
 import type { Variables } from "../server.ts";
 import { logger } from "../logger.ts";
@@ -153,12 +154,7 @@ mcp.put(
         }),
         updatedAt: new Date(),
       })
-      .where(
-        and(
-          eq(mcpTable.id, mcpId),
-          eq(mcpTable.workspaceId, scope.workspaceId),
-        ),
-      )
+      .where(workspaceScopedWhere("mcp", mcpId, scope.workspaceId))
       .returning();
     return c.json(sanitizeMcpResponse(record[0]), 200);
   },
@@ -182,12 +178,7 @@ mcp.delete(
 
     await db
       .delete(mcpTable)
-      .where(
-        and(
-          eq(mcpTable.id, mcpId),
-          eq(mcpTable.workspaceId, scope.workspaceId),
-        ),
-      )
+      .where(workspaceScopedWhere("mcp", mcpId, scope.workspaceId))
       .returning();
     return c.json({ message: "MCP deleted" });
   },
@@ -215,12 +206,7 @@ mcp.post(
         const mcpRecord = await db
           .select()
           .from(mcpTable)
-          .where(
-            and(
-              eq(mcpTable.id, data.mcpId),
-              eq(mcpTable.workspaceId, workspaceId),
-            ),
-          )
+          .where(workspaceScopedWhere("mcp", data.mcpId, workspaceId))
           .limit(1);
 
         if (mcpRecord.length === 0) {
@@ -319,7 +305,7 @@ mcp.post(
     const mcpRecord = await db
       .select()
       .from(mcpTable)
-      .where(and(eq(mcpTable.id, mcpId), eq(mcpTable.workspaceId, workspaceId)))
+      .where(workspaceScopedWhere("mcp", mcpId, workspaceId))
       .limit(1);
 
     if (mcpRecord.length === 0) {
@@ -415,7 +401,7 @@ mcp.post(
         ...OAUTH_TOKEN_CLEAR_FIELDS,
         updatedAt: new Date(),
       })
-      .where(and(eq(mcpTable.id, mcpId), eq(mcpTable.workspaceId, workspaceId)))
+      .where(workspaceScopedWhere("mcp", mcpId, workspaceId))
       .returning();
 
     if (record.length === 0) {

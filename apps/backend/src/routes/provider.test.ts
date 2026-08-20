@@ -448,10 +448,16 @@ describe("Provider Routes", () => {
       // requireWorkspaceMutable → resolveScoped → workspace-scoped row (no
       // attachment check needed)
       mockDb.limit.mockResolvedValueOnce([{ id: "p1", workspaceId }]);
+      mockDb.execute.mockResolvedValueOnce({ rowCount: 0 }); // nullifyEmbeddingsForProvider
 
       const res = await app.request(`${baseUrl}/p1`, { method: "DELETE" });
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({ message: "Provider deleted" });
+      // #605: the delete path used to run neither helper. A Provider's models
+      // — and any alias among them — vanish along with the row, so there is
+      // no surviving concrete id for de-migration to rewrite to, but stale
+      // embedding vectors computed against it must still be cleared.
+      expect(mockDb.execute).toHaveBeenCalledTimes(1);
     });
 
     it("should 404 when deleting an org-scoped provider not attached here", async () => {
@@ -470,6 +476,7 @@ describe("Provider Routes", () => {
       const res = await app.request(`${baseUrl}/p2`, { method: "DELETE" });
       expect(res.status).toBe(404);
       expect(mockDb.delete).not.toHaveBeenCalled();
+      expect(mockDb.execute).not.toHaveBeenCalled();
     });
 
     it("should 403 when deleting an attached org-scoped provider", async () => {
@@ -488,6 +495,7 @@ describe("Provider Routes", () => {
       const res = await app.request(`${baseUrl}/p2`, { method: "DELETE" });
       expect(res.status).toBe(403);
       expect(mockDb.delete).not.toHaveBeenCalled();
+      expect(mockDb.execute).not.toHaveBeenCalled();
     });
   });
 });
