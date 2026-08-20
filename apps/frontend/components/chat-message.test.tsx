@@ -81,6 +81,48 @@ describe("ChatMessage agent attribution", () => {
   });
 });
 
+type MessagePart = NonNullable<PlatypusUIMessage["parts"]>[number];
+
+describe("ChatMessage image parts", () => {
+  const userMessageWithFilePart = (part: MessagePart): PlatypusUIMessage => ({
+    id: "m1",
+    role: "user",
+    parts: [part, { type: "text", text: "Check this out" }],
+  });
+
+  it("renders an image media type with a URL inline, not as a file attachment", () => {
+    renderMessage(
+      userMessageWithFilePart({
+        type: "file",
+        mediaType: "image/png",
+        url: "https://example.com/a.png",
+        filename: "a.png",
+      }),
+    );
+
+    expect(screen.getByAltText("a.png")).toHaveAttribute(
+      "src",
+      "https://example.com/a.png",
+    );
+  });
+
+  // issue #579: a part can carry an image media type with nothing a client
+  // can fetch (e.g. Provider-reference-only). Rendering it as a broken <img>
+  // would be worse than the plain file card every non-image attachment gets.
+  it("falls back to a file attachment for an image media type with no URL", () => {
+    const { container } = renderMessage(
+      userMessageWithFilePart({
+        type: "file",
+        mediaType: "image/png",
+        url: "",
+        filename: "a.png",
+      }),
+    );
+
+    expect(container.querySelector("img")).toBeNull();
+  });
+});
+
 // A Web-search backend's `web_search` is client-executed, so its citations arrive
 // as a tool result rather than as `source-url` parts. Without lifting them, the
 // same Chat toggle gives pills on Anthropic and nothing on vLLM (ADR-0014).
