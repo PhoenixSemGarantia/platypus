@@ -7,7 +7,6 @@ import {
   attachment as attachmentTable,
 } from "../db/schema.ts";
 import { agentCreateSchema, agentUpdateSchema } from "@platypus/schemas";
-import { eq, and } from "drizzle-orm";
 import { requireAuth } from "../middleware/authentication.ts";
 import {
   requireOrgAccess,
@@ -25,6 +24,7 @@ import {
   listScoped,
   requireScoped,
   requireWorkspaceMutable,
+  workspaceScopedWhere,
 } from "../services/scoped-resource.ts";
 import { NotFoundError } from "../errors.ts";
 import { storeAvatar, deleteAvatar } from "../services/avatar.ts";
@@ -154,12 +154,7 @@ agent.post(
     const record = await db
       .update(agentTable)
       .set({ avatarKey: result.key, updatedAt: new Date() })
-      .where(
-        and(
-          eq(agentTable.id, agentId),
-          eq(agentTable.workspaceId, scope.workspaceId),
-        ),
-      )
+      .where(workspaceScopedWhere("agent", agentId, scope.workspaceId))
       .returning();
 
     return c.json(agentWithAvatarUrl(record[0], baseUrl));
@@ -185,12 +180,7 @@ agent.delete(
     const record = await db
       .update(agentTable)
       .set({ avatarKey: null, updatedAt: new Date() })
-      .where(
-        and(
-          eq(agentTable.id, agentId),
-          eq(agentTable.workspaceId, scope.workspaceId),
-        ),
-      )
+      .where(workspaceScopedWhere("agent", agentId, scope.workspaceId))
       .returning();
 
     return c.json(agentWithAvatarUrl(record[0], baseUrl));
@@ -241,12 +231,7 @@ agent.post(
     const [existing] = await db
       .select()
       .from(agentTable)
-      .where(
-        and(
-          eq(agentTable.id, agentId),
-          eq(agentTable.workspaceId, workspaceId),
-        ),
-      )
+      .where(workspaceScopedWhere("agent", agentId, workspaceId))
       .limit(1);
     if (!existing) {
       throw new NotFoundError("Agent not found");
@@ -285,12 +270,7 @@ agent.post(
             workspaceId: null,
             updatedAt: new Date(),
           })
-          .where(
-            and(
-              eq(agentTable.id, agentId),
-              eq(agentTable.workspaceId, workspaceId),
-            ),
-          )
+          .where(workspaceScopedWhere("agent", agentId, workspaceId))
           .returning();
 
         if (!record) {

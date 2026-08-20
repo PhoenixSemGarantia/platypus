@@ -19,6 +19,7 @@ import {
   listOrgScopedIds,
   orgScopedWhere,
   orgScopedWhereIn,
+  workspaceScopedWhere,
   isScopedResourceType,
 } from "./scoped-resource.ts";
 import { NotFoundError, LockedError, ConflictError } from "../errors.ts";
@@ -223,6 +224,22 @@ describe("ScopedResource module", () => {
       expect(inArray).toHaveBeenCalledWith(agentTable.id, ids);
       expect(eq).toHaveBeenCalledWith(agentTable.organizationId, "org-1");
       expect(isNull).toHaveBeenCalledWith(agentTable.workspaceId);
+    });
+  });
+
+  describe("workspaceScopedWhere", () => {
+    it("matches on id and workspace — the write-side counterpart to resolveScoped", () => {
+      workspaceScopedWhere("agent", "a1", "ws-1");
+
+      expect(eq).toHaveBeenCalledWith(agentTable.id, "a1");
+      expect(eq).toHaveBeenCalledWith(agentTable.workspaceId, "ws-1");
+    });
+
+    it("resolves the columns of the type it is given", () => {
+      workspaceScopedWhere("mcp", "m1", "ws-1");
+
+      expect(eq).toHaveBeenCalledWith(mcpTable.id, "m1");
+      expect(eq).toHaveBeenCalledWith(mcpTable.workspaceId, "ws-1");
     });
   });
 

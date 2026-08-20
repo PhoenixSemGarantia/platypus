@@ -135,6 +135,27 @@ export const orgScopedWhere = (
 };
 
 /**
+ * The `WHERE` clause matching a single Scoped resource inside a Workspace —
+ * the write-side counterpart to {@link resolveScoped}, mirroring
+ * {@link orgScopedWhere} for the Workspace surface. Deliberately narrower than
+ * `resolveScoped`: it matches only a directly-owned (Workspace-scoped) row, not
+ * an attached Shared one, because every Workspace-surface write already
+ * establishes that distinction itself — `requireWorkspaceMutable` throws
+ * `LockedError` for a Shared row before a caller ever builds this predicate.
+ * An `UPDATE`/`DELETE`/`SELECT` on the Workspace surface passes it straight to
+ * `.where(...)`, replacing the hand-rolled `and(eq(table.id, id),
+ * eq(table.workspaceId, workspaceId))` that 18 call sites each re-wrote.
+ */
+export const workspaceScopedWhere = (
+  type: ScopedResourceType,
+  id: string,
+  workspaceId: string,
+): SQL => {
+  const { table } = REGISTRY[type];
+  return allOf(eq(table.id, id), eq(table.workspaceId, workspaceId));
+};
+
+/**
  * {@link orgScopedWhere} over a set of ids — for the callers that validate a
  * batch of references in one query rather than a row at a time.
  */

@@ -9,6 +9,7 @@ import {
   listScoped,
   resolveScopedByName,
   workspaceMutationLockedMessage,
+  workspaceScopedWhere,
 } from "../services/scoped-resource.ts";
 import type { ScopeContext } from "../scope.ts";
 
@@ -165,12 +166,7 @@ export function createSkillManagementTools(
 
       await db
         .delete(skillTable)
-        .where(
-          and(
-            eq(skillTable.id, skillId),
-            eq(skillTable.workspaceId, workspaceId),
-          ),
-        );
+        .where(workspaceScopedWhere("skill", skillId, workspaceId));
 
       return { success: true };
     },
