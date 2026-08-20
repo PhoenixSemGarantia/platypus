@@ -87,6 +87,10 @@ while the browser talks to the backend at its public URL. See
 [Configuration & environment](/self-hosting/configuration) for how these URLs fit
 together.
 
+Those ports carry traffic inward. For the other direction — the backend calling
+a model server running on the host machine rather than in the stack — see
+[Reaching a model server on the host machine](/self-hosting/providers-and-auth#reaching-a-model-server-on-the-host-machine).
+
 ### Volumes
 
 - `postgres_data` — a named volume holding the database. Your data lives here;

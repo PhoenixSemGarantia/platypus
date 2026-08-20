@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/input-group";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useSpeechToText } from "@/hooks/use-speech-to-text";
+import { isImageAttachment } from "@/lib/message-parts";
 import { cn } from "@/lib/utils";
 import type { ChatStatus, FileUIPart } from "ai";
 import {
@@ -112,9 +113,7 @@ export function PromptInputAttachment({
 
   const filename = data.filename || "";
 
-  const mediaType =
-    data.mediaType?.startsWith("image/") && data.url ? "image" : "file";
-  const isImage = mediaType === "image";
+  const isImage = isImageAttachment(data);
 
   const attachmentLabel = filename || (isImage ? "Image" : "Attachment");
 
