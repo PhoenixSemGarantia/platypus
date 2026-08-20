@@ -28,17 +28,8 @@ import {
 } from "../services/scoped-resource.ts";
 import { NotFoundError } from "../errors.ts";
 import { storeAvatar, deleteAvatar } from "../services/avatar.ts";
-import { avatarKeyToUrl } from "../utils/avatar-url.ts";
+import { agentWithAvatarUrl } from "../utils/avatar-url.ts";
 import { getOrigin } from "../utils/get-origin.ts";
-
-function agentWithAvatarUrl(
-  agent: Record<string, unknown>,
-  baseUrl: string,
-): Record<string, unknown> {
-  const key = agent.avatarKey as string | null | undefined;
-  const { avatarKey: _avatarKey, ...rest } = agent;
-  return { ...rest, avatarUrl: avatarKeyToUrl(key, baseUrl) ?? undefined };
-}
 
 const agent = new Hono<{ Variables: Variables }>();
 
@@ -119,7 +110,11 @@ agent.put(
     // A Shared Agent is a single source of truth edited only on the Organization
     // surface (ADR-0007); `updateAgentRow` throws NotFound (→404) when the
     // Agent is not visible here, then Locked (→403) when it is org-scoped.
-    const result = await updateAgentRow(scope, agentId, data);
+    const result = await updateAgentRow(
+      { kind: "workspace", ctx: scope },
+      agentId,
+      data,
+    );
     if ("error" in result) {
       return c.json({ error: result.error }, 400);
     }
@@ -200,7 +195,7 @@ agent.delete(
     // A Shared Agent is deleted only from the Organization surface (ADR-0007):
     // `deleteAgentRow` throws NotFound (→404) when the Agent is not visible
     // here, then Locked (→403) when it is org-scoped.
-    await deleteAgentRow(scope, agentId);
+    await deleteAgentRow({ kind: "workspace", ctx: scope }, agentId);
 
     return c.json({ message: "Agent deleted" });
   },
