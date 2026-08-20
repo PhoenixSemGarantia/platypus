@@ -92,7 +92,7 @@ export const AgentsList = ({
   orgId: string;
   workspaceId: string;
 }) => {
-  const { user, isOrgAdmin, actor } = useAuth();
+  const { user, actor } = useAuth();
   const backendUrl = useBackendUrl();
   const router = useRouter();
   const [cloneDialogOpen, setCloneDialogOpen] = useState(false);
@@ -349,7 +349,7 @@ export const AgentsList = ({
         {isOrgScoped ? (
           // A Shared Agent is locked in the Workspace; only an Org Admin can
           // open it in the org settings editor or detach it here (ADR-0007).
-          isOrgAdmin && (
+          canManageShared && (
             <>
               <DropdownMenuItem asChild>
                 <Link
@@ -413,7 +413,7 @@ export const AgentsList = ({
 
   // A Shared Agent with no admin actions has an empty menu; hide the trigger.
   const hasMenu = (agent: AgentWithScope) =>
-    agent.scope !== "organization" || isOrgAdmin;
+    agent.scope !== "organization" || canManageShared;
 
   return (
     <>
@@ -645,7 +645,7 @@ export const AgentsList = ({
             >
               Close
             </Button>
-            {isOrgAdmin && selectedOrgAgent && (
+            {canManageShared && selectedOrgAgent && (
               <Button asChild variant="ghost">
                 <Link href={`/${orgId}/settings/agents`}>
                   <ExternalLink className="size-4" />

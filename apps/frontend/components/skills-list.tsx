@@ -51,7 +51,10 @@ import { fetcher, joinUrl } from "@/lib/utils";
 import Link from "next/link";
 import { useBackendUrl } from "@/app/client-context";
 import { useAuth } from "@/components/auth-provider";
-import { canManageSharedResource } from "@/lib/authorization";
+import {
+  canManageOrgSharedResource,
+  canManageSharedResource,
+} from "@/lib/authorization";
 import { AttachSharedResourceDialog } from "@/components/attach-shared-resource-dialog";
 import {
   ManageAttachmentsDialog,
@@ -106,7 +109,7 @@ export const SkillsList = ({
   orgId: string;
   workspaceId?: string;
 }) => {
-  const { user, isOrgAdmin, actor } = useAuth();
+  const { user, actor } = useAuth();
   const backendUrl = useBackendUrl();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [skillToDelete, setSkillToDelete] = useState<SkillWithScope | null>(
@@ -169,6 +172,7 @@ export const SkillsList = ({
   // (ADR-0007 / #154), asked of the auth module instead of re-derived here.
   const canAttach = canManageSharedResource(actor, workspaceId).allowed;
   const canPromote = canAttach;
+  const canManageOrg = canManageOrgSharedResource(actor).allowed;
 
   const attachedOrgIds = skills
     .filter((s) => s.scope === "organization")
@@ -342,7 +346,7 @@ export const SkillsList = ({
                     {workspaceId && (
                       <SkillAgentsIndicator agents={skillAgents} />
                     )}
-                    {!workspaceId && isOrgAdmin && (
+                    {!workspaceId && canManageOrg && (
                       <div className="mt-1">
                         <SharedWithBadge
                           orgId={orgId}
@@ -384,7 +388,7 @@ export const SkillsList = ({
                             <ArrowUpFromLine /> Promote to organization
                           </DropdownMenuItem>
                         )}
-                        {!workspaceId && isOrgAdmin && (
+                        {!workspaceId && canManageOrg && (
                           <DropdownMenuItem
                             className="cursor-pointer"
                             onSelect={() => setSkillToManage(skill)}
@@ -489,7 +493,7 @@ export const SkillsList = ({
                 Detach
               </Button>
             )}
-            {isOrgAdmin && selectedOrgSkill && (
+            {canAttach && selectedOrgSkill && (
               <Button asChild>
                 <Link href={`/${orgId}/settings/skills/${selectedOrgSkill.id}`}>
                   <ExternalLink className="size-4" />

@@ -45,7 +45,7 @@ const ProvidersList = ({
   // Add scope to Provider type for this component
   type ProviderWithScope = Provider & { scope: "organization" | "workspace" };
 
-  const { user, isOrgAdmin, actor, workspaceDelegation } = useAuth();
+  const { user, actor, workspaceDelegation } = useAuth();
   const backendUrl = useBackendUrl();
   const [selectedOrgProvider, setSelectedOrgProvider] =
     useState<ProviderWithScope | null>(null);
@@ -267,7 +267,7 @@ const ProvidersList = ({
                 Detach
               </Button>
             )}
-            {isOrgAdmin && (
+            {canAttach && (
               <Button asChild>
                 <Link
                   href={`/${orgId}/settings/providers/${selectedOrgProvider?.id}`}

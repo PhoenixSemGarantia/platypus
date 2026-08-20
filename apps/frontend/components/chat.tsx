@@ -49,6 +49,7 @@ import { useChatUI } from "@/hooks/use-chat-ui";
 import { Dialog, DialogTrigger } from "./ui/dialog";
 import { useBackendUrl } from "@/app/client-context";
 import { useAuth } from "@/components/auth-provider";
+import { canSendChatMessages } from "@/lib/authorization";
 import { NoProvidersEmptyState } from "./no-providers-empty-state";
 import { AgentInfoDialog } from "./agent-info-dialog";
 import { ChatSettingsDialog } from "./chat-settings-dialog";
@@ -73,7 +74,8 @@ export const Chat = ({
   chatId: string;
   initialAgentId?: string;
 }) => {
-  const { isWorkspaceOwner } = useAuth();
+  const { ownsWorkspace } = useAuth();
+  const canSendMessages = canSendChatMessages(ownsWorkspace).allowed;
   const backendUrl = useBackendUrl();
   const scope = useMemo(() => ({ orgId, workspaceId }), [orgId, workspaceId]);
 
@@ -499,7 +501,7 @@ export const Chat = ({
       <div className="grid shrink-0 gap-4 p-4">
         <div className="flex justify-center min-w-0">
           <div className="w-full xl:w-4/5 max-w-4xl min-w-0">
-            {isWorkspaceOwner ? (
+            {canSendMessages ? (
               <PromptInput
                 onSubmit={(message) => {
                   handleSubmit(message);

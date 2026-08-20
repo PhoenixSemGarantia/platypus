@@ -21,13 +21,13 @@ export interface ActorContext {
   /** The caller's role in the Organization in scope, or null outside one. */
   orgRole: OrgRole | null;
   /** Whether the caller owns the Workspace in scope. */
-  isWorkspaceOwner: boolean;
+  ownsWorkspace: boolean;
 }
 
 export function resolveActor(context: ActorContext): Actor {
   if (context.isOperator) return "operator";
   if (context.orgRole === "admin") return "org-admin";
-  if (context.isWorkspaceOwner) return "workspace-owner";
+  if (context.ownsWorkspace) return "workspace-owner";
   return "org-member";
 }
 
@@ -137,4 +137,68 @@ export function canAccessWorkspace(actor: Actor): boolean {
 /** May this actor reach a platform-level, Operator-only surface? */
 export function isOperator(actor: Actor): boolean {
   return actor === "operator";
+}
+
+// ---- Org-Admin-tier actions with no Workspace requirement ----
+
+export type OrgAdminOnlyDenial = "not-org-admin";
+
+export type OrgAdminOnlyAccess = Access<OrgAdminOnlyDenial>;
+
+/** Shared body for every Org-Admin-tier, no-Workspace-requirement capability below. */
+const orgAdminOnly = (actor: Actor): OrgAdminOnlyAccess =>
+  isOrgAdminOrAbove(actor)
+    ? { allowed: true }
+    : { allowed: false, reason: "not-org-admin" };
+
+/**
+ * May this actor manage a Shared resource on the Organization settings
+ * surface — editing, deleting, or changing its Workspace attachments,
+ * outside any Workspace (ADR-0007)? The sibling of
+ * {@link canManageSharedResource} for that surface: same Org Admin rule,
+ * without the Workspace requirement that governs attach/detach/Promote from
+ * inside a Workspace.
+ */
+export const canManageOrgSharedResource = orgAdminOnly;
+
+/**
+ * ADR-0006: may this actor configure the Workspace's Sandbox? Unlike
+ * Providers and MCPs, a Sandbox is never delegatable to the Workspace
+ * Owner, so this is a plain Org Admin gate rather than
+ * {@link canConfigureWorkspaceResource}'s delegation check.
+ */
+export const canConfigureSandbox = orgAdminOnly;
+
+/** May this actor list the Organization's members? The backend endpoint is admin-only. */
+export const canListOrgMembers = orgAdminOnly;
+
+/** ADR-0008: may this actor create a Workspace in this Organization? */
+export const canCreateWorkspace = orgAdminOnly;
+
+/**
+ * ADR-0006: may this actor toggle a Workspace's delegation flags
+ * (`providerSelfManagement`, `mcpSelfManagement`)? Always an Org Admin
+ * decision — the flags are what let a Workspace Owner self-manage a
+ * Provider or MCP in the first place, so the Owner can't grant themself
+ * that.
+ */
+export const canManageWorkspaceDelegation = orgAdminOnly;
+
+// ---- Chat: literal Workspace ownership (not the `Actor` tier) ----
+
+export type ChatWriteDenial = "not-owner";
+
+export type ChatWriteAccess = Access<ChatWriteDenial>;
+
+/**
+ * May this caller send chat messages in this Workspace? Mirrors the
+ * backend's `requireWorkspaceOwner`: literal ownership only — an Org Admin
+ * or the Operator viewing someone else's Workspace gets read-only, same as
+ * any other non-owner. Takes ownership directly rather than `Actor`, whose
+ * tier ranking would otherwise fold an Org-Admin-who-owns-it into
+ * `"org-admin"` and hide the case this asks about.
+ */
+export function canSendChatMessages(ownsWorkspace: boolean): ChatWriteAccess {
+  if (!ownsWorkspace) return { allowed: false, reason: "not-owner" };
+  return { allowed: true };
 }

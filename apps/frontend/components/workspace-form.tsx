@@ -36,6 +36,10 @@ import { canSubmitForm, retractFieldError } from "@/lib/form-errors";
 import { writeEntity } from "@/lib/api-write";
 import { useBackendUrl } from "@/app/client-context";
 import { useAuth } from "@/components/auth-provider";
+import {
+  canListOrgMembers,
+  canManageWorkspaceDelegation,
+} from "@/lib/authorization";
 import { Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import useSWR, { useSWRConfig } from "swr";
@@ -63,7 +67,9 @@ const WorkspaceForm = ({
   orgId,
   workspaceId,
 }: WorkspaceFormProps) => {
-  const { user, isOrgAdmin } = useAuth();
+  const { user, actor } = useAuth();
+  const canListMembers = canListOrgMembers(actor).allowed;
+  const canManageDelegation = canManageWorkspaceDelegation(actor).allowed;
   const backendUrl = useBackendUrl();
   const router = useRouter();
   const { mutate: globalMutate } = useSWRConfig();
@@ -92,7 +98,7 @@ const WorkspaceForm = ({
   const { data: membersData } = useSWR<{
     results: { userId: string; user: { name: string; email: string } }[];
   }>(
-    !workspaceId && user && isOrgAdmin
+    !workspaceId && user && canListMembers
       ? joinUrl(backendUrl, `/organizations/${orgId}/members`)
       : null,
     fetcher,
@@ -506,7 +512,7 @@ const WorkspaceForm = ({
           {/* Delegation flags (ADR-0006) — admin-only. When off, only org
               admins may configure the respective resource; when on, the
               workspace owner may self-manage it. */}
-          {workspaceId && isOrgAdmin && (
+          {workspaceId && canManageDelegation && (
             <>
               <Field
                 orientation="horizontal"

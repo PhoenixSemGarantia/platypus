@@ -59,11 +59,14 @@ interface AuthContextType {
   error: Error | null;
   authClient: ReturnType<typeof createAuthClient>;
   orgMembership: OrgMembership | null;
-  isOrgAdmin: boolean;
-  isWorkspaceOwner: boolean;
-  hasWorkspaceAccess: boolean;
   /** The named actor for this request — see `lib/authorization.ts`. */
   actor: Actor;
+  /**
+   * Literal Workspace ownership, independent of the `actor` tier — an Org
+   * Admin who also owns this Workspace still resolves to the `"org-admin"`
+   * actor, so `canSendChatMessages` needs this raw fact rather than `actor`.
+   */
+  ownsWorkspace: boolean;
   /** ADR-0006 delegation flags for the Workspace in scope, if any. */
   workspaceDelegation: WorkspaceDelegationFlags | null;
 }
@@ -181,15 +184,13 @@ export function AuthProvider({
   }, [userId, orgId, workspaceId, backendUrl]);
 
   // Computed permissions
-  const isOrgAdmin = orgMembership?.role === "admin";
   const isSuperAdmin =
     (data?.user as unknown as User | undefined)?.role === "admin";
-  const isWorkspaceOwner = workspaceData?.ownerId === data?.user?.id;
-  const hasWorkspaceAccess = isSuperAdmin || isOrgAdmin || isWorkspaceOwner;
+  const ownsWorkspace = workspaceData?.ownerId === data?.user?.id;
   const actor = resolveActor({
     isOperator: isSuperAdmin,
     orgRole: orgMembership?.role ?? null,
-    isWorkspaceOwner,
+    ownsWorkspace,
   });
   const workspaceDelegation: WorkspaceDelegationFlags | null = workspaceData;
 
@@ -207,10 +208,8 @@ export function AuthProvider({
         error,
         authClient,
         orgMembership,
-        isOrgAdmin,
-        isWorkspaceOwner,
-        hasWorkspaceAccess,
         actor,
+        ownsWorkspace,
         workspaceDelegation,
       }}
     >
