@@ -38,6 +38,7 @@ import {
   type ChatStatus,
 } from "ai";
 import { Agent, isPresentableUrl } from "@platypus/schemas";
+import { isImageAttachment } from "@/lib/message-parts";
 import {
   BotIcon,
   CheckIcon,
@@ -107,8 +108,7 @@ export const isGenericToolPart = (part: MessagePart) =>
   !specializedToolMatchers.some((matches) => matches(part));
 
 const isImageFilePart = (part: MessagePart) =>
-  part.type === "file" &&
-  Boolean((part as FileUIPart).mediaType?.startsWith("image/"));
+  part.type === "file" && isImageAttachment(part as FileUIPart);
 
 interface PartRenderer {
   matches: (part: MessagePart) => boolean;
@@ -187,7 +187,7 @@ export const ChatMessage = memo(function ChatMessage({
     ));
   const fileParts = message.parts?.filter(
     (part): part is FileUIPart =>
-      part.type === "file" && !part.mediaType?.startsWith("image/"),
+      part.type === "file" && !isImageFilePart(part),
   );
   // Scheme-checked with the same predicate a plugin result's URL goes through.
   // A vendor is more trusted than a Web-search backend, but the pill is titled by
