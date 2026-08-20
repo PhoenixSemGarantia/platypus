@@ -27,16 +27,77 @@ code — there is no "custom vendor" type.
 That is not the same as five supported endpoints. Anything speaking the OpenAI
 API is reached through the **OpenAI** type with `baseUrl` pointed at it:
 
-| You want to run…  | Provider type | What you set                                                                                        |
-| ----------------- | ------------- | --------------------------------------------------------------------------------------------------- |
-| Ollama            | OpenAI        | `baseUrl` → your Ollama host's `/v1`; any non-empty API key                                         |
-| vLLM              | OpenAI        | `baseUrl` → your vLLM server; usually `apiMode: "chat"`                                             |
-| Azure OpenAI      | OpenAI        | `baseUrl` → your Azure deployment endpoint                                                          |
-| LiteLLM / a proxy | OpenAI        | `baseUrl` → the gateway (see [Fronting a Provider with a proxy](#fronting-a-provider-with-a-proxy)) |
+| You want to run…  | Provider type | What you set                                                                                                                                                                                       |
+| ----------------- | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Ollama            | OpenAI        | `baseUrl` → your Ollama host's `/v1` (see [Reaching a model server on the host machine](#reaching-a-model-server-on-the-host-machine)); any non-empty API key; **API Mode** → **Chat Completions** |
+| vLLM              | OpenAI        | `baseUrl` → your vLLM server; usually `apiMode: "chat"`                                                                                                                                            |
+| Azure OpenAI      | OpenAI        | `baseUrl` → your Azure deployment endpoint                                                                                                                                                         |
+| LiteLLM / a proxy | OpenAI        | `baseUrl` → the gateway (see [Fronting a Provider with a proxy](#fronting-a-provider-with-a-proxy))                                                                                                |
 
 So "is my stack supported?" comes down to: does it speak the OpenAI API? If yes,
 it works through the OpenAI type. If it speaks only a bespoke protocol, put a
 translating gateway in front of it.
+
+### Reaching a model server on the host machine
+
+Ollama, LM Studio and llama.cpp normally run on the machine hosting the Docker
+stack, not inside it. Writing `http://localhost:11434/v1` in **Base URL** fails:
+inside the backend container `localhost` is the container, and nothing is
+listening on that port there.
+
+Use the host alias instead — `http://host.docker.internal:11434/v1`. The shipped
+`compose.yaml` already maps that alias to the host gateway on the `backend`
+service, so it resolves on Docker Desktop and on Linux Docker Engine 20.10+ with
+no edit. If you run the backend image outside that Compose file, add the mapping
+yourself:
+
+```yaml
+services:
+  backend:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+```
+
+<Callout type="warning">
+  Right URL, connection refused. Ollama listens on `127.0.0.1:11434` by
+  default, and traffic arriving through the host gateway reaches the bridge
+  address rather than loopback — so **Base URL** can be exactly right and the
+  Provider still fails to connect. Start Ollama with `OLLAMA_HOST=0.0.0.0` so it
+  accepts those connections. LM Studio and llama.cpp each have a listen-address
+  setting of their own and need the same change. That opens the port to every
+  interface the machine has, so firewall it where the machine isn't yours alone.
+</Callout>
+
+**Or run the model server in the stack.** Where you operate both sides, add the
+model server to `compose.yaml` on the same `platypus-network` and skip the host
+gateway altogether. **Base URL** then names the service and its container port —
+`http://ollama:11434/v1` — with no `ports:` entry needed, since the backend
+reaches it over the private network rather than the host. It is the steadier of
+the two: the same **Base URL** works on every machine that runs the stack.
+
+A working Ollama Provider, field by field:
+
+| Field                                      | What to enter                                                                            |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------- |
+| **Provider Type**                          | **OpenAI**                                                                               |
+| **Name**                                   | A label for the connection, e.g. `Local Ollama`                                          |
+| **API Key**                                | Any non-empty placeholder — the field is required, and Ollama ignores the value          |
+| **Base URL**                               | `http://host.docker.internal:11434/v1`, or `http://ollama:11434/v1` as a Compose service |
+| **Models**                                 | One entry per model you have pulled, id exactly as `ollama list` reports it              |
+| **API Mode** (under **Advanced settings**) | **Chat Completions**                                                                     |
+
+The **Base URL** ends in `/v1`: that is where Ollama serves its OpenAI-compatible
+API, and Platypus appends the route to what you give it. **API Mode** defaults to
+**Responses**, which Ollama does not implement — leave the default in place and
+every turn fails no matter how correct the URL is.
+
+<Callout type="info">
+  This is the **backend** reaching a Provider, which the per-Sandbox
+  `extraHosts` allowlist has no bearing on. That allowlist governs what an
+  agent's own execution container can reach — see [Sandbox
+  infrastructure](/self-hosting/sandbox). Granting a Sandbox a host alias does
+  not make a Provider reachable, and a Provider that works needs nothing from it.
+</Callout>
 
 ### What a Provider holds
 
