@@ -64,10 +64,15 @@ describe("Organization Agent Routes", () => {
   describe("PUT /:agentId", () => {
     it("updates an org agent if org admin and references stay shared", async () => {
       mockSession();
-      mockDb.limit.mockResolvedValueOnce([{ role: "admin" }]); // requireOrgAccess
+      mockDb.limit
+        .mockResolvedValueOnce([{ role: "admin" }]) // requireOrgAccess
+        .mockResolvedValueOnce([
+          { id: "agent-1", organizationId: orgId, workspaceId: null },
+        ]); // requireOrgScoped
 
       mockDb.where
         .mockReturnValueOnce(mockDb) // requireOrgAccess
+        .mockReturnValueOnce(mockDb) // requireOrgScoped
         .mockResolvedValueOnce([
           { id: "p1", name: "Shared Provider", organizationId: orgId },
         ]); // provider validation → org-scoped
@@ -100,10 +105,15 @@ describe("Organization Agent Routes", () => {
 
     it("blocks an update that references a workspace-private resource", async () => {
       mockSession();
-      mockDb.limit.mockResolvedValueOnce([{ role: "admin" }]); // requireOrgAccess
+      mockDb.limit
+        .mockResolvedValueOnce([{ role: "admin" }]) // requireOrgAccess
+        .mockResolvedValueOnce([
+          { id: "agent-1", organizationId: orgId, workspaceId: null },
+        ]); // requireOrgScoped
 
       mockDb.where
         .mockReturnValueOnce(mockDb) // requireOrgAccess
+        .mockReturnValueOnce(mockDb) // requireOrgScoped
         .mockResolvedValueOnce([
           { id: "p1", name: "WS Provider", organizationId: null },
         ]); // provider validation → workspace-private, blocker
@@ -124,6 +134,54 @@ describe("Organization Agent Routes", () => {
       expect(body.blockers).toEqual([
         { type: "provider", id: "p1", name: "WS Provider" },
       ]);
+      expect(mockDb.update).not.toHaveBeenCalled();
+    });
+
+    it("returns 404 when the agent is not visible here", async () => {
+      mockSession();
+      mockDb.limit
+        .mockResolvedValueOnce([{ role: "admin" }]) // requireOrgAccess
+        .mockResolvedValueOnce([]); // requireOrgScoped: not found
+
+      mockDb.where.mockReturnValueOnce(mockDb); // requireOrgAccess
+
+      const res = await app.request(`${baseUrl}/missing`, {
+        method: "PUT",
+        body: JSON.stringify({
+          name: "Renamed",
+          description: "A shared agent",
+          providerId: "p1",
+          modelId: "m1",
+        }),
+        headers: { "Content-Type": "application/json" },
+      });
+
+      expect(res.status).toBe(404);
+    });
+
+    it("rejects a self-assigned sub-agent", async () => {
+      mockSession();
+      mockDb.limit
+        .mockResolvedValueOnce([{ role: "admin" }]) // requireOrgAccess
+        .mockResolvedValueOnce([
+          { id: "agent-1", organizationId: orgId, workspaceId: null },
+        ]); // requireOrgScoped
+
+      mockDb.where.mockReturnValueOnce(mockDb); // requireOrgAccess
+
+      const res = await app.request(`${baseUrl}/agent-1`, {
+        method: "PUT",
+        body: JSON.stringify({
+          name: "Renamed",
+          description: "A shared agent",
+          providerId: "p1",
+          modelId: "m1",
+          subAgentIds: ["agent-1"],
+        }),
+        headers: { "Content-Type": "application/json" },
+      });
+
+      expect(res.status).toBe(400);
       expect(mockDb.update).not.toHaveBeenCalled();
     });
 

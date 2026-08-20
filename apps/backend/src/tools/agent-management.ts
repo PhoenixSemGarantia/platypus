@@ -35,6 +35,7 @@ export function createAgentManagementTools(
   frontendUrl: string | undefined,
 ): Record<string, Tool> {
   const ctx: ScopeContext = { orgId, workspaceId };
+  const scope = { kind: "workspace" as const, ctx };
 
   /**
    * Turns `updateAgent`/`deleteAgent`'s thrown `NotFoundError`/`LockedError`
@@ -127,7 +128,7 @@ export function createAgentManagementTools(
     }),
     execute: async ({ agentId, label: _label, ...data }) =>
       asToolResult(async () => {
-        const result = await updateAgentRow(ctx, agentId, data);
+        const result = await updateAgentRow(scope, agentId, data);
         if ("error" in result) return result;
 
         const { avatarKey: _, ...rest } = result.row;
@@ -149,7 +150,7 @@ export function createAgentManagementTools(
     }),
     execute: async ({ agentId }) =>
       asToolResult(async () => {
-        await deleteAgentRow(ctx, agentId);
+        await deleteAgentRow(scope, agentId);
         return { success: true };
       }),
   });
