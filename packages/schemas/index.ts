@@ -762,6 +762,39 @@ const pointerModelIdSchema = z
 export const CONTEXT_WINDOW_MIN = 1_000;
 export const CONTEXT_WINDOW_MAX = 10_000_000;
 
+/**
+ * Tool-result clearing (ADR-0018 Notes, issue #524).
+ *
+ * The core tool names whose results are large, disposable, and safe to clear
+ * from what a model call receives once Context occupancy crosses the
+ * threshold below. Deny by default: a new core tool is NOT clearable until
+ * added here explicitly, which is the safe direction and so needs no
+ * announcement.
+ *
+ * Excludes anything that mutates state (`fsWrite`, `fsEdit`, `shellExec`),
+ * sub-Agent delegation (its result is the point of the call, not disposable
+ * page content), and `loadSkill` (its result is instructions the model is
+ * meant to keep following, not data to discard). MCP and third-party plugin
+ * tools are out of scope until read-only hints are surfaced (#626).
+ */
+export const CLEARABLE_TOOL_NAMES: ReadonlySet<string> = new Set([
+  "web_search",
+  "read_url",
+  "fetchUrl",
+  "fsRead",
+  "fsList",
+]);
+
+/**
+ * The fraction of the declared Context window at which Tool-result clearing
+ * engages. Read against the total window, not the total less the Output
+ * ceiling — see the ADR-0018 Notes.
+ */
+export const TOOL_RESULT_CLEARING_THRESHOLD = 0.7;
+
+/** How many of the most recent clearable tool results survive a clearing pass. */
+export const TOOL_RESULT_CLEARING_KEEP_RECENT = 4;
+
 export const modelConfigSchema = z.object({
   id: z.string().min(1),
   // The bare alias name. Absent means the model is referenced by its id.

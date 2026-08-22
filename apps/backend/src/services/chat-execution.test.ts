@@ -619,6 +619,128 @@ describe("chat-execution", () => {
       expect(turn.stream.maxOutputTokens).toBe(32000);
     });
 
+    // ADR-0018 Notes / issue #524: Tool-result clearing's only reading for the
+    // first model call of a turn — read from the INCOMING history, before
+    // this turn appends anything.
+    describe("initialOccupancy", () => {
+      it("is absent on a Chat's first turn (no prior assistant message)", async () => {
+        const queries = createInMemoryChatTurnQueries({
+          workspaces: [baseWorkspace],
+          providers: [baseProvider],
+        });
+
+        const turn = await prepareChatTurn(
+          {
+            ...baseInput,
+            request: { providerId: baseProvider.id, modelId: "gpt-4" },
+          },
+          queries,
+        );
+
+        expect(turn.stream).not.toHaveProperty("initialOccupancy");
+      });
+
+      it("sums the last assistant message's input and output tokens", async () => {
+        const queries = createInMemoryChatTurnQueries({
+          workspaces: [baseWorkspace],
+          providers: [baseProvider],
+        });
+
+        const turn = await prepareChatTurn(
+          {
+            ...baseInput,
+            messages: [
+              {
+                id: "m1",
+                role: "user",
+                parts: [{ type: "text", text: "hi" }],
+              },
+              {
+                id: "m2",
+                role: "assistant",
+                parts: [{ type: "text", text: "hello" }],
+                metadata: {
+                  contextOccupancy: { inputTokens: 1000, outputTokens: 200 },
+                },
+              },
+            ] as PlatypusUIMessage[],
+            request: { providerId: baseProvider.id, modelId: "gpt-4" },
+          },
+          queries,
+        );
+
+        expect(turn.stream.initialOccupancy).toBe(1200);
+      });
+
+      it("reads the LAST assistant message's reading, not an earlier one", async () => {
+        const queries = createInMemoryChatTurnQueries({
+          workspaces: [baseWorkspace],
+          providers: [baseProvider],
+        });
+
+        const turn = await prepareChatTurn(
+          {
+            ...baseInput,
+            messages: [
+              {
+                id: "m1",
+                role: "assistant",
+                parts: [{ type: "text", text: "first" }],
+                metadata: {
+                  contextOccupancy: { inputTokens: 100, outputTokens: 10 },
+                },
+              },
+              {
+                id: "m2",
+                role: "assistant",
+                parts: [{ type: "text", text: "second" }],
+                metadata: {
+                  contextOccupancy: { inputTokens: 5000, outputTokens: 50 },
+                },
+              },
+            ] as PlatypusUIMessage[],
+            request: { providerId: baseProvider.id, modelId: "gpt-4" },
+          },
+          queries,
+        );
+
+        expect(turn.stream.initialOccupancy).toBe(5050);
+      });
+
+      it("treats a null (erased, stale) reading as unknown, same as absent", async () => {
+        const queries = createInMemoryChatTurnQueries({
+          workspaces: [baseWorkspace],
+          providers: [baseProvider],
+        });
+
+        const turn = await prepareChatTurn(
+          {
+            ...baseInput,
+            messages: [
+              {
+                id: "m1",
+                role: "assistant",
+                parts: [{ type: "text", text: "stale" }],
+                metadata: {
+                  contextOccupancy: { inputTokens: 100, outputTokens: 10 },
+                },
+              },
+              {
+                id: "m2",
+                role: "assistant",
+                parts: [{ type: "text", text: "erased" }],
+                metadata: { contextOccupancy: null },
+              },
+            ] as PlatypusUIMessage[],
+            request: { providerId: baseProvider.id, modelId: "gpt-4" },
+          },
+          queries,
+        );
+
+        expect(turn.stream).not.toHaveProperty("initialOccupancy");
+      });
+    });
+
     it("Agent without an explicit maxSteps falls back to the default (15), not 1", async () => {
       const agentNoMaxSteps = { ...baseAgent, maxSteps: null };
       const queries = createInMemoryChatTurnQueries({

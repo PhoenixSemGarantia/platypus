@@ -170,6 +170,36 @@ describe("resolveGenerationPlan", () => {
     expect(plan).not.toHaveProperty("maxOutputTokens");
   });
 
+  // ADR-0018 / issue #524: `contextWindow` is Tool-result clearing's sole
+  // gate, so it must reach the plan the same way the output ceiling does —
+  // present when declared, absent (never a guessed default) when not.
+  it("carries the resolved model's declared Context window", async () => {
+    const provider = {
+      ...baseProvider,
+      modelIds: [
+        { id: "gpt-4", passthroughFileTypes: [], contextWindow: 128000 },
+      ],
+    } as unknown as Provider;
+
+    const { plan } = await resolveGenerationPlan(
+      { agent: { providerId: "p1", modelId: "gpt-4" } },
+      scope,
+      queriesWith([provider]),
+    );
+
+    expect(plan.contextWindow).toBe(128000);
+  });
+
+  it("leaves the Context window absent when the Provider declares none", async () => {
+    const { plan } = await resolveGenerationPlan(
+      { agent: { providerId: "p1", modelId: "gpt-4" } },
+      scope,
+      queriesWith([baseProvider]),
+    );
+
+    expect(plan).not.toHaveProperty("contextWindow");
+  });
+
   it("resolves an alias reference to the model it currently points at", async () => {
     const provider = {
       ...baseProvider,

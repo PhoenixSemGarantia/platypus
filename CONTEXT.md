@@ -62,8 +62,16 @@ The total token capacity of a `(Provider, model)` pair, declared by an Org Admin
 _Avoid_: context size, token limit, max tokens (that names an output cap).
 
 **Context occupancy**:
-How full a model's **Context window** was on the most recent Chat turn — the input-token count the vendor reported for the last model call of that turn, inclusive of cached tokens. A last value, not a running total: the conversation is re-sent in full on every Chat turn, so occupancy replaces rather than accumulates. Unknown where the Provider reports no token usage, in which case Platypus estimates nothing. Distinct from **Token usage**, which is the count of tokens billed across a turn or run and legitimately is a sum.
+How full a model's **Context window** was on a single model call — the input-token count the vendor reported for it, inclusive of cached tokens. Read per **Chat turn** as that turn's last call, and within a **Drive** as the step just completed; either way a last value, not a running total, because the **Transcript** is re-sent in full on every call and so occupancy replaces rather than accumulates. Unknown where the Provider reports no token usage, in which case Platypus estimates nothing. Distinct from **Token usage**, which is the count of tokens billed across a turn or run and legitimately is a sum.
 _Avoid_: context size, context usage, tokens used, running total.
+
+**Transcript**:
+The ordered messages of a **Chat**, held as its record and re-sent to the model in full on every **Chat turn** and on every step within one. Distinct from what a single model call receives, which may be narrower — see **Tool-result clearing** — and from the **System prompt**, which is composed per turn rather than accumulated.
+_Avoid_: history, conversation, message log, context (which already carries three other meanings).
+
+**Tool-result clearing**:
+Replacing the content of an older tool result in what a model call receives, leaving the tool call itself and the stored **Transcript** untouched. Bounds a **Transcript** by retention rather than by summary, so a cleared result is plainly absent to the model instead of silently condensed; Platypus does not summarise a **Transcript** at all. Engages only where a **Context window** was declared, and only for tools whose results are safe to lose.
+_Avoid_: pruning, compaction (reserve for summarising, which Platypus does not do), context editing, truncation (that names a per-call bound on a single result or reply).
 
 **Token usage**:
 The tokens a **Chat turn** or run was billed for — the vendor's reported input and output counts folded across every model call the turn made. A sum, and legitimately one: each call is billed separately. Distinct from **Context occupancy**, which is a single call's input count and never accumulates — on a long tool-using turn the two differ by roughly an order of magnitude. Counts only: no Provider declares what a model costs per token, so Platypus states no monetary figure anywhere.
@@ -190,6 +198,7 @@ The record binding a Conversation locus to a Chat (which carries the Workspace +
 - A **Provider** belongs to either an **Organization** (shared) or a **Workspace** (private).
 - Each model a **Provider** exposes may declare a **Context window**. A **Chat turn** against that model yields a **Context occupancy**, measured from the tokens the vendor reports and meaningful only where a **Context window** was declared.
 - A **Chat turn** also yields a **Token usage**, folded across its model calls. Both come from the same vendor-reported figures and neither substitutes for the other: occupancy answers how full the window got, usage answers how much the turn was billed.
+- A **Chat turn** sends its **Transcript** in full. **Tool-result clearing** narrows what an individual model call receives without altering the stored **Transcript**, so what a User reads and what the model was given can legitimately differ; it is driven by **Context occupancy** and therefore engages only where a **Context window** was declared.
 - Each model a **Provider** exposes may also declare an **Output ceiling**, which a **Chat turn** — or a **Sub-Agent** run — against that model is generated under. Independent of the **Context window**: one bounds the reply and is enforced, the other describes the whole capacity and is not.
 - A **Chat turn** may also record an **Unavailable capability** — something it was asked to run with that **Turn resolution** could not supply. Like the **Output ceiling** cutoff it is a per-turn outcome told to the User under the reply, and unlike it, it is known before the model is ever called.
 - An **Agent**, **Skill**, **MCP**, or **Provider** is a **Scoped resource**: its row carries either an `organizationId` or a `workspaceId`, never both. Resolved relative to a **Workspace**, an Organization-scoped one is a **Shared resource**, visible only through an **Attachment**; a Sandbox-backed **Tool set** instead rebinds to the invoking **Workspace**'s **Sandbox** at Chat-turn time.

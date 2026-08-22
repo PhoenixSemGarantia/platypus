@@ -6,6 +6,11 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { ToolUIPart } from "ai";
 import {
@@ -18,6 +23,7 @@ import {
   ChevronDownIcon,
   CircleIcon,
   ClockIcon,
+  EyeOffIcon,
   FileIcon,
   FilePenIcon,
   FilePlusIcon,
@@ -190,6 +196,12 @@ export type ToolHeaderProps = {
   /** Recorded execution time, once the run has been persisted. */
   durationMs?: number;
   className?: string;
+  /**
+   * Tool-result clearing (ADR-0018 Notes, issue #524) would leave this
+   * result out of the next model call. The full result stays expandable
+   * below — this only says the model no longer has it.
+   */
+  cleared?: boolean;
 };
 
 const getStatusBadge = (status: ToolUIPart["state"]) => {
@@ -221,6 +233,30 @@ const getStatusBadge = (status: ToolUIPart["state"]) => {
   );
 };
 
+/**
+ * Shown on a tool part whose result Tool-result clearing (ADR-0018 Notes,
+ * issue #524) has left out of the next model call. The full result is still
+ * expandable below this header — the badge says only that the model no
+ * longer has it, never that it's gone.
+ */
+export const ClearedResultBadge = () => (
+  <Tooltip>
+    <TooltipTrigger asChild>
+      <Badge
+        className="gap-1 rounded-full text-xs text-muted-foreground"
+        variant="outline"
+      >
+        <EyeOffIcon className="size-3" />
+        Not sent to model
+      </Badge>
+    </TooltipTrigger>
+    <TooltipContent>
+      This result was left out of the last model call to free up space in the
+      context window. It is still here — expand to read it.
+    </TooltipContent>
+  </Tooltip>
+);
+
 export const ToolHeader = ({
   className,
   title,
@@ -228,6 +264,7 @@ export const ToolHeader = ({
   type,
   state,
   durationMs,
+  cleared,
   ...props
 }: ToolHeaderProps) => {
   // getToolIcon returns a stable module-level Lucide icon; render via
@@ -255,6 +292,7 @@ export const ToolHeader = ({
           )}
         </span>
         <ToolDuration durationMs={durationMs} />
+        {cleared && state === "output-available" && <ClearedResultBadge />}
         {getStatusBadge(state)}
       </div>
       <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />

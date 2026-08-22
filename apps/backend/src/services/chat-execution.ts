@@ -128,6 +128,32 @@ export type ChatTurn = {
   dispose: () => Promise<void>;
 };
 
+/**
+ * The Context occupancy a new Chat turn starts at, before its own first step
+ * has reported any usage (ADR-0018 Notes, issue #524).
+ *
+ * Read from the last assistant message that carries a `contextOccupancy`
+ * reading — mirroring the context-meter derivation in `chat.tsx` — and summed
+ * from that reading's input AND output tokens, because the assistant's own
+ * reply becomes part of what the next turn resends. `null` (an erased,
+ * mid-turn-stale reading) counts as unknown, same as absent.
+ *
+ * Undefined for a Chat's first turn, and for a delegated Sub-Agent or headless
+ * Trigger run, which never pass a prior Chat's messages here at all — Tool-result
+ * clearing simply does not engage on their first model call.
+ */
+const initialOccupancyFrom = (
+  messages: PlatypusUIMessage[],
+): number | undefined => {
+  const lastReading = messages
+    .filter((m) => m.role === "assistant")
+    .map((m) => m.metadata?.contextOccupancy)
+    .filter((reading) => reading !== undefined)
+    .at(-1);
+  if (!lastReading) return undefined;
+  return lastReading.inputTokens + (lastReading.outputTokens ?? 0);
+};
+
 export type PrepareChatTurnInput = {
   orgId: string;
   workspaceId: string;
@@ -628,12 +654,20 @@ export const prepareChatTurn = async (
     },
   );
 
+  // Read from the INCOMING history, before this turn appends anything — Tool-
+  // result clearing's only reading for the first model call of the turn
+  // (ADR-0018 Notes, issue #524). Left off entirely rather than sent as
+  // `undefined` when there is no prior reading, matching every other optional
+  // field on this plan.
+  const initialOccupancy = initialOccupancyFrom(messages);
+
   return {
     stream: {
       ...context.plan,
       tools: wrappedTools,
       system: systemPrompt,
       messages: inlinedMessages,
+      ...(initialOccupancy !== undefined ? { initialOccupancy } : {}),
     },
     resolved: {
       agentId: context.resolvedAgentId,

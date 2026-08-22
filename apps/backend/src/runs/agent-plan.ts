@@ -1,6 +1,7 @@
 import { NotFoundError, ValidationError } from "../errors.ts";
 import { openProvider } from "../services/provider.ts";
 import {
+  contextWindowForModel,
   maxOutputTokensForModel,
   resolveModelId,
 } from "../services/model-capability.ts";
@@ -128,6 +129,7 @@ export const resolveGenerationPlan = async (
 
   const model = openProvider(provider).languageModel(resolvedModelId);
   const maxOutputTokens = maxOutputTokensForModel(provider, resolvedModelId);
+  const contextWindow = contextWindowForModel(provider, resolvedModelId);
 
   return {
     plan: {
@@ -138,6 +140,10 @@ export const resolveGenerationPlan = async (
       // assert "the key is absent" instead of guarding against `undefined`
       // sneaking in as though it were unset.
       ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
+      // Absent when the Provider declares no Context window (ADR-0018) — the
+      // sole gate on Tool-result clearing, so an undeclared window must reach
+      // `buildModelInvocation` as a true absence, not a guessed default.
+      ...(contextWindow !== undefined ? { contextWindow } : {}),
       ...resolveSamplingSettings(samplingSource),
     },
     provider,

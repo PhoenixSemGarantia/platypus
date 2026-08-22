@@ -155,6 +155,13 @@ interface ChatMessageProps {
   onCopyMessage: (content: string, messageId: string) => void;
   /** ID of the message that was recently copied, or null */
   copiedMessageId: string | null;
+  /**
+   * `toolCallId`s whose result Tool-result clearing (ADR-0018 Notes, issue
+   * #524) would leave out of the NEXT model call — derived per render from
+   * the current Context occupancy reading, never persisted. Absent/empty
+   * renders every tool part exactly as before.
+   */
+  staleToolCallIds?: ReadonlySet<string>;
 }
 
 export const ChatMessage = memo(function ChatMessage({
@@ -173,6 +180,7 @@ export const ChatMessage = memo(function ChatMessage({
   onRegenerate,
   onCopyMessage,
   copiedMessageId,
+  staleToolCallIds,
 }: ChatMessageProps) {
   const messageAgentId = message.metadata?.agentId;
   const messageAgent = messageAgentId
@@ -347,6 +355,7 @@ export const ChatMessage = memo(function ChatMessage({
           key={`${message.id}-${i}`}
           toolPart={part as ToolUIPart}
           messageMetadata={message.metadata}
+          cleared={staleToolCallIds?.has((part as ToolUIPart).toolCallId)}
         />
       ),
     },
@@ -378,6 +387,7 @@ export const ChatMessage = memo(function ChatMessage({
                 message.metadata,
                 toolPart.toolCallId,
               )}
+              cleared={staleToolCallIds?.has(toolPart.toolCallId)}
             />
             <ToolContent>
               <ToolInput input={toolPart.input} />
