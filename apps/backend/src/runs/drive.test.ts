@@ -174,6 +174,16 @@ const stuckPlanOf = (model: MockLanguageModelV3) => ({
   maxSteps: 12,
 });
 
+/**
+ * The same tool-calling loop under a ceiling of one, so the step-count stop
+ * condition is what halts it — well before the detector's three repeats, which
+ * is the confusion the flag has to avoid.
+ */
+const oneStepPlanOf = (model: MockLanguageModelV3) => ({
+  ...stuckPlanOf(model),
+  maxSteps: 1,
+});
+
 describe("driveOnce", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -264,6 +274,53 @@ describe("driveOnce", () => {
     expect(outcome[0].error?.message).toMatch(
       new RegExp(`no_progress:.*${STUCK_TOOL}`),
     );
+  });
+
+  // Issue #540: the run did the work it was allowed to do, so it still
+  // succeeds — the stop is recorded as a fact on the statistics, not as a
+  // failure.
+  it("records the step-ceiling stop on the run's stats", async () => {
+    const { run, outcome } = startRecordedRun();
+
+    const { stats } = await driveOnce({
+      plan: oneStepPlanOf(stuckGeneratingModel()),
+      run,
+      prompt: "hi",
+    });
+
+    expect(stats.stoppedAtStepLimit).toBe(true);
+    expect(outcome[0].status).toBe("succeeded");
+    expect(outcome[0].stats).toMatchObject({ stoppedAtStepLimit: true });
+  });
+
+  it("records nothing on a run the model finished", async () => {
+    const { run, outcome } = startRecordedRun();
+
+    const { stats } = await driveOnce({
+      plan: planOf(generatingModel()),
+      run,
+      prompt: "hi",
+    });
+
+    expect(stats).not.toHaveProperty("stoppedAtStepLimit");
+    expect(outcome[0].stats).not.toHaveProperty("stoppedAtStepLimit");
+  });
+
+  // The false positive the two-part condition exists to prevent: a no-progress
+  // abort ends on the same terminal finish reason. It keeps its own failed
+  // status and `no_progress:` message and is never relabelled.
+  it("does not report a no-progress abort as a step-ceiling stop", async () => {
+    const { run, outcome } = startRecordedRun();
+
+    const { stats } = await driveOnce({
+      plan: stuckPlanOf(stuckGeneratingModel()),
+      run,
+      prompt: "hi",
+    });
+
+    expect(stats).not.toHaveProperty("stoppedAtStepLimit");
+    expect(outcome[0].status).toBe("failed");
+    expect(outcome[0].stats).not.toHaveProperty("stoppedAtStepLimit");
   });
 });
 
@@ -377,6 +434,55 @@ describe("driveDelegate", () => {
     expect(result.status).toBe("failed");
     expect(result.failure).toMatch(new RegExp(`no_progress:.*${STUCK_TOOL}`));
     expect(outcome[0].error?.name).toBe("NoProgressError");
+  });
+
+  // Issue #540. The delegate's parent has to tell a stopped delegation from a
+  // finished one, so the outcome reports the stop alongside the stats.
+  it("reports the step-ceiling stop to its caller and on the run's stats", async () => {
+    const { run, outcome } = startRecordedRun();
+    const drive = driveDelegate({
+      plan: oneStepPlanOf(stuckStreamingModel()),
+      run,
+      prompt: "hi",
+    });
+    for await (const _ of drive.snapshots) void _;
+    const result = await drive.done;
+
+    expect(result.stoppedAtStepLimit).toBe(true);
+    expect(result.status).toBe("succeeded");
+    expect(outcome[0].stats).toMatchObject({ stoppedAtStepLimit: true });
+  });
+
+  it("reports no step-ceiling stop on a delegation the model finished", async () => {
+    const { run, outcome } = startRecordedRun();
+    const drive = driveDelegate({
+      plan: planOf(modelOf(text("t1", "all done"))),
+      run,
+      prompt: "hi",
+    });
+    for await (const _ of drive.snapshots) void _;
+    const result = await drive.done;
+
+    expect(result.stoppedAtStepLimit).toBe(false);
+    expect(outcome[0].stats).not.toHaveProperty("stoppedAtStepLimit");
+  });
+
+  // The no-progress abort keeps its own reporting on the streamed path too: its
+  // stop condition trips below the ceiling, and on a low ceiling could trip on
+  // the ceiling step itself, so the teardown defers to it either way.
+  it("does not report a no-progress abort as a step-ceiling stop", async () => {
+    const { run, outcome } = startRecordedRun();
+    const drive = driveDelegate({
+      plan: stuckPlanOf(stuckStreamingModel()),
+      run,
+      prompt: "hi",
+    });
+    for await (const _ of drive.snapshots) void _;
+    const result = await drive.done;
+
+    expect(result.stoppedAtStepLimit).toBe(false);
+    expect(result.failure).toMatch(new RegExp(`no_progress:.*${STUCK_TOOL}`));
+    expect(outcome[0].stats).not.toHaveProperty("stoppedAtStepLimit");
   });
 
   // A run that both timed out and reported a stream error is better explained
@@ -523,6 +629,44 @@ describe("driveChat", () => {
     await drive.done;
 
     expect(chunks.some((c) => c.type === "error")).toBe(false);
+  });
+
+  // Issue #540. A Chat turn's record of the stop is the message metadata: Chat
+  // rows persist the message array wholesale, so that is what survives a reload
+  // and what the notice renders from when the Chat is re-opened later.
+  it("marks the streamed message when the step ceiling stopped the loop", async () => {
+    const { run, outcome } = startRecordedRun();
+    const drive = driveChat({
+      plan: oneStepPlanOf(stuckStreamingModel()),
+      run,
+      modelMessages: [{ role: "user", content: "hi" }],
+    });
+
+    for await (const _ of drive.snapshots) void _;
+    const result = await drive.done;
+    await drive.response.cancel();
+
+    expect(result.stoppedAtStepLimit).toBe(true);
+    expect(result.messages?.at(-1)?.metadata?.stoppedAtStepLimit).toBe(true);
+    expect(outcome[0].stats).toMatchObject({ stoppedAtStepLimit: true });
+  });
+
+  it("leaves the message unmarked on a turn the model finished", async () => {
+    const { run } = startRecordedRun();
+    const drive = driveChat({
+      plan: planOf(modelOf(text("t1", "Hi"))),
+      run,
+      modelMessages: [{ role: "user", content: "hi" }],
+    });
+
+    for await (const _ of drive.snapshots) void _;
+    const result = await drive.done;
+    await drive.response.cancel();
+
+    expect(result.stoppedAtStepLimit).toBe(false);
+    expect(result.messages?.at(-1)?.metadata ?? {}).not.toHaveProperty(
+      "stoppedAtStepLimit",
+    );
   });
 });
 

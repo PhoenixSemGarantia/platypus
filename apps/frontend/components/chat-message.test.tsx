@@ -15,6 +15,7 @@ import {
   ChatMessage,
   CUT_SHORT_NOTICE,
   SEARCH_UNAVAILABLE_NOTICE,
+  STEP_LIMIT_NOTICE,
   isGenericToolPart,
 } from "./chat-message";
 
@@ -739,6 +740,44 @@ describe("ChatMessage truncation marker", () => {
 
     expect(screen.getByAltText("Research Agent")).toBeInTheDocument();
     expect(screen.getByText(CUT_SHORT_NOTICE)).toBeInTheDocument();
+  });
+});
+
+// Issue #540: a turn whose loop ran out of steps ended with no answer — often a
+// tool card and nothing after it — and nothing anywhere said a step limit was
+// what happened.
+describe("ChatMessage step-limit marker", () => {
+  it("marks a message the run flagged as stopped at the step limit", () => {
+    renderMessage(assistantMessage({ stoppedAtStepLimit: true }));
+
+    expect(screen.getByText(STEP_LIMIT_NOTICE)).toBeInTheDocument();
+  });
+
+  it.each([
+    ["a message that finished cleanly", { agentId: "agent-1" }],
+    ["a message with no metadata at all", undefined],
+  ] as const)("renders no marker for %s", (_, metadata) => {
+    renderMessage(assistantMessage(metadata));
+
+    expect(screen.queryByText(STEP_LIMIT_NOTICE)).toBeNull();
+  });
+
+  // The two cut-short notices name different limits — one bounds the loop, the
+  // other bounds a single reply — and a turn only ever hits one of them.
+  it("renders the output-limit marker without the step-limit one", () => {
+    renderMessage(assistantMessage({ truncatedByTokenLimit: true }));
+
+    expect(screen.getByText(CUT_SHORT_NOTICE)).toBeInTheDocument();
+    expect(screen.queryByText(STEP_LIMIT_NOTICE)).toBeNull();
+  });
+
+  it("keeps the agent avatar on a step-limited agent turn", () => {
+    renderMessage(
+      assistantMessage({ agentId: "agent-1", stoppedAtStepLimit: true }),
+    );
+
+    expect(screen.getByAltText("Research Agent")).toBeInTheDocument();
+    expect(screen.getByText(STEP_LIMIT_NOTICE)).toBeInTheDocument();
   });
 });
 

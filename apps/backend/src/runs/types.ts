@@ -67,6 +67,16 @@ export type RunStats = {
    * than `false`, mirroring the Chat message metadata marker.
    */
   truncatedByTokenLimit?: true;
+  /**
+   * Set only when the run's model loop stopped at its **Step ceiling** with the
+   * model still asking to continue. Absent rather than `false`, the same way its
+   * output-ceiling sibling above is.
+   *
+   * Never set for a run the no-progress detector halted: that stop reports
+   * itself as a failure with its own message, and both can be true of the same
+   * step on a low ceiling.
+   */
+  stoppedAtStepLimit?: true;
 };
 
 /**

@@ -25,7 +25,10 @@ vi.mock("@/components/back-button", () => ({
 }));
 
 import TriggerRunsPage from "./page";
-import { RUN_CUT_SHORT_NOTICE } from "@/components/run-cut-short-notice";
+import {
+  RUN_CUT_SHORT_NOTICE,
+  RUN_STEP_LIMIT_NOTICE,
+} from "@/components/run-cut-short-notice";
 
 const stats = (overrides?: Partial<TriggerRunStats>): TriggerRunStats => ({
   steps: 1,
@@ -79,6 +82,47 @@ describe("Trigger runs truncation marker", () => {
     await renderRuns([run(stats())]);
 
     expect(screen.queryByText(RUN_CUT_SHORT_NOTICE)).toBeNull();
+  });
+});
+
+// Issue #540. The same problem for the other limit: a run whose loop ran out of
+// steps also ends as 'success', and the runs view said nothing about it.
+describe("Trigger runs step-limit marker", () => {
+  it("marks a run whose stats say its loop was stopped short", async () => {
+    await renderRuns([run(stats({ stoppedAtStepLimit: true }))]);
+
+    expect(screen.getByText(RUN_STEP_LIMIT_NOTICE)).toBeInTheDocument();
+  });
+
+  it("names the step limit, not the output limit", async () => {
+    await renderRuns([run(stats({ stoppedAtStepLimit: true }))]);
+
+    expect(screen.queryByText(RUN_CUT_SHORT_NOTICE)).toBeNull();
+  });
+
+  it("renders no marker for a run that finished cleanly", async () => {
+    await renderRuns([run(stats())]);
+
+    expect(screen.queryByText(RUN_STEP_LIMIT_NOTICE)).toBeNull();
+  });
+
+  // The no-progress stop reports itself already: a failed run with its own
+  // message. Relabelling it a step-limit stop would tell an Operator to raise a
+  // ceiling that was never the problem.
+  it("leaves a no-progress failure reported as itself", async () => {
+    await renderRuns([
+      {
+        ...run(stats({ steps: 4 })),
+        status: "failed",
+        errorMessage:
+          "no_progress: tool 'listCards' produced the same result 3 times without making progress",
+      },
+    ]);
+
+    expect(
+      screen.getByText(/no_progress: tool 'listCards'/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(RUN_STEP_LIMIT_NOTICE)).toBeNull();
   });
 });
 

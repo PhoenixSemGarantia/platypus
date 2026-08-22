@@ -6,9 +6,10 @@ import { cn } from "@/lib/utils";
  * or how it ended — under a Chat reply, under a delegated Sub-Agent response,
  * and in Trigger run history.
  *
- * It carries the output-ceiling notice and the search-was-unavailable notice,
- * and a Chat reply can show both at once — how the reply was produced, then how
- * it ended.
+ * It carries the two cut-short notices — the output ceiling and the step
+ * ceiling, never both of one turn — and the search-was-unavailable notice. A
+ * Chat reply can show a cut-short row and the search row at once: how the reply
+ * was produced, then how it ended.
  *
  * The row is shared; the wording is not. Each surface owns its own sentence as
  * an exported constant its tests assert against — the ceiling notices name

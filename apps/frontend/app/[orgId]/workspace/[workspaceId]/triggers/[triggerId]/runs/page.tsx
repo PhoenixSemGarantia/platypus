@@ -27,7 +27,10 @@ import {
   Gauge,
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
-import { RunCutShortNotice } from "@/components/run-cut-short-notice";
+import {
+  RunCutShortNotice,
+  RunStepLimitNotice,
+} from "@/components/run-cut-short-notice";
 
 const TriggerRunsPage = ({
   params,
@@ -229,6 +232,7 @@ const TriggerRunsPage = ({
                           {stats?.truncatedByTokenLimit && (
                             <RunCutShortNotice />
                           )}
+                          {stats?.stoppedAtStepLimit && <RunStepLimitNotice />}
                           {run.errorMessage && (
                             <p className="text-sm text-destructive mt-1">
                               {run.errorMessage}

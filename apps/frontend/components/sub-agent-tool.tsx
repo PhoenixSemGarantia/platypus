@@ -42,6 +42,7 @@ type SubAgentActivity = {
   entries: SubAgentActivityEntry[];
   text?: string;
   truncatedByTokenLimit?: true;
+  stoppedAtStepLimit?: true;
 };
 
 /**
@@ -53,6 +54,14 @@ type SubAgentActivity = {
  */
 export const SUB_AGENT_CUT_SHORT_NOTICE =
   "Sub-Agent response cut short at the model's output limit.";
+
+/**
+ * The same thing for the other limit: the Sub-Agent's tool-calling loop ran out
+ * of steps while it was still working, so what came back is as far as it got —
+ * which may be a tool result and no answer at all.
+ */
+export const SUB_AGENT_STEP_LIMIT_NOTICE =
+  "Sub-Agent response cut short at the step limit.";
 
 const isSubAgentActivity = (output: unknown): output is SubAgentActivity =>
   typeof output === "object" &&
@@ -207,15 +216,10 @@ const ActivityEntry = ({ entry }: { entry: CompactEntry }) => {
 /**
  * The delegate's answer. One component for both call sites — with and without
  * an activity log — so a marker can never be shown on one and missed on the
- * other.
+ * other. `notice` is the resolved wording for whichever limit stopped the
+ * delegation, absent when it finished on its own.
  */
-const ResponseBlock = ({
-  text,
-  truncated,
-}: {
-  text: string;
-  truncated: boolean;
-}) => (
+const ResponseBlock = ({ text, notice }: { text: string; notice?: string }) => (
   <div className="space-y-2 border-t p-4">
     <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
       Response
@@ -225,9 +229,7 @@ const ResponseBlock = ({
         <MessageResponse>{text}</MessageResponse>
       </MessageContent>
     </Message>
-    {truncated && (
-      <TurnNotice className="mt-2">{SUB_AGENT_CUT_SHORT_NOTICE}</TurnNotice>
-    )}
+    {notice && <TurnNotice className="mt-2">{notice}</TurnNotice>}
   </div>
 );
 
@@ -260,7 +262,14 @@ export const SubAgentTool = ({
   const activity = isSubAgentActivity(output) ? output : null;
   const legacyText = typeof output === "string" ? output : null;
   const responseText = activity?.text ?? legacyText;
-  const truncated = activity?.truncatedByTokenLimit ?? false;
+  // Which limit ended the delegation, if either did. At most one applies: a
+  // terminal finish names the output ceiling or a loop the model wanted to
+  // continue, never both.
+  const cutShortNotice = activity?.truncatedByTokenLimit
+    ? SUB_AGENT_CUT_SHORT_NOTICE
+    : activity?.stoppedAtStepLimit
+      ? SUB_AGENT_STEP_LIMIT_NOTICE
+      : undefined;
   const compacted = useMemo(
     () => (activity ? compactEntries(activity.entries) : []),
     [activity],
@@ -335,7 +344,7 @@ export const SubAgentTool = ({
               ))}
             </div>
             {responseText ? (
-              <ResponseBlock text={responseText} truncated={truncated} />
+              <ResponseBlock text={responseText} notice={cutShortNotice} />
             ) : null}
           </>
         ) : !isComplete ? (
@@ -343,7 +352,7 @@ export const SubAgentTool = ({
             <Shimmer className="text-sm">Working...</Shimmer>
           </div>
         ) : responseText ? (
-          <ResponseBlock text={responseText} truncated={truncated} />
+          <ResponseBlock text={responseText} notice={cutShortNotice} />
         ) : null}
       </CollapsibleContent>
     </Collapsible>

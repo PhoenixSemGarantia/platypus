@@ -6,6 +6,7 @@ import { z } from "zod";
 import {
   createSubAgentTool,
   createSubAgentTools,
+  SUB_AGENT_STEP_LIMIT_NOTE,
   SUB_AGENT_TRUNCATION_NOTE,
 } from "./sub-agent.ts";
 import type { SubAgentActivity } from "./sub-agent.ts";
@@ -820,6 +821,98 @@ describe("createSubAgentTool", () => {
           ),
         }),
       ).rejects.toThrow(/upstream reset/);
+    });
+  });
+
+  // Issue #540. The other way a delegation comes back unfinished: its loop ran
+  // out of steps while the model was still asking to continue. The card showed
+  // the fragment as though it were the finding, and the parent read it the same
+  // way.
+  describe("stopped at the step ceiling", () => {
+    /** A delegate that spends its only allowed step on a tool call. */
+    const haltedAtCeiling = (overrides: LegacyOptions = {}) =>
+      delegate({
+        maxSteps: 1,
+        model: modelOf(
+          step(toolCall("tc1", "noop", "{}"), {
+            unified: "tool-calls",
+            raw: "tool_use",
+          }),
+          step(text("t1", "the answer that never came")),
+        ),
+        loadTools: toolsOf({
+          noop: {
+            inputSchema: z.object({}),
+            execute: () => Promise.resolve("ok"),
+          },
+        }),
+        ...overrides,
+      });
+
+    it("flags the delegation result", async () => {
+      const { yielded } = await haltedAtCeiling();
+
+      expect(yielded.at(-1)!.stoppedAtStepLimit).toBe(true);
+    });
+
+    it("tells the parent model the answer is not a finished one", async () => {
+      const { tool, yielded } = await haltedAtCeiling();
+
+      const value = modelText(tool, yielded.at(-1)!);
+      expect(value).toContain(SUB_AGENT_STEP_LIMIT_NOTE);
+      // Its own wording, not the output-ceiling note's: the two stops have
+      // different causes and a parent that reads one for the other would
+      // delegate the wrong remedy.
+      expect(value).not.toContain(SUB_AGENT_TRUNCATION_NOTE);
+    });
+
+    it("records the stop in the log", async () => {
+      await haltedAtCeiling();
+
+      const warned = vi
+        .mocked(logger.warn)
+        .mock.calls.find((call) =>
+          String(call[1]).includes("stopped at its step ceiling"),
+        );
+      expect(warned?.[0]).toMatchObject({
+        subAgentId: "agent-1",
+        subAgentName: "Research Agent",
+        rawFinishReason: "tool_use",
+      });
+    });
+
+    it("leaves a delegation the model finished unflagged", async () => {
+      const { tool, yielded } = await delegate({
+        model: modelOf(step(text("t1", "All done."))),
+      });
+      const final = yielded.at(-1)!;
+
+      expect(final).not.toHaveProperty("stoppedAtStepLimit");
+      expect(modelText(tool, final)).toBe("All done.");
+    });
+
+    // The ceiling was reached but the last allowed step was the answer, so
+    // nothing was cut short.
+    it("leaves a delegation whose last allowed step answered unflagged", async () => {
+      const { yielded } = await delegate({
+        maxSteps: 2,
+        model: modelOf(
+          step(toolCall("tc1", "noop", "{}"), {
+            unified: "tool-calls",
+            raw: "tool_use",
+          }),
+          step(text("t1", "One card.")),
+        ),
+        loadTools: toolsOf({
+          noop: {
+            inputSchema: z.object({}),
+            execute: () => Promise.resolve("ok"),
+          },
+        }),
+      });
+
+      expect(yielded.at(-1)!).not.toHaveProperty("stoppedAtStepLimit");
+      expect(yielded.at(-1)!.text).toBe("One card.");
     });
   });
 

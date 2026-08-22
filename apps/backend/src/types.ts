@@ -23,6 +23,17 @@ export type ChatMessageMetadata = {
    */
   truncatedByTokenLimit?: true;
   /**
+   * The turn's model loop was stopped because it reached its **Step ceiling**,
+   * with the model still asking to continue — so the reply is whatever it had
+   * produced by then, often a tool card and no answer at all. The chat marks
+   * the message as cut short.
+   *
+   * The sibling of `truncatedByTokenLimit`, and never both: one bounds the loop
+   * and the other bounds a single reply, and the terminal finish reason names
+   * only one of them.
+   */
+  stoppedAtStepLimit?: true;
+  /**
    * Search was requested for this turn and Turn resolution served no search
    * tools, so the reply was written without it — the **Unavailable capability**
    * of `CONTEXT.md`. The model was not told; the Chat renders a notice under the
