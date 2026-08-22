@@ -102,3 +102,40 @@ Platypus gains a fourth core-owned Extension point — a **Web-search backend** 
 - **Boundary vs MCP (ADR-0013 non-goal #4).** A Plugin Tool set that merely proxies HTTP is an MCP smell. A Web-search backend is different on two counts: it fills core's own **request-gated toggle slot** — a slot no MCP or Tool set can fill — and it is the same category as sandbox backends, a swappable deployment-chosen capability, not a duplication of MCP's always-on per-Agent tool exposure.
 - **Coexistence.** `read_url` and `@platypus/web-fetch`'s `fetchUrl` both remain. `read_url` does not check robots.txt.
 - **Out of tree.** No SearXNG / browser-service code ships in core; those are out-of-tree Plugins. Core ships the Extension point, registry, selection, resolution, Tool construction, guard, and gate only.
+
+## Amendment — an unavailable search is reported to the User (#522)
+
+The **Selection** consequence above ends "a stale id degrades to no search tools
+plus a warn-log rather than blocking the form". That outcome is now
+**reported to the User** as well as logged. It is the **Unavailable capability**
+of `CONTEXT.md`: a turn that asked for search and was served none carries a flag
+on its reply's metadata, and the Chat renders a notice under the answer. The
+model is never told, so nothing about the prompt or the tool set changes — a turn
+where search was unavailable is indistinguishable, to the model, from one that
+never asked for it.
+
+The flag is **outcome-based**: search was asked for, resolution had somewhere to
+send it, and no tools came back. So a stale id, a factory that threw or outran
+its timeout, and a malformed executor object all report the same thing to the
+User, while the Operator's log keeps naming the specific fault. What it does
+**not** cover is a `searchSource` that resolves to no search at all, including
+`"native"` on a Provider with no native tool: nothing was promised, so nothing
+was missing. A direct API caller can still reach that case unreported; the UI
+cannot, because the toggle's gate and Turn resolution consult the same
+`providerHasNativeSearch` predicate.
+
+The reporting path is deliberately the whole of the fix. Hiding the toggle on a
+Provider whose backend is missing was considered and **rejected**: the toggle's
+visibility stays a pure function of the Provider row, as the **Capability gate**
+consequence specifies, so the frontend needs no mirror of a registry that lives
+in the backend and no per-turn catalogue fetch. See
+`.out-of-scope/hiding-the-search-toggle-on-a-missing-backend.md`.
+
+The three warns keep their distinct messages and each names the **Provider row**,
+which is the field an Operator edits — an org-scoped Shared Provider (ADR-0007)
+is one row serving many Workspaces, so the Workspace alone names a symptom. This
+does **not** widen the **Backend context** consequence above:
+`WebBackendContext` remains `{ orgId, workspaceId, userId }` for Plugin authors.
+Core passes its own `buildTurnTools` a `TurnToolsContext` that adds `providerId`
+and strips it again before the plugin-facing `createExecutors` call, so the
+published SDK contract is untouched.
