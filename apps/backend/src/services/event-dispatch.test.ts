@@ -264,19 +264,24 @@ describe("event-dispatch", () => {
       expect(mockExecuteTrigger).toHaveBeenCalled();
     });
 
-    it("should not fire a changedFields filter for an event that carries no changedFields", async () => {
+    it("should ignore the changedFields filter for an event other than card.updated", async () => {
       const trigger = makeEventTrigger({
         config: {
-          events: ["card.created"],
+          events: ["card.moved", "card.updated"],
           filters: { changedFields: ["assignees"] },
         },
       });
       mockDb.where.mockResolvedValueOnce([]).mockResolvedValueOnce([trigger]);
 
-      dispatchEvent("org-1", "ws-1", "card.created", { cardId: "c1" });
+      // A move emits card.moved (no changedFields) then card.updated. Only
+      // card.updated answers to the filter, so the move still fires.
+      dispatchEvent("org-1", "ws-1", "card.moved", {
+        id: "c1",
+        previousColumnId: "col-1",
+      });
       await flushMicrotasks();
 
-      expect(mockExecuteTrigger).not.toHaveBeenCalled();
+      expect(mockExecuteTrigger).toHaveBeenCalled();
     });
 
     it("should compose the changedFields filter with the boardId filter", async () => {

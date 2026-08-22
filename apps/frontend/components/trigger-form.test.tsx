@@ -21,6 +21,7 @@ vi.mock("sonner", () => ({
 }));
 
 const agents = [{ id: "agent-1", name: "Agent One" }];
+const boards = [{ id: "board-1", name: "Board One" }];
 
 vi.mock("swr", () => ({
   __esModule: true,
@@ -29,7 +30,7 @@ vi.mock("swr", () => ({
       return { data: { results: agents }, isLoading: false, mutate: vi.fn() };
     }
     if (key?.includes("/boards")) {
-      return { data: { results: [] }, isLoading: false, mutate: vi.fn() };
+      return { data: { results: boards }, isLoading: false, mutate: vi.fn() };
     }
     return { data: undefined, isLoading: false, mutate: vi.fn() };
   },
@@ -62,35 +63,65 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-async function renderEventTriggerForm() {
-  render(<TriggerForm orgId="org1" workspaceId="ws1" />);
-  await waitFor(() => expect(screen.getByText("Agent")).toBeInTheDocument());
-
-  // Trigger Type is a Radix Select defaulting to "Cron" — open it and pick
-  // "Event" the same way provider-form's tests drive Radix Select controls.
-  const triggerTypeSelect = screen
+/** Picks an option on the Radix Select currently reading `from`. */
+async function selectOption(from: string, option: string) {
+  const combobox = screen
     .getAllByRole("combobox")
-    .find((el) => el.textContent === "Cron")!;
+    .find((el) => el.textContent === from)!;
   const scrollIntoView = Element.prototype.scrollIntoView;
   Element.prototype.scrollIntoView = vi.fn();
   try {
-    fireEvent.keyDown(triggerTypeSelect, { key: "ArrowDown" });
-    const event = await screen.findByRole("option", { name: "Event" });
-    fireEvent.keyDown(event, { key: "Enter" });
+    fireEvent.keyDown(combobox, { key: "ArrowDown" });
+    const item = await screen.findByRole("option", { name: option });
+    fireEvent.keyDown(item, { key: "Enter" });
   } finally {
     Element.prototype.scrollIntoView = scrollIntoView;
   }
 }
 
+async function renderEventTriggerForm() {
+  render(<TriggerForm orgId="org1" workspaceId="ws1" />);
+  await waitFor(() => expect(screen.getByText("Agent")).toBeInTheDocument());
+
+  // Trigger Type is a Radix Select defaulting to "Cron".
+  await selectOption("Cron", "Event");
+}
+
+describe("TriggerForm — board and column filters", () => {
+  it("hides the column filter until a board is selected", async () => {
+    await renderEventTriggerForm();
+
+    fireEvent.click(screen.getByLabelText("card.updated"));
+
+    expect(screen.queryByText("Only cards in this Column")).toBeNull();
+
+    await selectOption("All boards", "Board One");
+
+    expect(screen.getByText("Only cards in this Column")).toBeInTheDocument();
+  });
+});
+
 describe("TriggerForm — changed-fields filter", () => {
   it("hides the changed-fields filter until card.updated is selected", async () => {
     await renderEventTriggerForm();
 
-    expect(screen.queryByText("Filter by Changed Fields")).toBeNull();
+    expect(
+      screen.queryByText("Only when these fields change (card.updated)"),
+    ).toBeNull();
 
     fireEvent.click(screen.getByLabelText("card.updated"));
 
-    expect(screen.getByText("Filter by Changed Fields")).toBeInTheDocument();
+    expect(
+      screen.getByText("Only when these fields change (card.updated)"),
+    ).toBeInTheDocument();
+  });
+
+  it("does not offer Column as a changed field — card.moved is that event", async () => {
+    await renderEventTriggerForm();
+
+    fireEvent.click(screen.getByLabelText("card.updated"));
+
+    expect(screen.queryByLabelText("Column")).toBeNull();
   });
 
   it("clears the changed-fields filter when card.updated is deselected", async () => {

@@ -105,7 +105,10 @@ export function dispatchEvent(
           const eventData = data as Record<string, unknown>;
           if (eventData.columnId !== triggerConfig.filters.columnId) continue;
         }
-        if (triggerConfig.filters?.changedFields) {
+        // Only `card.updated` reports a changed-fields diff, so the filter is
+        // scoped to it: a `card.moved`/`card.created`/`card.deleted` selected
+        // alongside it keeps firing rather than being silently suppressed.
+        if (event === "card.updated" && triggerConfig.filters?.changedFields) {
           const eventData = data as Record<string, unknown>;
           const changedFields = eventData.changedFields;
           const filterFields = triggerConfig.filters.changedFields;

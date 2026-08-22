@@ -115,7 +115,6 @@ const CHANGED_FIELD_OPTIONS = [
   { value: "assignees", label: "Assignees" },
   { value: "dueDate", label: "Due date" },
   { value: "priority", label: "Priority" },
-  { value: "columnId", label: "Column" },
 ] as const;
 
 const buildCronExpression = (
@@ -1064,9 +1063,9 @@ const TriggerForm = ({
           {/* Board and column filters for card events */}
           {triggerType === "event" &&
             selectedEvents.some((e) => e.startsWith("card.")) && (
-              <div className="flex flex-col sm:flex-row gap-4">
-                <Field className="flex-1">
-                  <FieldLabel>Filter by Board</FieldLabel>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <Field>
+                  <FieldLabel>Only cards in this Board</FieldLabel>
                   <Select
                     value={filterBoardId || "__all__"}
                     onValueChange={(value) => {
@@ -1087,35 +1086,31 @@ const TriggerForm = ({
                       ))}
                     </SelectContent>
                   </Select>
-                  <FieldDescription>
-                    Optionally restrict card events to a specific board.
-                  </FieldDescription>
                 </Field>
-                <Field className="flex-1">
-                  <FieldLabel>Filter by Column</FieldLabel>
-                  <Select
-                    value={filterColumnId || "__all__"}
-                    onValueChange={(value) =>
-                      setFilterColumnId(value === "__all__" ? "" : value)
-                    }
-                    disabled={isSubmitting || !filterBoardId}
-                  >
-                    <SelectTrigger disabled={isSubmitting || !filterBoardId}>
-                      <SelectValue placeholder="All columns" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__all__">All columns</SelectItem>
-                      {columns.map((col) => (
-                        <SelectItem key={col.id} value={col.id}>
-                          {col.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <FieldDescription>
-                    Optionally restrict card events to a specific column.
-                  </FieldDescription>
-                </Field>
+                {filterBoardId && (
+                  <Field>
+                    <FieldLabel>Only cards in this Column</FieldLabel>
+                    <Select
+                      value={filterColumnId || "__all__"}
+                      onValueChange={(value) =>
+                        setFilterColumnId(value === "__all__" ? "" : value)
+                      }
+                      disabled={isSubmitting}
+                    >
+                      <SelectTrigger disabled={isSubmitting}>
+                        <SelectValue placeholder="All columns" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__all__">All columns</SelectItem>
+                        {columns.map((col) => (
+                          <SelectItem key={col.id} value={col.id}>
+                            {col.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                )}
               </div>
             )}
 
@@ -1123,20 +1118,14 @@ const TriggerForm = ({
           {triggerType === "event" &&
             selectedEvents.includes("card.updated") && (
               <Field>
-                <FieldLabel>Filter by Changed Fields</FieldLabel>
+                <FieldLabel>
+                  Only when these fields change (card.updated)
+                </FieldLabel>
                 <FieldDescription>
                   Only fire on a card update when one of these fields actually
-                  changed. Leave all off to fire on any change.
-                  {selectedEvents.some(
-                    (e) => e !== "card.updated" && e.startsWith("card."),
-                  ) && (
-                    <>
-                      {" "}
-                      Setting this also stops the other selected card events
-                      from firing, since only card.updated reports changed
-                      fields.
-                    </>
-                  )}
+                  changed. Leave all off to fire on any change. Other selected
+                  events are unaffected — to fire on a column change, select
+                  card.moved.
                 </FieldDescription>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-2">
                   {CHANGED_FIELD_OPTIONS.map((field) => (
