@@ -3,7 +3,7 @@ import { cn } from "@/lib/utils";
 
 /**
  * The muted warning row for a per-turn notice about how an answer was produced
- * or how it ended — under a Chat reply, under a delegated sub-agent response,
+ * or how it ended — under a Chat reply, under a delegated Sub-Agent response,
  * and in Trigger run history.
  *
  * It carries the output-ceiling notice and the search-was-unavailable notice,
@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils";
  *
  * The row is shared; the wording is not. Each surface owns its own sentence as
  * an exported constant its tests assert against — the ceiling notices name
- * their subject ("Response", "Sub-agent response", "Run") per surface.
+ * their subject ("Response", "Sub-Agent response", "Run") per surface.
  */
 export const TurnNotice = ({
   children,
