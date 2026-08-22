@@ -108,7 +108,7 @@ const specializedToolMatchers: Array<(part: MessagePart) => boolean> = [
  * that no specialised renderer above has already claimed.
  *
  * Exported so a test can assert the exclusion directly: a plugin web-search
- * or sub-agent part must never also satisfy this, or its raw JSON body would
+ * or Sub-Agent part must never also satisfy this, or its raw JSON body would
  * repeat what the specialised card (and, for search, the Sources row above
  * the parts loop) already shows.
  */
