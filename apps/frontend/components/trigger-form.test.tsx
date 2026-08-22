@@ -86,11 +86,23 @@ describe("TriggerForm — changed-fields filter", () => {
   it("hides the changed-fields filter until card.updated is selected", async () => {
     await renderEventTriggerForm();
 
-    expect(screen.queryByText("Filter by Changed Fields")).toBeNull();
+    expect(
+      screen.queryByText("Only when these fields change (card.updated)"),
+    ).toBeNull();
 
     fireEvent.click(screen.getByLabelText("card.updated"));
 
-    expect(screen.getByText("Filter by Changed Fields")).toBeInTheDocument();
+    expect(
+      screen.getByText("Only when these fields change (card.updated)"),
+    ).toBeInTheDocument();
+  });
+
+  it("does not offer Column as a changed field — card.moved is that event", async () => {
+    await renderEventTriggerForm();
+
+    fireEvent.click(screen.getByLabelText("card.updated"));
+
+    expect(screen.queryByLabelText("Column")).toBeNull();
   });
 
   it("clears the changed-fields filter when card.updated is deselected", async () => {

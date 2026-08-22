@@ -54,29 +54,27 @@ Trigger** to run once and then disable itself.
 
 For an Event trigger, select one or more **Events** (e.g. `card.created`,
 `card.updated`, `card.moved`, `notification.created`). Optionally narrow with
-**Filter by Board** and **Filter by Column** so the Trigger only fires for
-activity on a specific board.
+**Only cards in this Board** and **Only cards in this Column** so the Trigger
+only fires for activity in one place.
 
 `card.moved` fires only when a card's column actually changes, so a column
 filter on it matches the card's **destination** column — use it to run an
 Agent whenever a card enters a specific column, without re-firing on later
 edits to cards already sitting there.
 
-When `card.updated` is among the selected events, a **Filter by Changed
-Fields** control appears — pick one or more card attributes (Title, Body,
-Labels, Assignees, Due date, Priority, Column) and the Trigger fires only when
-one of them actually changed, not on every write to a matching card. It
-composes with the Board and Column filters: every filter set on the Trigger
-must match. See [Webhooks: the
+When `card.updated` is among the selected events, an **Only when these fields
+change** control appears — pick one or more card attributes (Title, Body,
+Labels, Assignees, Due date, Priority) and `card.updated` fires only when one
+of them actually changed, not on every write to a matching card. Leave them all
+off to fire on any change. It composes with the Board and Column filters: every
+filter set on the Trigger must match. See [Webhooks: the
 payload](/building-with-platypus/webhooks#the-payload) for what counts as a
 changed field.
 
-<Callout type="warning">
-  This filter only applies to `card.updated` — `card.created`, `card.moved`,
-  and `card.deleted` carry no changed fields, so a Trigger that also
-  subscribes to one of those alongside a Changed Fields filter never fires for
-  it. Give a Trigger that needs both its own copy without the filter.
-</Callout>
+The control applies to `card.updated` alone. Other events you selected are
+unaffected — a Trigger on both `card.moved` and `card.updated` still fires on
+every move, whatever fields the control names. To act on a column change, use
+`card.moved`: it is the event for that, and it carries the previous column.
 
 ### Finish
 
