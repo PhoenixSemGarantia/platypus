@@ -87,6 +87,41 @@ export type ChatMessageMetadata = {
      */
     outputTokens: number | null;
   } | null;
+  /**
+   * The turn's billed Token usage (`CONTEXT.md`): the vendor's reported input
+   * and output counts folded across every model call the turn made. A sum,
+   * legitimately, because each call is billed separately — distinct from
+   * `contextOccupancy`, which is a last value and means something else
+   * entirely (issue #354).
+   *
+   * Absent where the Provider reported no usage on any step of the turn;
+   * nothing is estimated. Never needs erasing: unlike occupancy, it only ever
+   * grows as the turn's steps report in, so a later step cannot make it stale.
+   */
+  tokenUsage?: {
+    inputTokens: number;
+    outputTokens: number;
+  };
+  /**
+   * How long Turn resolution took, in whole milliseconds, before the model
+   * request was sent. Surfaced to Users as **Preparation** (`CONTEXT.md`).
+   *
+   * Known before the stream exists — Turn resolution has already finished by
+   * the time this message starts — so it rides `start` the same way `agentId`
+   * does, and survives a turn cancelled before any model content arrives.
+   */
+  prepDurationMs?: number;
+  /**
+   * How long the Drive ran, in whole milliseconds, from the model request
+   * being sent to the moment this reading was taken. Surfaced to Users as
+   * **Model** (`CONTEXT.md`); tool execution happens inside this phase and is
+   * reported separately, nested, from `toolDurations`.
+   *
+   * Emitted per step, last one standing, for the same reason `contextOccupancy`
+   * is: the terminal `finish` part never arrives on an aborted run, and a
+   * cancelled turn is exactly when someone wants to know how long it ran.
+   */
+  modelDurationMs?: number;
 };
 
 /**

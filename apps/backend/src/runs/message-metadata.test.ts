@@ -379,6 +379,199 @@ describe("tool durations over a real multi-step stream", () => {
  * been sent by the time a turn is cancelled. A `finish`-derived flag would be
  * absent on exactly the turns a reader most needs it on.
  */
+/**
+ * Token usage (issue #354), driven through the same real multi-step stream as
+ * Context occupancy above — the two must diverge on exactly this fixture, or
+ * the panel is showing occupancy twice under two names.
+ */
+describe("Token usage over a real multi-step stream", () => {
+  const runTokenUsageTurn = async () => {
+    const result = streamText({
+      model: mockModel([
+        toolCallStep(usage(1_000, 30)),
+        answerStep(usage(4_200, 70)),
+      ]),
+      prompt: "Ping the service and tell me what it said.",
+      tools: { ping },
+      stopWhen: [stepCountIs(5)],
+    });
+
+    return {
+      message: await lastSnapshot(
+        result.toUIMessageStream({
+          messageMetadata: createMessageMetadata({ agentId: "agent-1" }),
+        }),
+      ),
+    };
+  };
+
+  it("folds input and output tokens across every step, not the last one", async () => {
+    const { message } = await runTokenUsageTurn();
+
+    // 1,000 + 4,200 and 30 + 70 — the sum, which is a different number from
+    // Context occupancy's 4,200 / 70 on this same fixture.
+    expect(message?.metadata?.tokenUsage).toEqual({
+      inputTokens: 5_200,
+      outputTokens: 100,
+    });
+  });
+
+  it("keeps the folded sum from a turn cancelled mid-stream", async () => {
+    const controller = new AbortController();
+    const result = streamText({
+      model: mockModel([
+        toolCallStep(usage(1_000, 30)),
+        answerStep(usage(4_200, 70)),
+      ]),
+      prompt: "Ping the service and tell me what it said.",
+      tools: { ping },
+      stopWhen: [stepCountIs(5)],
+      abortSignal: controller.signal,
+      onStepFinish: () => controller.abort(),
+    });
+
+    const message = await lastSnapshot(
+      result.toUIMessageStream({
+        messageMetadata: createMessageMetadata({ agentId: "agent-1" }),
+      }),
+    );
+
+    expect(message?.metadata?.tokenUsage).toEqual({
+      inputTokens: 1_000,
+      outputTokens: 30,
+    });
+  });
+
+  it("records no Token usage when the Provider reports none at all", async () => {
+    const result = streamText({
+      model: mockModel([answerStep(NO_USAGE)]),
+      prompt: "Hi.",
+    });
+
+    const message = await lastSnapshot(
+      result.toUIMessageStream({
+        messageMetadata: createMessageMetadata({ agentId: "agent-1" }),
+      }),
+    );
+
+    expect(message?.metadata).not.toHaveProperty("tokenUsage");
+  });
+});
+
+/**
+ * Preparation and Model durations (issue #354) — the two-phase wall clock the
+ * panel shows instead of first-token latency. A fake clock makes the
+ * assertions exact rather than "at least however long the test took".
+ */
+describe("Preparation and Model durations", () => {
+  const answerOnly = () =>
+    streamText({
+      model: mockModel([answerStep(usage(1_000, 30))]),
+      prompt: "Hi.",
+    });
+
+  it("stamps Preparation on `start`, known before the model was ever called", async () => {
+    const message = await lastSnapshot(
+      answerOnly().toUIMessageStream({
+        messageMetadata: createMessageMetadata({
+          agentId: "agent-1",
+          prepDurationMs: 842,
+        }),
+      }),
+    );
+
+    expect(message?.metadata?.prepDurationMs).toBe(842);
+  });
+
+  it("says nothing about Preparation when the drive never measured one", async () => {
+    const message = await lastSnapshot(
+      answerOnly().toUIMessageStream({
+        messageMetadata: createMessageMetadata({ agentId: "agent-1" }),
+      }),
+    );
+
+    expect(message?.metadata).not.toHaveProperty("prepDurationMs");
+  });
+
+  it("computes Model duration as the elapsed time since the Drive started, last step standing", async () => {
+    // Each call to the fake clock advances by 500ms; two steps means two
+    // `finish-step` reads, at 0 and 500ms elapsed. The message keeps
+    // whichever one was read last — the second step's, 500.
+    let calls = 0;
+    const now = () => 1_000 + calls++ * 500;
+
+    const result = streamText({
+      model: mockModel([
+        toolCallStep(usage(1_000, 30)),
+        answerStep(usage(4_200, 70)),
+      ]),
+      prompt: "Ping the service and tell me what it said.",
+      tools: { ping },
+      stopWhen: [stepCountIs(5)],
+    });
+
+    const message = await lastSnapshot(
+      result.toUIMessageStream({
+        messageMetadata: createMessageMetadata({
+          agentId: "agent-1",
+          driveStartMs: 1_000,
+          now,
+        }),
+      }),
+    );
+
+    expect(message?.metadata?.modelDurationMs).toBe(500);
+  });
+
+  it("keeps the last Model duration reading from a turn cancelled mid-stream", async () => {
+    const controller = new AbortController();
+    let calls = 0;
+    const now = () => 1_000 + calls++ * 500;
+
+    const result = streamText({
+      model: mockModel([
+        toolCallStep(usage(1_000, 30)),
+        answerStep(usage(4_200, 70)),
+      ]),
+      prompt: "Ping the service and tell me what it said.",
+      tools: { ping },
+      stopWhen: [stepCountIs(5)],
+      abortSignal: controller.signal,
+      // Cancelled the moment the first step lands, so the turn ends with only
+      // that step's `finish-step` reading taken and no terminal finish part.
+      onStepFinish: () => controller.abort(),
+    });
+
+    const message = await lastSnapshot(
+      result.toUIMessageStream({
+        messageMetadata: createMessageMetadata({
+          agentId: "agent-1",
+          driveStartMs: 1_000,
+          now,
+        }),
+      }),
+    );
+
+    expect(message?.parts).not.toContainEqual(
+      expect.objectContaining({ type: "text" }),
+    );
+    // Only the first step's `finish-step` was ever read (0ms elapsed) before
+    // the abort — proof that a reading exists at all even though the turn
+    // never reached a terminal finish.
+    expect(message?.metadata?.modelDurationMs).toBe(0);
+  });
+
+  it("says nothing about Model duration when the drive never measured a start", async () => {
+    const message = await lastSnapshot(
+      answerOnly().toUIMessageStream({
+        messageMetadata: createMessageMetadata({ agentId: "agent-1" }),
+      }),
+    );
+
+    expect(message?.metadata).not.toHaveProperty("modelDurationMs");
+  });
+});
+
 describe("search availability over a real stream", () => {
   const answerOnly = () =>
     streamText({
