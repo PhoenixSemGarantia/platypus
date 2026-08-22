@@ -1086,9 +1086,6 @@ const TriggerForm = ({
                       ))}
                     </SelectContent>
                   </Select>
-                  <FieldDescription>
-                    Optionally restrict card events to a specific board.
-                  </FieldDescription>
                 </Field>
                 <Field className="flex-1">
                   <FieldLabel>Only cards in this Column</FieldLabel>
@@ -1111,9 +1108,9 @@ const TriggerForm = ({
                       ))}
                     </SelectContent>
                   </Select>
-                  <FieldDescription>
-                    Optionally restrict card events to a specific column.
-                  </FieldDescription>
+                  {!filterBoardId && (
+                    <FieldDescription>Pick a Board first.</FieldDescription>
+                  )}
                 </Field>
               </div>
             )}
