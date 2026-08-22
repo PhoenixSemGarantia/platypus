@@ -1063,8 +1063,8 @@ const TriggerForm = ({
           {/* Board and column filters for card events */}
           {triggerType === "event" &&
             selectedEvents.some((e) => e.startsWith("card.")) && (
-              <div className="flex flex-col sm:flex-row gap-4">
-                <Field className="flex-1">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <Field>
                   <FieldLabel>Only cards in this Board</FieldLabel>
                   <Select
                     value={filterBoardId || "__all__"}
@@ -1087,31 +1087,30 @@ const TriggerForm = ({
                     </SelectContent>
                   </Select>
                 </Field>
-                <Field className="flex-1">
-                  <FieldLabel>Only cards in this Column</FieldLabel>
-                  <Select
-                    value={filterColumnId || "__all__"}
-                    onValueChange={(value) =>
-                      setFilterColumnId(value === "__all__" ? "" : value)
-                    }
-                    disabled={isSubmitting || !filterBoardId}
-                  >
-                    <SelectTrigger disabled={isSubmitting || !filterBoardId}>
-                      <SelectValue placeholder="All columns" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__all__">All columns</SelectItem>
-                      {columns.map((col) => (
-                        <SelectItem key={col.id} value={col.id}>
-                          {col.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {!filterBoardId && (
-                    <FieldDescription>Pick a Board first.</FieldDescription>
-                  )}
-                </Field>
+                {filterBoardId && (
+                  <Field>
+                    <FieldLabel>Only cards in this Column</FieldLabel>
+                    <Select
+                      value={filterColumnId || "__all__"}
+                      onValueChange={(value) =>
+                        setFilterColumnId(value === "__all__" ? "" : value)
+                      }
+                      disabled={isSubmitting}
+                    >
+                      <SelectTrigger disabled={isSubmitting}>
+                        <SelectValue placeholder="All columns" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__all__">All columns</SelectItem>
+                        {columns.map((col) => (
+                          <SelectItem key={col.id} value={col.id}>
+                            {col.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                )}
               </div>
             )}
 
