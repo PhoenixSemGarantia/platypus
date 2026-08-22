@@ -126,6 +126,33 @@ const inlineCodeSpans = (content: string): Located[] => {
   return spans;
 };
 
+/**
+ * Every fenced block on the page, as raw text with its opening line number.
+ *
+ * The counterpart to `withoutCodeFences`: that one throws the fences away
+ * because a snippet is not a claim, and this one keeps them for the rare
+ * snippet that is — text the reader is told the product produces verbatim.
+ */
+const fencedBlocks = (content: string): Located[] => {
+  const blocks: Located[] = [];
+  let open: number | null = null;
+  let body: string[] = [];
+  content.split("\n").forEach((line, index) => {
+    if (!/^\s*```/.test(line)) {
+      if (open !== null) body.push(line);
+      return;
+    }
+    if (open === null) {
+      open = index + 1;
+      body = [];
+    } else {
+      blocks.push({ text: body.join("\n"), line: open });
+      open = null;
+    }
+  });
+  return blocks;
+};
+
 type MarkdownTable = { line: number; header: string[]; rows: string[][] };
 
 const splitRow = (line: string): string[] =>
@@ -430,6 +457,107 @@ describe("webhook events", () => {
             `That event never fires.`,
         );
       }
+    }
+    expectNoViolations(violations);
+  });
+});
+
+// --- trigger event payloads --------------------------------------------------
+
+/**
+ * The Triggers page reproduces the prefix an Event trigger's Agent actually
+ * receives, because there is no other way for a Workspace Owner to learn the
+ * shape short of firing an event and reading the run. That makes the prefix a
+ * quoted string with one authoritative source, so pin it: the docs show a
+ * worked example, and the example's scaffolding has to be the scaffolding the
+ * service builds.
+ */
+const TRIGGER_PREFIX_SOURCE = "apps/backend/src/services/trigger-execution.ts";
+
+/**
+ * The fixed text of the event prefix template, in order — the parts of the
+ * template literal that are not interpolations, with escapes resolved.
+ */
+const parseEventPrefixSegments = (): string[] => {
+  const source = readRepoFile(TRIGGER_PREFIX_SOURCE);
+  const template = source.match(/effectiveInstruction\s*=[\s\S]*?`([^`]*)`/);
+  if (!template) {
+    throw new Error(
+      `No \`effectiveInstruction = \` template literal in ${TRIGGER_PREFIX_SOURCE}. ` +
+        `The prefix moved or stopped being a template; re-anchor this test.`,
+    );
+  }
+  return template[1]
+    .split(/\$\{[^}]*\}/)
+    .map((segment) => segment.replace(/\\n/g, "\n").trim())
+    .filter((segment) => segment.length > 0);
+};
+
+describe("trigger event payloads", () => {
+  const page = "building-with-platypus/triggers.mdx";
+  const content = readDoc(page);
+  const segments = parseEventPrefixSegments();
+
+  it("parsed the prefix template", () => {
+    expect(
+      segments.length,
+      `Parsed no fixed text out of the event prefix in ${TRIGGER_PREFIX_SOURCE}. ` +
+        `A test that checks nothing is worse than no test; re-anchor it.`,
+    ).toBeGreaterThan(0);
+  });
+
+  it("shows the prefix the service builds", () => {
+    const examples = fencedBlocks(content).filter((block) =>
+      /^Event: \S/.test(block.text),
+    );
+    expect(
+      examples.length,
+      `apps/docs/content/${page} has ${examples.length} fenced blocks starting with ` +
+        `"Event: ". This check reads one — it is the worked example of the prefix ` +
+        `built in ${TRIGGER_PREFIX_SOURCE}.`,
+    ).toBe(1);
+
+    const example = examples[0];
+    const violations: string[] = [];
+    for (const segment of segments) {
+      if (!example.text.includes(segment)) {
+        violations.push(
+          `apps/docs/content/${page}:${example.line} does not contain ${JSON.stringify(segment)}, ` +
+            `but ${TRIGGER_PREFIX_SOURCE} puts it in the prefix every Event trigger sends.\n` +
+            `An Instruction written against the wrong prefix refers to text the Agent never sees.`,
+        );
+      }
+    }
+    const named = example.text.match(/^Event: (\S+)/);
+    const events: readonly string[] = webhookEventSchema.options;
+    if (named && !events.includes(named[1])) {
+      violations.push(
+        `apps/docs/content/${page}:${example.line} works the example through \`${named[1]}\`, ` +
+          `which is not in packages/schemas/index.ts (webhookEventSchema).\n` +
+          `That event never fires.`,
+      );
+    }
+    expectNoViolations(violations);
+  });
+
+  it("names only events that exist", () => {
+    const namespaces = new Set(
+      webhookEventSchema.options.map((event) => event.split(".")[0]),
+    );
+    const looksLikeEvent = new RegExp(
+      `^(?:${[...namespaces].join("|")})\\.[A-Za-z.]+$`,
+    );
+    const events: readonly string[] = webhookEventSchema.options;
+
+    const violations: string[] = [];
+    for (const span of inlineCodeSpans(content)) {
+      if (!looksLikeEvent.test(span.text)) continue;
+      if (events.includes(span.text)) continue;
+      violations.push(
+        `apps/docs/content/${page}:${span.line} mentions \`${span.text}\`, which is not in ` +
+          `packages/schemas/index.ts (webhookEventSchema).\n` +
+          `A Trigger cannot subscribe to an event that never fires.`,
+      );
     }
     expectNoViolations(violations);
   });
