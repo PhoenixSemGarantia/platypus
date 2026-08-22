@@ -129,15 +129,7 @@ Event Data:
   "columnId": "9zHcN3eW1qoP5rUaB7dKt",
   "title": "Review onboarding flow",
   "body": "Check the new sign-up steps and confirm the copy.",
-  "labelIds": [],
-  "assignees": [],
-  "dueDate": null,
-  "priority": "none",
-  "position": 1024,
-  "createdByUserId": "x6Ym2Qp9LrT4nW8sVdB1k",
-  "createdByAgentId": null,
-  "createdAt": "2026-06-26T09:30:00.000Z",
-  "updatedAt": "2026-06-26T09:31:30.000Z",
+  ... the rest of the card ...
   "changedFields": ["body"]
 }
 ---
@@ -165,10 +157,9 @@ belongs to. Every event's shape is written up once, on the Webhooks page: see
   Trigger, or write the Instruction to cope with both.
 </Callout>
 
-The runs view names the event type each run fired for, so you can confirm which
-shape reached the Agent — it does not show the payload itself. To read a real
-one, point a [Webhook](/building-with-platypus/webhooks) at the same event and
-inspect the delivery.
+Run history does not show the payload itself. To read a real one, point a
+[Webhook](/building-with-platypus/webhooks) at the same event and inspect the
+delivery — the `data` object it sends is what the Trigger received.
 
 ## Review run history
 

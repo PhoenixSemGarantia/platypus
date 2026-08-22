@@ -126,6 +126,33 @@ const inlineCodeSpans = (content: string): Located[] => {
   return spans;
 };
 
+/**
+ * Every fenced block on the page, as raw text with its opening line number.
+ *
+ * The counterpart to `withoutCodeFences`: that one throws the fences away
+ * because a snippet is not a claim, and this one keeps them for the rare
+ * snippet that is — text the reader is told the product produces verbatim.
+ */
+const fencedBlocks = (content: string): Located[] => {
+  const blocks: Located[] = [];
+  let open: number | null = null;
+  let body: string[] = [];
+  content.split("\n").forEach((line, index) => {
+    if (!/^\s*```/.test(line)) {
+      if (open !== null) body.push(line);
+      return;
+    }
+    if (open === null) {
+      open = index + 1;
+      body = [];
+    } else {
+      blocks.push({ text: body.join("\n"), line: open });
+      open = null;
+    }
+  });
+  return blocks;
+};
+
 type MarkdownTable = { line: number; header: string[]; rows: string[][] };
 
 const splitRow = (line: string): string[] =>
@@ -464,27 +491,6 @@ const parseEventPrefixSegments = (): string[] => {
     .split(/\$\{[^}]*\}/)
     .map((segment) => segment.replace(/\\n/g, "\n").trim())
     .filter((segment) => segment.length > 0);
-};
-
-/** Every fenced block on the page, as raw text with its opening line number. */
-const fencedBlocks = (content: string): Located[] => {
-  const blocks: Located[] = [];
-  let open: number | null = null;
-  let body: string[] = [];
-  content.split("\n").forEach((line, index) => {
-    if (!/^\s*```/.test(line)) {
-      if (open !== null) body.push(line);
-      return;
-    }
-    if (open === null) {
-      open = index + 1;
-      body = [];
-    } else {
-      blocks.push({ text: body.join("\n"), line: open });
-      open = null;
-    }
-  });
-  return blocks;
 };
 
 describe("trigger event payloads", () => {
