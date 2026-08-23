@@ -154,3 +154,55 @@ from them that the original decision left open or silent.
   turn's own first step has reported anything. Dropping the output-token figure
   from what is persisted would silently disable clearing on exactly the call it
   is most needed on, with no error to say so.
+
+## Notes: the composer meter shows Projected occupancy
+
+Added when the Chat meter was corrected to read forward. The
+Decision above is unchanged — Context occupancy is still one call's input count,
+measured and never estimated — and this records only which quantity the meter
+renders.
+
+- **The meter was showing the wrong one of two right numbers.** It rendered
+  `contextOccupancy.inputTokens`: what the last call was sent. But it sits in the
+  composer, where the question is what the _next_ call will be sent, and that
+  includes the reply the last call produced, because the Transcript is re-sent in
+  full. On a short turn the gap is the whole assistant message — 222 shown
+  against 340 actually queued up.
+- **Nothing new is measured.** The figure is the last reading's input plus its
+  output, both vendor-reported. The derivation now has a name (**Projected
+  occupancy**, `CONTEXT.md`) and one implementation (`nextTurnOccupancy` in
+  `packages/schemas`) rather than being open-coded where each consumer needed it.
+- **"Derivable exactly" above is too strong, and measurement says so.** Three
+  consecutive turns on a reasoning model projected 275 against an actual 260, and
+  855 against an actual 946. Two causes pull opposite ways. A thinking turn bills
+  its reasoning tokens as output and then does NOT resend them — the first turn
+  there carried a 272-character `reasoning` part alongside 265 characters of
+  text, and only the text came back — so the projection reads HIGH by whatever
+  the model thought. And it cannot include the next message, which is the draft
+  nothing local can count, so it reads LOW by however much someone types. The
+  figure is an upper-ish bound on the conversation so far, not an arithmetic
+  identity. It is still far closer than the input-only figure it replaced, which
+  was low by 38% on that same turn, and the reasoning-token error is in the
+  conservative direction — the same direction an under-declared window already
+  errs in. A future ADR wanting an exact projection would need the vendor to
+  report resent-token counts, which none does.
+- **This closes a real divergence, not just a cosmetic one.** Tool-result
+  clearing's backend gate for a turn's first call already summed input and output
+  (`initialOccupancyFrom`); the frontend mirror that renders results as cleared
+  was fed the meter's input-only figure. Around the 0.7 threshold the two
+  straddled — with a 16k window, 11,000 in and 500 out reads 0.69 to the browser
+  and 0.72 to the server — so the UI could show results as live that the model
+  was no longer being given. The mirror's own comment claimed this could not
+  happen. Both now call the shared derivation.
+- **"One turn stale" becomes "one draft stale".** The Consequences above note the
+  meter cannot account for an unsent draft, and that is still true and still
+  unfixable here — counting tokens locally is the estimate this ADR rejects. What
+  it no longer omits is the last reply. The user-facing docs previously told
+  readers not to read the meter forward; that instruction was correct for the old
+  numerator and is now wrong, so it changed with the code.
+- **A Trigger run's stats deliberately do NOT change.** That page reports a
+  finished run retrospectively, where the last call's input count is the honest
+  figure and no projection is meaningful. `RunStats.contextOccupancy` is also a
+  bare integer carrying no output count, so the derivation is not available there
+  even in principle. Two surfaces therefore show different quantities on purpose,
+  and the glossary names both so the difference is not read as a bug.
