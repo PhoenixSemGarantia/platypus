@@ -18,6 +18,57 @@ export const isTruncatedByTokenLimit = (
   finishReason: string | undefined,
 ): boolean => finishReason === "length";
 
+/**
+ * The model meant to keep going: it ended the step by asking for tool calls, so
+ * there was more of the turn left to run.
+ *
+ * On a *terminal* finish that can only happen because something stopped the
+ * loop — every Tool Platypus serves executes server-side, so no turn ends
+ * legitimately waiting on a caller to run one. Necessary but not sufficient for
+ * naming a step-ceiling stop: the no-progress detector halts an unattended run
+ * on this same reason, below the ceiling, so the step count has to agree.
+ *
+ * A named sibling of the predicate above rather than a string comparison at the
+ * emission point: both readings of a finish reason live in one module, where a
+ * change to what the SDK reports has one place to be made. Module-private
+ * because nothing outside wants half the rule — callers take
+ * {@link stoppedAtStepCeiling}, which is the whole of it.
+ */
+const intendedToContinue = (finishReason: string | undefined): boolean =>
+  finishReason === "tool-calls";
+
+/**
+ * The whole two-part rule for "the step ceiling stopped this loop", in one
+ * place: the model asked to continue, and the turn had no steps left to give it.
+ *
+ * Both halves are required and neither is sufficient. The finish reason alone
+ * mislabels any other stop condition that halts a tool loop — a no-progress
+ * abort ends on the same reason, below the ceiling. The step count alone flags a
+ * turn whose last allowed step happened to be its answer, which was never cut
+ * short.
+ *
+ * Stated once because two paths read it from different sources: the streamed
+ * extractor counts the per-step finish parts it sees, and the headless drive
+ * reads the step count off the computed statistics. A rule written twice is a
+ * rule that drifts. Deciding a *tripped no-progress detector* owns the stop
+ * instead is the caller's — this predicate never sees one.
+ *
+ * `stepCeiling` is optional so a caller with no ceiling to give reports nothing
+ * rather than guessing one.
+ */
+export const stoppedAtStepCeiling = ({
+  finishReason,
+  steps,
+  stepCeiling,
+}: {
+  finishReason: string | undefined;
+  steps: number;
+  stepCeiling?: number;
+}): boolean =>
+  stepCeiling !== undefined &&
+  steps >= stepCeiling &&
+  intendedToContinue(finishReason);
+
 const describeValidationFailure = (error: InvalidToolInputError): string => {
   const issues = findIssues(error.cause);
   if (issues) return formatIssues(issues);

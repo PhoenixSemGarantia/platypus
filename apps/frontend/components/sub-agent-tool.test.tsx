@@ -10,7 +10,11 @@ vi.mock("streamdown", () => ({
   ),
 }));
 
-import { SubAgentTool, SUB_AGENT_CUT_SHORT_NOTICE } from "./sub-agent-tool";
+import {
+  SubAgentTool,
+  SUB_AGENT_CUT_SHORT_NOTICE,
+  SUB_AGENT_STEP_LIMIT_NOTICE,
+} from "./sub-agent-tool";
 
 const delegateCall = (toolMetadata?: Record<string, unknown>): ToolUIPart =>
   ({
@@ -85,5 +89,58 @@ describe("SubAgentTool cut-short marker", () => {
 
     expect(screen.getByText("It shipped in March.")).toBeInTheDocument();
     expect(screen.queryByText(SUB_AGENT_CUT_SHORT_NOTICE)).toBeNull();
+  });
+});
+
+// Issue #540. The delegate's other way of coming back unfinished: its loop ran
+// out of steps. On the card that is the same class of fact as the one above, and
+// gets the same row with its own wording.
+describe("SubAgentTool step-limit marker", () => {
+  const stepLimitedDelegateCall = (
+    entries: Array<Record<string, unknown>> = [],
+  ): ToolUIPart =>
+    ({
+      type: "tool-delegateToResearchBot",
+      toolCallId: "call-1",
+      state: "output-available",
+      input: { task: "Find the release date" },
+      output: {
+        entries,
+        text: "webFetch result: 404",
+        stoppedAtStepLimit: true,
+      },
+    }) as unknown as ToolUIPart;
+
+  const renderExpanded = (toolPart: ToolUIPart) => {
+    render(<SubAgentTool toolPart={toolPart} />);
+    fireEvent.click(screen.getByRole("button"));
+  };
+
+  it("marks a response whose loop was stopped short", () => {
+    renderExpanded(stepLimitedDelegateCall());
+
+    expect(screen.getByText(SUB_AGENT_STEP_LIMIT_NOTICE)).toBeInTheDocument();
+  });
+
+  it("marks it alongside an activity log too", () => {
+    renderExpanded(
+      stepLimitedDelegateCall([
+        { type: "tool-call", toolName: "webFetch", status: "completed" },
+      ]),
+    );
+
+    expect(screen.getByText(SUB_AGENT_STEP_LIMIT_NOTICE)).toBeInTheDocument();
+  });
+
+  it("names the step limit, not the output limit", () => {
+    renderExpanded(stepLimitedDelegateCall());
+
+    expect(screen.queryByText(SUB_AGENT_CUT_SHORT_NOTICE)).toBeNull();
+  });
+
+  it("says nothing about a delegation that finished on its own", () => {
+    renderExpanded(delegateCall());
+
+    expect(screen.queryByText(SUB_AGENT_STEP_LIMIT_NOTICE)).toBeNull();
   });
 });

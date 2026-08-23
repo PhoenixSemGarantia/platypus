@@ -22,6 +22,7 @@ import {
   describeSdkError,
   formatStreamError,
   isTruncatedByTokenLimit,
+  stoppedAtStepCeiling,
 } from "./stream-error.ts";
 import { applyToolDurations } from "./tool-durations.ts";
 import type { RunStats, RunStatus } from "./types.ts";
@@ -32,8 +33,8 @@ import type { RunStats, RunStatus } from "./types.ts";
  * Every entry point that turns a prompt or a Chat history into a model answer
  * drives it from here, so the rules that hold for all of them are stated once:
  * how the invocation is assembled (step ceiling and stop conditions), which
- * terminal status the run ends with, and when the output-ceiling cutoff is
- * recorded on its stats.
+ * terminal status the run ends with, and when a cutoff — the output ceiling, or
+ * the step ceiling stopping the loop — is recorded on its stats.
  *
  * Three entry points, one per shape a caller needs:
  *
@@ -107,6 +108,9 @@ export type StreamedDriveResult = {
   failure?: string;
   /** The terminal finish hit the model's output ceiling. */
   truncated: boolean;
+  /** The model loop was stopped at its step ceiling with the model still asking
+   *  to continue, so the answer is whatever it had produced by then. */
+  stoppedAtStepLimit: boolean;
 };
 
 type TerminalDecision = {
@@ -180,6 +184,7 @@ export const failBeforeDrive = async (
     status: decision.status,
     failure: decision.failure ?? failure,
     truncated: false,
+    stoppedAtStepLimit: false,
   };
 };
 
@@ -271,6 +276,7 @@ const runStreamedDrive = (
 
   let failure: string | undefined;
   let truncated = false;
+  let stoppedAtStepLimit = false;
   let finalHandedOver = false;
   let latest: PlatypusUIMessage | undefined;
   let handoverMessages: PlatypusUIMessage[] | undefined;
@@ -309,6 +315,10 @@ const runStreamedDrive = (
       agentId,
       toolDurations,
       searchUnavailable,
+      // The ceiling the invocation's step-count stop condition is built from.
+      // The extractor sees the terminal finish reason but has no other way to
+      // know whether the loop was stopped or the model was done.
+      stepCeiling: opts.plan.maxSteps,
       prepDurationMs,
       driveStartMs,
     }),
@@ -347,18 +357,28 @@ const runStreamedDrive = (
       );
       failure ??= describeSdkError(error);
     } finally {
-      // The terminal finish attaches the cutoff marker to the folded messages it
+      // The terminal finish attaches its markers to the folded messages it
       // hands over; if that never fires (an abort before completion), the last
-      // snapshot still carries it. Either way it is recorded once, before the
-      // run's status is decided, so both the stats and the outcome agree.
-      truncated =
-        (handoverMessages?.some(
-          (m) => m.metadata?.truncatedByTokenLimit === true,
-        ) ??
-          false) ||
-        latest?.metadata?.truncatedByTokenLimit === true;
-      if (truncated) {
-        run.setStats({ ...run.stats, truncatedByTokenLimit: true });
+      // snapshot still carries them. Either way they are read once, here, before
+      // the run's status is decided, so the stats and the outcome agree.
+      const marked = (key: "truncatedByTokenLimit" | "stoppedAtStepLimit") =>
+        (handoverMessages?.some((m) => m.metadata?.[key] === true) ?? false) ||
+        latest?.metadata?.[key] === true;
+
+      truncated = marked("truncatedByTokenLimit");
+      // A no-progress abort halts the loop on the same terminal finish reason
+      // the step ceiling does, and under a ceiling as low as the detector's own
+      // threshold it can trip on the ceiling step itself. That stop already
+      // reports itself — a failed run carrying a `no_progress:` message — and is
+      // never relabelled as a step-ceiling stop.
+      stoppedAtStepLimit =
+        !noProgress?.tripped() && marked("stoppedAtStepLimit");
+      if (truncated || stoppedAtStepLimit) {
+        run.setStats({
+          ...run.stats,
+          ...(truncated ? { truncatedByTokenLimit: true as const } : {}),
+          ...(stoppedAtStepLimit ? { stoppedAtStepLimit: true as const } : {}),
+        });
       }
       const decision = decideTerminalStatus(run, {
         failure,
@@ -372,6 +392,7 @@ const runStreamedDrive = (
         latest,
         failure: decision.failure,
         truncated,
+        stoppedAtStepLimit,
       });
     }
   })();
@@ -476,9 +497,10 @@ export const driveDelegate = (opts: DelegateDriveOptions): StreamedCore =>
  * Drives a headless `generateText` run inside its registered lifecycle.
  *
  * Returns a single answer and the computed statistics. Headless means
- * unattended, so the no-progress condition is always on. The terminal status
- * and output-ceiling cutoff are decided by the same rules the streamed drives
- * apply, and the run is finished before returning.
+ * unattended, so the no-progress condition is always on. The terminal status and
+ * both cutoffs — the output ceiling and the step ceiling — are decided by the
+ * same rules the streamed drives apply, and the run is finished before
+ * returning.
  */
 export const driveOnce = async (
   opts: DriveBase & DriveConversation,
@@ -496,6 +518,20 @@ export const driveOnce = async (
     const stats = computeStats(result as Parameters<typeof computeStats>[0]);
     if (isTruncatedByTokenLimit(result.finishReason)) {
       stats.truncatedByTokenLimit = true;
+    }
+    // The step ceiling, under the same shared rule the streamed path applies —
+    // read here off the computed step count rather than the stream's finish
+    // parts. A tripped no-progress detector owns the stop instead: it reports
+    // itself as a failure, and on a low ceiling both can fire on one step.
+    if (
+      !noProgress?.tripped() &&
+      stoppedAtStepCeiling({
+        finishReason: result.finishReason,
+        steps: stats.steps ?? 0,
+        stepCeiling: opts.plan.maxSteps,
+      })
+    ) {
+      stats.stoppedAtStepLimit = true;
     }
     run.setStats(stats);
 

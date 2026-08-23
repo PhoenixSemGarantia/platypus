@@ -196,11 +196,31 @@ limit once to learn it exists.
   the work in smaller pieces to begin with.
 </Callout>
 
+### When the reply runs out of steps instead
+
+There is a second way a reply can stop early, and it looks different. A turn
+that uses tools works in steps: each tool the model calls, and each reply it
+writes after getting the result back, is one step. A turn only gets so many of
+them, and reaching that number stops the turn wherever it had got to.
+
+The reply then ends without an answer — often with a tool card and nothing after
+it. A muted line appears under the message reading **Response cut short at the
+step limit.** Like the marker above, it is stored with the message and is still
+there when you reload the Chat.
+
+The two markers name different limits. **Output limit** means the model ran out
+of room to write the reply it was writing; **step limit** means it ran out of
+steps before the work was done. For a Chat that uses an Agent, the number of
+steps is that Agent's **Max steps** — see
+[Tune generation](/building-with-platypus/agents#tune-generation). Asking for
+less in one message, so fewer tool calls are needed, is the other way to stay
+under it.
+
 ## How full the conversation is
 
-A second limit sits alongside the one above, and it is not the same one: as well
-as a ceiling on what a model can **write**, there is a ceiling on what it can be
-**sent**. A Chat sends the whole conversation every turn, so a Chat that has been
+A further limit sits alongside the two above, and it is not the same as either:
+as well as a ceiling on what a model can **write**, there is a ceiling on what it
+can be **sent**. A Chat sends the whole conversation every turn, so a Chat that has been
 going a while is spending more of that room on each reply. A small meter beside
 the prompt input tells you how much of it the last turn used: a short bar, the
 percentage, and both token figures, as in `33% · 42K/128K`.

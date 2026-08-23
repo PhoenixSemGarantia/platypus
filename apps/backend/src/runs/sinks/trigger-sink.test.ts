@@ -295,5 +295,50 @@ describe("TriggerSink", () => {
       const setArg = mockDb.set.mock.calls[0][0] as Record<string, unknown>;
       expect(setArg.stats).not.toHaveProperty("truncatedByTokenLimit");
     });
+
+    // Issue #540. The run history page reads the persisted stats, so a run that
+    // ended at its step ceiling is only distinguishable from one the Agent
+    // finished if the flag is written here.
+    it("persists the step-limit marker on a run whose loop was stopped short", async () => {
+      const sink = new TriggerSink({ triggerId: "trigger-1" });
+
+      await sink.onFinish({
+        runId: "run-1",
+        status: "succeeded",
+        messages: [],
+        stats: {
+          steps: 15,
+          toolCalls: [],
+          inputTokens: 100,
+          outputTokens: 200,
+          stoppedAtStepLimit: true,
+        },
+      });
+
+      const setArg = mockDb.set.mock.calls[0][0] as Record<string, unknown>;
+      // Still a success: the run did the work it was allowed to do.
+      expect(setArg.status).toBe("success");
+      expect(setArg.stats).toEqual({
+        steps: 15,
+        toolCalls: [],
+        inputTokens: 100,
+        outputTokens: 200,
+        stoppedAtStepLimit: true,
+      });
+    });
+
+    it("omits the step-limit marker for a run that finished cleanly", async () => {
+      const sink = new TriggerSink({ triggerId: "trigger-1" });
+
+      await sink.onFinish({
+        runId: "run-1",
+        status: "succeeded",
+        messages: [],
+        stats: { steps: 1, toolCalls: [], inputTokens: 1, outputTokens: 1 },
+      });
+
+      const setArg = mockDb.set.mock.calls[0][0] as Record<string, unknown>;
+      expect(setArg.stats).not.toHaveProperty("stoppedAtStepLimit");
+    });
   });
 });

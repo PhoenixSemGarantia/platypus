@@ -202,6 +202,23 @@ Org Admin sets — see
 [Capping a single reply](/self-hosting/providers-and-auth#capping-a-single-reply).
 Worth checking before rewriting the Instruction.
 
+A run can also stop early for the other reason: it ran out of _steps_ rather
+than room to write. A run that reaches its Agent's **Max steps** — see
+[Tune generation](/building-with-platypus/agents#tune-generation) — stops with
+work outstanding and still ends _Success_, because it did what it was allowed to
+do. It carries a muted line in the runs view reading **Run cut short at the step
+limit.**
+
+The **Steps** figure in the run's own statistics is the count it reached, so a
+run history where every run stops at the same number is the shape to look for.
+
+<Callout type="info">
+  A run that stopped because the Agent made no progress — the same tool call
+  returning the same result over and over — is a different thing, and reports
+  itself differently: it ends _Failed_ with a `no_progress:` message naming the
+  tool. That is not a step limit and raising **Max steps** will not help it.
+</Callout>
+
 ## Where to next
 
 - **[Agents & Sub-Agents](/building-with-platypus/agents)** — the Agent a Trigger

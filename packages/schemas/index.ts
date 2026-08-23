@@ -1704,6 +1704,14 @@ export const triggerRunStatsSchema = z.object({
    * the equivalent marker on a Chat message.
    */
   truncatedByTokenLimit: z.literal(true).optional(),
+  /**
+   * Set only when the run's model loop was stopped because it reached its step
+   * ceiling with the model still asking to continue. Absent rather than `false`,
+   * the same way the output-ceiling marker above is, and never set for a run the
+   * no-progress detector halted — that stop is reported as a failure with its
+   * own message.
+   */
+  stoppedAtStepLimit: z.literal(true).optional(),
 });
 
 export type TriggerRunStats = z.infer<typeof triggerRunStatsSchema>;

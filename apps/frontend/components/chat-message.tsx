@@ -69,6 +69,15 @@ export const CUT_SHORT_NOTICE =
   "Response cut short at the model's output limit.";
 
 /**
+ * The same thing for the other limit: the turn's tool-calling loop ran out of
+ * steps while the model was still working, so the reply is whatever it had
+ * produced by then — often nothing after the last tool card. States the fact and
+ * stops: the ceiling is raisable on an Agent turn and not on a direct one, so a
+ * remedy sentence would be wrong for half the turns that see this.
+ */
+export const STEP_LIMIT_NOTICE = "Response cut short at the step limit.";
+
+/**
  * What the person reading a reply is told when they turned search on and the
  * turn served none — the backend the Provider names is gone, or it failed to
  * start. The model was never told, so the reply reads as if it simply had
@@ -474,6 +483,9 @@ export const ChatMessage = memo(function ChatMessage({
           )}
           {message.metadata?.truncatedByTokenLimit && (
             <TurnNotice className="pl-8">{CUT_SHORT_NOTICE}</TurnNotice>
+          )}
+          {message.metadata?.stoppedAtStepLimit && (
+            <TurnNotice className="pl-8">{STEP_LIMIT_NOTICE}</TurnNotice>
           )}
         </>
       )}

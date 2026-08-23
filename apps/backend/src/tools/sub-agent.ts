@@ -45,6 +45,13 @@ export type SubAgentActivity = {
    * message, because it is the same fact one level down.
    */
   truncatedByTokenLimit?: true;
+  /**
+   * Set when the sub-agent's model loop was stopped at its step ceiling with the
+   * model still asking to continue, so `text` is whatever it had produced by
+   * then — often a tool result and no answer. The sibling of the flag above, and
+   * named the same way the run path names it on a Chat message.
+   */
+  stoppedAtStepLimit?: true;
 };
 
 /**
@@ -55,6 +62,15 @@ export type SubAgentActivity = {
  */
 export const SUB_AGENT_TRUNCATION_NOTE =
   "[Incomplete: the sub-agent stopped at its model's output token limit, so the answer above breaks off part-way. Treat it as partial — do not present it as the sub-agent's complete finding. Delegate the remainder as a narrower task if you need it.]";
+
+/**
+ * The same annotation for the other stop: the delegate's loop ran out of steps
+ * while it was still working. A separate constant rather than a reuse of the
+ * one above, because what the parent can usefully do about it differs — the
+ * answer is not truncated prose, it is work that never got done.
+ */
+export const SUB_AGENT_STEP_LIMIT_NOTE =
+  "[Incomplete: the sub-agent's loop was stopped at its step limit while it was still working, so the result above is as far as it got and may contain no answer at all. Treat it as partial — do not present it as the sub-agent's complete finding. Delegate the remainder as a narrower task if you need it.]";
 
 /** The subset of a streamed tool-result part used to synthesize a fallback answer. */
 type ToolResultSummary = { toolName?: string; output: unknown };
@@ -383,6 +399,7 @@ export const createSubAgentTool = (options: SubAgentToolOptions) => {
 
           const aggregatedText = assistantText(latest);
           const truncatedByTokenLimit = outcome.truncated;
+          const stoppedAtStepLimit = outcome.stoppedAtStepLimit;
 
           // Throw rather than return: a failed delegation must reach the parent
           // as a tool error, not as a short answer it might summarize and pass
@@ -424,6 +441,13 @@ export const createSubAgentTool = (options: SubAgentToolOptions) => {
             );
           }
 
+          if (stoppedAtStepLimit) {
+            logger.warn(
+              { runId, subAgentId: id, subAgentName: name, rawFinishReason },
+              `Sub-agent "${name}" stopped at its step ceiling with work outstanding`,
+            );
+          }
+
           const text =
             aggregatedText || summarizeToolResult(finalToolResult(latest));
 
@@ -432,9 +456,10 @@ export const createSubAgentTool = (options: SubAgentToolOptions) => {
           yield {
             entries,
             text,
-            // Omitted rather than `false` when the answer is whole, so the flag's
-            // presence is the whole of its meaning wherever it is read.
+            // Omitted rather than `false` when the answer is whole, so each
+            // flag's presence is the whole of its meaning wherever it is read.
             ...(truncatedByTokenLimit ? { truncatedByTokenLimit: true } : {}),
+            ...(stoppedAtStepLimit ? { stoppedAtStepLimit: true } : {}),
           } satisfies SubAgentActivity;
         } finally {
           parentSignal?.removeEventListener("abort", cancelWithParent);
@@ -444,14 +469,20 @@ export const createSubAgentTool = (options: SubAgentToolOptions) => {
       },
       toModelOutput: ({ output }) => {
         const value = output?.text ?? "Task completed.";
+        // Annotated rather than thrown: the fragment is real work the parent can
+        // still use, and the run path treats a cutoff as a fact to record rather
+        // than a failure. What it must not do is read as complete.
+        //
+        // At most one applies — a terminal finish reason names either the output
+        // ceiling or a loop the model wanted to continue, never both.
+        const note = output?.truncatedByTokenLimit
+          ? SUB_AGENT_TRUNCATION_NOTE
+          : output?.stoppedAtStepLimit
+            ? SUB_AGENT_STEP_LIMIT_NOTE
+            : undefined;
         return {
           type: "text" as const,
-          // Annotated rather than thrown: the fragment is real work the parent
-          // can still use, and the run path treats a cutoff as a fact to record
-          // rather than a failure. What it must not do is read as complete.
-          value: output?.truncatedByTokenLimit
-            ? `${value}\n\n${SUB_AGENT_TRUNCATION_NOTE}`.trim()
-            : value,
+          value: note ? `${value}\n\n${note}`.trim() : value,
         };
       },
     }),

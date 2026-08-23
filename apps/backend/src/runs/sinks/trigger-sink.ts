@@ -46,6 +46,9 @@ const toTriggerRunStats = (stats: RunStats): TriggerRunStats | null => {
     ...(stats.truncatedByTokenLimit
       ? { truncatedByTokenLimit: true as const }
       : {}),
+    // Same idiom, same reason: a run whose loop was never stopped short stores
+    // no key, so the flag's presence is the whole of its meaning.
+    ...(stats.stoppedAtStepLimit ? { stoppedAtStepLimit: true as const } : {}),
   };
 };
 

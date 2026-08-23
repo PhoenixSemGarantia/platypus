@@ -664,3 +664,152 @@ describe("search availability over a real stream", () => {
     expect(message?.metadata?.searchUnavailable).toBe(true);
   });
 });
+
+/**
+ * The step-ceiling stop (issue #540).
+ *
+ * Driven through a real stream because the trap is entirely in the shape of
+ * what the SDK reports. At the stream-part level the terminal finish reason is
+ * a plain string; the provider-level chunk a mock writes carries the
+ * `{ unified, raw }` object — so the run-lifecycle suite, which mocks the SDK
+ * wholesale, cannot fail on the reading this feature depends on. Only a real
+ * `stopWhen: [stepCountIs(n)]` halt produces the pair of facts the flag needs:
+ * a terminal `"tool-calls"` reason and a step count that reached the ceiling.
+ */
+describe("the step-ceiling stop over a real multi-step stream", () => {
+  /** A turn halted by its step ceiling: the model asked for the tool, the
+   *  ceiling of one call was already spent, and the answer never came. */
+  const haltedAtCeiling = (stepCeiling: number) => {
+    const result = streamText({
+      model: mockModel([
+        toolCallStep(usage(1_000, 30)),
+        answerStep(usage(4_200, 70)),
+      ]),
+      prompt: "Ping the service and tell me what it said.",
+      tools: { ping },
+      stopWhen: [stepCountIs(stepCeiling)],
+    });
+    return lastSnapshot(
+      result.toUIMessageStream({
+        messageMetadata: createMessageMetadata({
+          agentId: "agent-1",
+          stepCeiling,
+        }),
+      }),
+    );
+  };
+
+  it("flags a turn whose loop was stopped with the model still asking to continue", async () => {
+    const message = await haltedAtCeiling(1);
+
+    expect(message?.metadata?.stoppedAtStepLimit).toBe(true);
+  });
+
+  // The dangling tool card with no reply after it — the symptom the notice
+  // exists to explain, asserted so the fixture cannot drift into a turn that
+  // did finish.
+  it("describes a turn that really did end without an answer", async () => {
+    const message = await haltedAtCeiling(1);
+
+    expect(message?.parts).not.toContainEqual(
+      expect.objectContaining({ type: "text" }),
+    );
+    expect(message?.metadata).not.toHaveProperty("truncatedByTokenLimit");
+  });
+
+  it("says nothing about the step limit on a turn the model finished", async () => {
+    const message = await haltedAtCeiling(5);
+
+    expect(message?.metadata).not.toHaveProperty("stoppedAtStepLimit");
+  });
+
+  // The ceiling was reached, but the last allowed step was the answer. Nothing
+  // was cut short, so nothing is reported.
+  it("says nothing when the last allowed step ended on a normal stop", async () => {
+    const message = await haltedAtCeiling(2);
+
+    expect(message?.parts).toContainEqual(
+      expect.objectContaining({ type: "text" }),
+    );
+    expect(message?.metadata).not.toHaveProperty("stoppedAtStepLimit");
+  });
+
+  // The no-progress detector's shape: an unattended run halted by a second stop
+  // condition ends on the same terminal `"tool-calls"` reason, but below the
+  // ceiling. It reports itself as a failed run with its own message, and must
+  // not also be relabelled a step-limit stop.
+  it("says nothing when another stop condition halted the loop below the ceiling", async () => {
+    const result = streamText({
+      model: mockModel([
+        toolCallStep(usage(1_000, 30)),
+        answerStep(usage(4_200, 70)),
+      ]),
+      prompt: "Ping the service and tell me what it said.",
+      tools: { ping },
+      stopWhen: [stepCountIs(5), () => true],
+    });
+
+    const message = await lastSnapshot(
+      result.toUIMessageStream({
+        messageMetadata: createMessageMetadata({
+          agentId: "agent-1",
+          stepCeiling: 5,
+        }),
+      }),
+    );
+
+    expect(message?.metadata).not.toHaveProperty("stoppedAtStepLimit");
+  });
+
+  // The output ceiling is the other way a turn is cut short, and the two are
+  // separate facts: a truncated reply is not a step-limit stop.
+  it("reports the output ceiling, not the step limit, when the reply ran out of room", async () => {
+    const result = streamText({
+      model: mockModel([
+        chunks([
+          { type: "stream-start", warnings: [] },
+          { type: "text-start", id: "t1" },
+          { type: "text-delta", id: "t1", delta: "half an ans" },
+          { type: "text-end", id: "t1" },
+          {
+            type: "finish",
+            finishReason: { unified: "length", raw: "max_tokens" },
+            usage: usage(1_000, 30),
+          },
+        ]),
+      ]),
+      prompt: "Write at length.",
+      stopWhen: [stepCountIs(1)],
+    });
+
+    const message = await lastSnapshot(
+      result.toUIMessageStream({
+        messageMetadata: createMessageMetadata({
+          agentId: "agent-1",
+          stepCeiling: 1,
+        }),
+      }),
+    );
+
+    expect(message?.metadata?.truncatedByTokenLimit).toBe(true);
+    expect(message?.metadata).not.toHaveProperty("stoppedAtStepLimit");
+  });
+
+  // The extractor is constructed without a ceiling on any path that has none to
+  // give, and reports nothing rather than guessing one.
+  it("reports nothing when it was given no ceiling to compare against", async () => {
+    const result = streamText({
+      model: mockModel([
+        toolCallStep(usage(1_000, 30)),
+        answerStep(usage(4_200, 70)),
+      ]),
+      prompt: "Ping the service and tell me what it said.",
+      tools: { ping },
+      stopWhen: [stepCountIs(1)],
+    });
+
+    const message = await lastSnapshot(uiStreamOf(result));
+
+    expect(message?.metadata).not.toHaveProperty("stoppedAtStepLimit");
+  });
+});

@@ -1,5 +1,8 @@
 import type { TextStreamPart, ToolSet } from "ai";
-import { isTruncatedByTokenLimit } from "./stream-error.ts";
+import {
+  isTruncatedByTokenLimit,
+  stoppedAtStepCeiling,
+} from "./stream-error.ts";
 import type { ChatMessageMetadata } from "../types.ts";
 
 /**
@@ -49,6 +52,17 @@ export type MessageMetadataFacts = {
   toolDurations?: ReadonlyMap<string, number>;
   /** Turn resolution served no search tools for a turn that asked for search. */
   searchUnavailable?: boolean;
+  /**
+   * The turn's resolved **Step ceiling** — the same figure the loop's step-count
+   * stop condition is built from. Needed here because the terminal finish reason
+   * alone cannot say whether the loop was stopped or the model was done.
+   *
+   * Optional like every fact above it, so this factory keeps its no-argument
+   * form: a caller that leaves it out gets no step-ceiling reporting rather than
+   * a comparison against a guessed ceiling. Every production caller passes it —
+   * the drive reads it off the plan it is about to invoke.
+   */
+  stepCeiling?: number;
   /** How long Turn resolution took, in whole milliseconds. Absent for a drive
    *  (e.g. a delegated sub-Agent) that never measured one. */
   prepDurationMs?: number;
@@ -64,6 +78,7 @@ export const createMessageMetadata = ({
   agentId,
   toolDurations = new Map(),
   searchUnavailable = false,
+  stepCeiling,
   prepDurationMs,
   driveStartMs,
   now = Date.now,
@@ -72,6 +87,10 @@ export const createMessageMetadata = ({
   // read to erase a reading, never to synthesise one — see the `finish-step`
   // branch below.
   let occupancyReported = false;
+  // How many model calls the turn has completed. Counted from the per-step
+  // finish parts this extractor already sees: the terminal finish carries no
+  // step count of its own, and the run's own tally is not in scope here.
+  let steps = 0;
   // The running Token usage sum (issue #354) — folded across every step that
   // reported one, as opposed to `contextOccupancy`'s last-value replacement
   // right beside it.
@@ -103,6 +122,7 @@ export const createMessageMetadata = ({
     // are ever confused: on a twenty-step turn the sum reads roughly an order
     // of magnitude higher than any single step's count.
     if (part.type === "finish-step") {
+      steps += 1;
       const meta: ChatMessageMetadata = {};
       const { inputTokens, outputTokens } = part.usage;
 
@@ -171,8 +191,28 @@ export const createMessageMetadata = ({
     // The terminal finish only. A step inside a tool loop can end at the
     // ceiling and the run still recover and complete normally; flagging those
     // marks answers that were never cut short.
-    if (part.type === "finish" && isTruncatedByTokenLimit(part.finishReason)) {
-      return { truncatedByTokenLimit: true };
+    if (part.type === "finish") {
+      if (isTruncatedByTokenLimit(part.finishReason)) {
+        return { truncatedByTokenLimit: true };
+      }
+      // `part.finishReason` here is a plain string, not the `{ unified, raw }`
+      // object the provider-level chunk carries: this reads the stream part.
+      //
+      // Deciding that a tripped no-progress detector owns the stop instead is
+      // the drive's, not this extractor's — it happens in the teardown, where
+      // the detector is. Nothing reads this key on a run that carries one: only
+      // unattended runs do, a delegated run's messages are never persisted, and
+      // the card reads the guarded outcome. Wiring a detector onto an attended
+      // path would be the change that makes this worth revisiting.
+      if (
+        stoppedAtStepCeiling({
+          finishReason: part.finishReason,
+          steps,
+          stepCeiling,
+        })
+      ) {
+        return { stoppedAtStepLimit: true };
+      }
     }
     return undefined;
   };
