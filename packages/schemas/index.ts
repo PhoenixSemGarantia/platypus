@@ -89,6 +89,15 @@ export const chatStatusSchema = z.enum([
 export type ChatStatus = z.infer<typeof chatStatusSchema>;
 
 /**
+ * Bounds on the per-chat Max steps setting (`chatSchema.maxSteps`). Exported
+ * because the documentation contract test pins the numbers the
+ * Operator-facing docs quote to these, and the Chat settings input enforces
+ * the same pair.
+ */
+export const CHAT_MAX_STEPS_MIN = 1;
+export const CHAT_MAX_STEPS_MAX = 50;
+
+/**
  * Placeholder title a chat is created with until it is titled. Load-bearing on
  * both sides: the backend only ever generates a title while the row still holds
  * this value (idempotent, first-wins), and the client only polls for a
@@ -117,11 +126,40 @@ export const chatSchema = z.object({
   seed: z.number().optional(),
   presencePenalty: z.number().optional(),
   frequencyPenalty: z.number().optional(),
+  // Per-chat step ceiling for Direct (no-Agent) turns (#539). Nullable like
+  // its six sampling neighbours rather than shaped like the Agent's own
+  // `maxSteps`, so a client that clears a field by sending an explicit null
+  // — as the Agent form does — cannot hit #263, where a dropped key leaves
+  // the column's previous value standing. A chat turn happens to clear by
+  // omission instead and survives it only because every turn rewrites all
+  // generation columns; accepting null keeps the seam honest either way.
+  // Bounded above because a Direct turn never meets the no-progress detector
+  // — this ceiling is its only backstop — while the Agent form's field is
+  // deliberately left unbounded by its author.
+  maxSteps: z
+    .number()
+    .int()
+    .min(CHAT_MAX_STEPS_MIN)
+    .max(CHAT_MAX_STEPS_MAX)
+    .nullable()
+    .optional(),
   createdAt: z.date(),
   updatedAt: z.date(),
 });
 
 export type Chat = z.infer<typeof chatSchema>;
+
+/**
+ * Whether a per-chat Max steps value is one the turn endpoint will accept.
+ *
+ * Shared so the Chat settings input, the send guard and the request validator
+ * all decide from `chatSchema.maxSteps` itself. Restating `int/min/max` in the
+ * UI is how the field's inline error and its 400 drift apart. "Unset" (null or
+ * undefined) is valid — it means fall back to the Direct default.
+ */
+export const isValidChatMaxSteps = (
+  value: number | null | undefined,
+): boolean => chatSchema.shape.maxSteps.safeParse(value).success;
 
 export const chatSubmitSchema = chatSchema
   .pick({
@@ -135,6 +173,7 @@ export const chatSubmitSchema = chatSchema
     seed: true,
     presencePenalty: true,
     frequencyPenalty: true,
+    maxSteps: true,
   })
   .extend({
     agentId: z.string().optional(),
@@ -207,10 +246,12 @@ export const DEFAULT_AGENT_MAX_STEPS = 15;
  * Provider+model selection with no `agent` row to declare its own `maxSteps`.
  *
  * Deliberately BELOW `DEFAULT_AGENT_MAX_STEPS`: a Direct chat is a
- * conversation, not a configured workflow, it has no step-limit control in
- * the UI, and — unlike an unattended run — it is never guarded by the
- * no-progress detector. The ceiling itself is the only guard here, so do not
- * raise it to match the Agent default.
+ * conversation, not a configured workflow, and — unlike an unattended run — it
+ * is never guarded by the no-progress detector. The ceiling itself is the only
+ * guard here, so do not raise it to match the Agent default. It is the value
+ * the per-chat Max steps setting (#539) falls back to when left unset; do not
+ * derive that setting's maximum from this constant, whose job is to bound the
+ * conversation nobody has tuned.
  *
  * 10 rather than something smaller because the page-reader tool a Web-search
  * backend contributes is meant to be called repeatedly: it slices a long page

@@ -17,6 +17,18 @@ import {
 } from "./ui/collapsible";
 import { ChevronsUpDown } from "lucide-react";
 import { useState } from "react";
+import {
+  CHAT_MAX_STEPS_MAX,
+  CHAT_MAX_STEPS_MIN,
+  isValidChatMaxSteps,
+} from "@platypus/schemas";
+
+/**
+ * Shown inline under the field and raised as a toast if a bad value somehow
+ * reaches send. One string so the two paths cannot describe the bound
+ * differently.
+ */
+export const CHAT_MAX_STEPS_ERROR = `Max steps must be a whole number between ${CHAT_MAX_STEPS_MIN} and ${CHAT_MAX_STEPS_MAX}.`;
 
 interface ChatSettingsDialogProps {
   instructions: string;
@@ -33,6 +45,8 @@ interface ChatSettingsDialogProps {
   onPresencePenaltyChange: (value: number | undefined) => void;
   frequencyPenalty: number | undefined;
   onFrequencyPenaltyChange: (value: number | undefined) => void;
+  maxSteps: number | undefined;
+  onMaxStepsChange: (value: number | undefined) => void;
   onClose?: () => void;
 }
 
@@ -51,9 +65,20 @@ export const ChatSettingsDialog = ({
   onPresencePenaltyChange,
   frequencyPenalty,
   onFrequencyPenaltyChange,
+  maxSteps,
+  onMaxStepsChange,
   onClose,
 }: ChatSettingsDialogProps) => {
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
+
+  // Derived from the value, not stored: a flag would reset when the dialog
+  // remounts while an out-of-range value stayed in state. Judged by the schema
+  // that will judge the request, not by a copy of its bounds.
+  const maxStepsInvalid = !isValidChatMaxSteps(maxSteps);
+
+  const handleMaxStepsChange = (value: string) => {
+    onMaxStepsChange(value === "" ? undefined : parseInt(value));
+  };
 
   return (
     <DialogContent className="sm:max-w-[600px]" showCloseButton={false}>
@@ -192,6 +217,24 @@ export const ChatSettingsDialog = ({
                     )
                   }
                 />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="maxSteps">Max steps</Label>
+                <Input
+                  id="maxSteps"
+                  type="number"
+                  min={CHAT_MAX_STEPS_MIN}
+                  max={CHAT_MAX_STEPS_MAX}
+                  step="1"
+                  aria-invalid={maxStepsInvalid}
+                  value={maxSteps ?? ""}
+                  onChange={(e) => handleMaxStepsChange(e.target.value)}
+                />
+                {maxStepsInvalid && (
+                  <p className="text-destructive text-sm">
+                    {CHAT_MAX_STEPS_ERROR}
+                  </p>
+                )}
               </div>
             </div>
           </CollapsibleContent>

@@ -28,6 +28,15 @@ export type ChatTurnRequest = {
   seed?: number;
   presencePenalty?: number;
   frequencyPenalty?: number;
+  /**
+   * The per-chat Max steps setting (#539). Read only on the Direct
+   * (no-Agent) branch, where it overrides `DEFAULT_DIRECT_MAX_STEPS`; an
+   * Agent-backed turn ignores it exactly as it ignores the sampling fields,
+   * because the Agent's own stored `maxSteps` governs. Null and absent both
+   * mean cleared — the chat client clears by omission, and an explicit null
+   * is accepted so a client that clears the Agent form's way works too.
+   */
+  maxSteps?: number | null;
 };
 
 /**
@@ -109,6 +118,13 @@ export type ResolvedGeneration = {
   frequencyPenalty?: number;
   presencePenalty?: number;
   seed?: number;
+  /**
+   * The per-chat Max steps setting as REQUESTED, not as resolved (#539) —
+   * the plan always carries a concrete ceiling, so persisting it would turn
+   * "unset" into an explicit default on the row's first turn. Undefined
+   * leaves the column null, keeping "unset" and "explicitly set" distinct.
+   */
+  maxSteps?: number;
 };
 
 /**
