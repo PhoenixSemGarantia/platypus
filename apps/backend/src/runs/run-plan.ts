@@ -1,5 +1,12 @@
-import { stepCountIs, type LanguageModel, type Tool } from "ai";
+import {
+  stepCountIs,
+  type LanguageModel,
+  type ModelMessage,
+  type Tool,
+} from "ai";
 import type { NoProgressDetector } from "./no-progress.ts";
+import { applyToolResultClearing } from "./tool-result-clearing.ts";
+import { stepOccupancy } from "./run-stats.ts";
 
 /**
  * The generation half of a resolved turn: everything the model call needs
@@ -21,6 +28,19 @@ export type RunPlan = {
   frequencyPenalty?: number;
   presencePenalty?: number;
   seed?: number;
+  /** The Org Admin's declared Context window for this model (ADR-0018),
+   *  absent where none was declared. The sole gate on Tool-result clearing —
+   *  see `buildModelInvocation` below. */
+  contextWindow?: number;
+  /**
+   * Context occupancy the turn starts at, before its own first step has
+   * reported any usage — read from the Chat's last assistant message
+   * (`ChatMessageMetadata.contextOccupancy`, inputTokens + outputTokens, which
+   * together make the next turn's starting size derivable exactly). Absent for
+   * a delegated Sub-Agent or a headless Trigger run, which start no such
+   * history, and for a Chat's very first turn.
+   */
+  initialOccupancy?: number;
 };
 
 /** The generation settings, minus any the plan never set. */
@@ -74,5 +94,32 @@ export const buildModelInvocation = (
     ? [stepCountIs(plan.maxSteps), options.extraStopCondition]
     : [stepCountIs(plan.maxSteps)],
   abortSignal: options.abortSignal,
+  // Tool-result clearing (ADR-0018 Notes, issue #524). `prepareStep` fires
+  // before every step INCLUDING the first, and its `messages` override
+  // carries forward to later steps — the one seam that reaches both a
+  // within-turn blowup and, via `initialOccupancy`, a turn's very first call.
+  // It never touches `onFinish`'s response messages, so what a Chat persists
+  // is unaffected regardless of what this returns.
+  prepareStep: ({
+    steps,
+    messages,
+  }: {
+    steps: Array<{ usage?: { inputTokens?: number } }>;
+    messages: ModelMessage[];
+  }) => {
+    // The most recently completed step's occupancy IS the current context
+    // size (ADR-0018: a last value, not a sum). Before any step has run,
+    // fall back to the plan's `initialOccupancy` — the only reading that
+    // exists yet.
+    const occupancy =
+      steps.length > 0
+        ? stepOccupancy(steps[steps.length - 1]?.usage)
+        : plan.initialOccupancy;
+    const cleared = applyToolResultClearing(messages, {
+      occupancy,
+      contextWindow: plan.contextWindow,
+    });
+    return cleared === messages ? {} : { messages: cleared };
+  },
   ...declaredSettings(plan),
 });

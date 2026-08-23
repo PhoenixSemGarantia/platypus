@@ -41,6 +41,7 @@ import { useResetOnChange } from "@/hooks/use-reset-on-change";
 import { useChatSettings } from "@/hooks/use-chat-settings";
 import { useModelSelection } from "@/hooks/use-model-selection";
 import { resolveModel } from "@/lib/resolve-model";
+import { clearedToolCallIds } from "@/lib/tool-result-clearing";
 import { ContextMeter } from "./context-meter";
 import { FileCompatibilityWarning } from "./file-compatibility-warning";
 import { useMessageEditing } from "@/hooks/use-message-editing";
@@ -409,6 +410,15 @@ export const Chat = ({
     )
     .at(-1)?.metadata?.contextOccupancy;
 
+  // Tool-result clearing (ADR-0018 Notes, issue #524): which tool results the
+  // NEXT model call would no longer receive, derived from the same reading the
+  // meter above shows rather than a stored flag — a message this session
+  // hasn't reloaded can't carry a stale one.
+  const staleToolCallIds = clearedToolCallIds(messages, {
+    occupancy: contextOccupancy?.inputTokens,
+    contextWindow: resolvedModel?.contextWindow,
+  });
+
   // Treat a server-side run-in-progress as if we were locally streaming,
   // so a tab that reconnects mid-run (or an unrelated tab opened on the
   // same chat) can't kick off a second concurrent run. The submit button
@@ -495,6 +505,7 @@ export const Chat = ({
                   onRegenerate={handleRegenerate}
                   onCopyMessage={handleCopyMessage}
                   copiedMessageId={copiedMessageId}
+                  staleToolCallIds={staleToolCallIds}
                 />
               ))}
             </div>

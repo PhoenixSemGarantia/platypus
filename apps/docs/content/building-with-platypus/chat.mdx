@@ -234,6 +234,31 @@ declares the window on the Provider's model entry — see [Declaring a Context
 window](/self-hosting/providers-and-auth#declaring-a-context-window). Switching
 model switches the meter with it, since the window belongs to the model.
 
+## Freeing up space during a long tool-using turn
+
+Where a **Context window** is declared, a long turn that reads a lot of pages
+or files gets one piece of automatic help: once the meter above would be
+running high, older results from a small set of read-only tools — web search,
+reading a URL, reading a file or listing a directory in a Sandbox — stop being
+sent to the model. Only the oldest ones go, and only enough to make room; the
+most recent stay.
+
+Nothing is deleted. The full result is still in the message, still yours to
+read, and still there after a reload — this only changes what the model itself
+is sent starting from that point in the conversation. A tool result the model
+no longer has carries a small marker so you can tell; expand it to read what it
+returned.
+
+<Callout type="warning">
+  **This is retention, not summarising.** Platypus does not write a shorter
+  version of an older result — it either sends it in full or not at all. If the
+  model needs to act on something in a result that has stopped being sent, ask
+  again in a follow-up message.
+</Callout>
+
+This has no effect where no **Context window** is declared for the model — see
+above.
+
 ## Fixing a conversation instead of restarting it
 
 Hover a message for its actions:

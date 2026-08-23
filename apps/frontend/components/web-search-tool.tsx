@@ -134,6 +134,7 @@ export const webSearchSources = (
 export const WebSearchTool = ({
   toolPart,
   messageMetadata,
+  cleared,
 }: {
   toolPart: ToolUIPart;
   /**
@@ -143,6 +144,9 @@ export const WebSearchTool = ({
    * the composing message already holds them.
    */
   messageMetadata?: unknown;
+  /** Tool-result clearing (ADR-0018 Notes, issue #524) left this result out
+   *  of the next model call. */
+  cleared?: boolean;
 }) => {
   const query = asRecord(toolPart.input).query;
   const output = asRecord(toolPart.output);
@@ -176,6 +180,7 @@ export const WebSearchTool = ({
           messageMetadata,
           toolPart.toolCallId,
         )}
+        cleared={cleared}
       />
       <ToolContent>
         <div className="space-y-2 p-4 text-sm">
