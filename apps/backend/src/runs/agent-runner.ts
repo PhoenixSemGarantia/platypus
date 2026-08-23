@@ -141,8 +141,13 @@ export class AgentRunner {
      *  for the terminal callback that may run before it is assigned. */
     turn: ChatTurn;
     modelMessages: ModelMessage[];
+    /** How long this setup — Turn resolution (`CONTEXT.md`) — took, in whole
+     *  milliseconds. Surfaced to Users as "Preparation" once stamped onto the
+     *  streamed message (issue #354). */
+    prepDurationMs: number;
   }> {
     const { scope, input, sink } = params;
+    const prepStartMs = Date.now();
 
     // File gate (issue #328): reject a turn carrying a file the target model
     // can't handle BEFORE the sink persists anything, so a bad attachment can
@@ -221,7 +226,13 @@ export class AgentRunner {
     // run. The drives own the model call and the terminal decision from there.
     const modelMessages = await convertToModelMessages(turn.stream.messages);
 
-    return { state, run, turn, modelMessages };
+    return {
+      state,
+      run,
+      turn,
+      modelMessages,
+      prepDurationMs: Date.now() - prepStartMs,
+    };
   }
 
   async stream(params: {
@@ -231,14 +242,15 @@ export class AgentRunner {
     options: StreamOptions;
   }): Promise<Response> {
     const { input, options } = params;
-    const { state, run, turn, modelMessages } = await this.setup({
-      scope: params.scope,
-      input,
-      sink: params.sink,
-      origin: options.origin,
-      frontendUrl: options.frontendUrl,
-      timeouts: options.timeouts,
-    });
+    const { state, run, turn, modelMessages, prepDurationMs } =
+      await this.setup({
+        scope: params.scope,
+        input,
+        sink: params.sink,
+        origin: options.origin,
+        frontendUrl: options.frontendUrl,
+        timeouts: options.timeouts,
+      });
 
     logger.debug(
       { systemPrompt: turn.stream.system },
@@ -263,6 +275,7 @@ export class AgentRunner {
       originalMessages: input.messages,
       agentId: turn.resolved.agentId,
       searchUnavailable: turn.searchUnavailable,
+      prepDurationMs,
       generateMessageId: createIdGenerator({ prefix: "msg", size: 16 }),
       toolDurations,
       onToolExecutionEnd: ({ toolCall, toolExecutionMs }) => {
