@@ -372,6 +372,13 @@
       "when": 1787457700721,
       "tag": "0052_minor_demogoblin",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1787466743768,
+      "tag": "0053_tense_nekra",
+      "breakpoints": true
     }
   ]
 }

@@ -111,6 +111,11 @@ export const executeTrigger = async (
     runId,
     request: { agentId, search: trigger.search ?? undefined },
     messages,
+    // A headless run carries no Chat identity and so no pin: it renders the
+    // current Memories block, anchored to the moment this firing resolved
+    // (ADR-0020). Stamped once here rather than read inside turn preparation,
+    // so the reference date is an input the run can be replayed against.
+    memoriesReferenceDate: new Date(),
   };
 
   const sink = new TriggerSink({

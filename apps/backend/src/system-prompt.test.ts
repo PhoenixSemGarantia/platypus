@@ -1,18 +1,21 @@
 import { describe, it, expect } from "vitest";
 import {
   renderSystemPrompt,
-  type SystemPromptContext,
+  type SystemPromptStableContext,
 } from "./system-prompt.ts";
 import type { agent as agentTable } from "./db/schema.ts";
-import type { MemorySummary } from "./services/memory-retrieval.ts";
+import {
+  formatSummariesForSystemPrompt,
+  type MemorySummary,
+} from "./services/memory-retrieval.ts";
 
 type AgentRecord = typeof agentTable.$inferSelect;
 
-const baseCtx = (): SystemPromptContext => ({
+const baseCtx = (): SystemPromptStableContext => ({
   workspace: { id: "ws-1" },
   agent: null,
   user: { id: "user-1", name: "Alice" },
-  memories: [],
+  memoriesBlock: "",
   skills: [],
   subAgents: [],
   runMode: "interactive",
@@ -225,19 +228,21 @@ describe("renderSystemPrompt — user context", () => {
 });
 
 describe("renderSystemPrompt — memories block", () => {
-  it("emits no <memories> block when there are no rows", () => {
+  it("emits no <memories> block when the block text is empty", () => {
     expect(renderSystemPrompt(baseCtx())).not.toContain("<memories>");
   });
 
-  it("emits no <memories> block when rows have empty summaries", () => {
+  it("emits no <memories> block when the block text is blank", () => {
     const ctx = baseCtx();
-    ctx.memories = [memorySummary("   ")];
+    ctx.memoriesBlock = "   ";
     expect(renderSystemPrompt(ctx)).not.toContain("<memories>");
   });
 
-  it("renders the <memories> block when rows have content", () => {
+  it("renders the <memories> block when the block text has content", () => {
     const ctx = baseCtx();
-    ctx.memories = [memorySummary("Asked about pricing.", "2026-04-29")];
+    ctx.memoriesBlock = formatSummariesForSystemPrompt([
+      memorySummary("Asked about pricing.", "2026-04-29"),
+    ]);
     const out = renderSystemPrompt(ctx);
     expect(out).toContain("<memories>");
     expect(out).toContain("### 2026-04-29");
@@ -266,7 +271,9 @@ describe("renderSystemPrompt — memory tools prose", () => {
   it("emits the supplemental prose when memory tools are enabled AND a <memories> block exists", () => {
     const ctx = baseCtx();
     ctx.agent = agentRecord({ toolSetIds: ["memory"] });
-    ctx.memories = [memorySummary("Asked about pricing.")];
+    ctx.memoriesBlock = formatSummariesForSystemPrompt([
+      memorySummary("Asked about pricing."),
+    ]);
     const out = renderSystemPrompt(ctx);
     expect(out).toContain(
       "You also have access to memorySearch and memoryGet tools",
@@ -274,6 +281,38 @@ describe("renderSystemPrompt — memory tools prose", () => {
     expect(out).toContain("beyond what is shown above");
     // Standalone prose must NOT be present when supplemental is.
     expect(out).not.toContain("look up memories from past conversations.");
+  });
+});
+
+describe("renderSystemPrompt — stability (ADR-0020)", () => {
+  it("renders the pinned Memories block verbatim, never re-deriving it", () => {
+    const ctx = baseCtx();
+    ctx.agent = agentRecord({ toolSetIds: ["memory"] });
+    // A distinctive block with formatting the renderer must not touch: it
+    // proves the renderer consumes the pinned text rather than a live
+    // retrieval it can no longer reach.
+    ctx.memoriesBlock =
+      "Recent memory summaries from previous conversations:\n\n### 2026-04-29\nAsked about pricing.";
+    const out = renderSystemPrompt(ctx);
+    expect(out).toContain(
+      "<memories>\nRecent memory summaries from previous conversations:\n\n### 2026-04-29\nAsked about pricing.\n</memories>",
+    );
+    expect(out).toContain("beyond what is shown above");
+  });
+
+  it("is a pure function of the stable context — repeated renders are byte-identical", () => {
+    const ctx = baseCtx();
+    ctx.agent = agentRecord({ toolSetIds: ["memory", "sandbox"] });
+    ctx.memoriesBlock = formatSummariesForSystemPrompt([
+      memorySummary("Asked about pricing."),
+    ]);
+    ctx.subAgents = [{ name: "Helper", description: "Helps." }];
+    ctx.unavailableSubAgents = [{ id: "sub-1", name: "Dashboard Agent" }];
+    ctx.sandboxEnvKeys = ["OPENAI_API_KEY"];
+
+    const first = renderSystemPrompt(ctx);
+    const second = renderSystemPrompt(ctx);
+    expect(second).toBe(first);
   });
 });
 
@@ -429,7 +468,9 @@ describe("renderSystemPrompt — ordering snapshots", () => {
     ctx.workspace.context = "Books domain.";
     ctx.user.globalContext = "Likes haiku.";
     ctx.user.workspaceContext = "PM on books.";
-    ctx.memories = [memorySummary("Asked about pricing.", "2026-04-29")];
+    ctx.memoriesBlock = formatSummariesForSystemPrompt([
+      memorySummary("Asked about pricing.", "2026-04-29"),
+    ]);
     ctx.skills = [{ name: "research", description: "Look things up" }];
     ctx.subAgents = [{ name: "Helper", description: "Helps." }];
 

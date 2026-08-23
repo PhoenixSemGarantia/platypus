@@ -5,16 +5,38 @@ import { memoryDailySummary as memoryDailySummaryTable } from "../db/schema.ts";
 export type MemorySummary = typeof memoryDailySummaryTable.$inferSelect;
 
 /**
+ * The `YYYY-MM-DD` cutoff a retrieval window starts at, anchored to
+ * `referenceDate` and spanning `days` back. Extracted from the query so the
+ * "window is an input, not a clock read" property (ADR-0020) is unit-testable:
+ * the retrieval anchors to the caller's moment, never to a render-time clock.
+ */
+export function summaryCutoffForReference(
+  referenceDate: Date,
+  days: number = 2,
+): string {
+  const cutoffDate = new Date(referenceDate);
+  cutoffDate.setDate(cutoffDate.getDate() - days);
+  return cutoffDate.toISOString().split("T")[0];
+}
+
+/**
  * Retrieves the most recent daily summaries for a user in a workspace.
+ *
+ * The two-day retrieval window is anchored to the passed `referenceDate`, never
+ * to a wall-clock read at render time (ADR-0020): a cutoff computed from the
+ * clock made every Chat's prefix differ by the moment of composition and rolled
+ * all of them over at midnight. The caller bounds its own freshness — the Chat
+ * route passes the pin's re-take time, a headless run passes its resolution
+ * time — and the renderer never reads the clock at all. `referenceDate` is
+ * required so no caller silently inherits a hidden clock read.
  */
 export async function retrieveRecentSummaries(
   userId: string,
   workspaceId: string,
-  days: number = 2,
+  days: number,
+  referenceDate: Date,
 ): Promise<MemorySummary[]> {
-  const cutoffDate = new Date();
-  cutoffDate.setDate(cutoffDate.getDate() - days);
-  const cutoffDateStr = cutoffDate.toISOString().split("T")[0];
+  const cutoffDateStr = summaryCutoffForReference(referenceDate, days);
 
   return db
     .select()
@@ -49,4 +71,42 @@ export function formatSummariesForSystemPrompt(
   }
 
   return parts.join("\n").trim();
+}
+
+/**
+ * The re-pin horizon (ADR-0020): the longest cache TTL any supported Provider
+ * offers. Past this the cached prefix is provably expired, so re-taking the
+ * Memories snapshot is free. The measure is the Chat's **idle gap** — the
+ * elapsed time since the previous turn — never the snapshot's own age: a Chat
+ * in continuous use genuinely holds a warm prefix regardless of how old its
+ * snapped block is, and re-pinning on snapshot age would discard it for no gain
+ * (the two measures only agree once a Chat has actually gone cold).
+ */
+export const MEMORY_SNAPSHOT_RE_PIN_HORIZON_MS = 60 * 60 * 1000;
+
+/**
+ * Decides whether a Chat must re-take its pinned Memories block this turn.
+ *
+ * Re-takes when there is no pin at all (`null`/`undefined` — a new Chat, or a
+ * row written before this feature existed), when there is no recorded previous
+ * turn to measure idleness against, or when the gap since the previous turn
+ * exceeds the re-pin horizon. Otherwise the existing pin is reused so the
+ * system-prompt prefix stays byte-identical across turns of an active Chat —
+ * the property ADR-0020 exists to preserve.
+ *
+ * An empty string is a *pinned* empty block, not an absent one: a Chat with no
+ * memories still pins a stable (empty) prefix, so it must not re-retrieve every
+ * turn. The absence signal is `null`/`undefined` only.
+ */
+export function shouldRePinMemorySnapshot(args: {
+  existingSnapshot: string | null | undefined;
+  previousTurnAt: Date | null | undefined;
+  now: Date;
+}): boolean {
+  if (args.existingSnapshot == null) return true;
+  if (!args.previousTurnAt) return true;
+  return (
+    args.now.getTime() - args.previousTurnAt.getTime() >
+    MEMORY_SNAPSHOT_RE_PIN_HORIZON_MS
+  );
 }

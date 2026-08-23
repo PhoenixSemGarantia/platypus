@@ -201,6 +201,22 @@ export const chat = pgTable(
       .text("memory_extraction_status")
       .default("pending"), // "pending" | "processing" | "completed" | "failed"
 
+    // The pinned Memories block (ADR-0020): the rendered summaries fragment,
+    // snapshotted here while the Chat is active and re-taken only when the gap
+    // since the previous turn exceeds the re-pin horizon. An internal column —
+    // absent from the Chat response schema, never surfaced in the product and
+    // never editable. One fragment's rendered text, NOT a full system prompt
+    // composite (ADR-0016 / issue #373).
+    memorySnapshot: t.text("memory_snapshot"),
+
+    // The wall-clock start of the most recent turn, written ONLY by the run
+    // sink at turn boundaries. ADR-0020 measures the Chat's idle gap against
+    // this, never against `updatedAt` — which the memory-extraction job and
+    // auto-titling bump at their own cadence, so a background write must not
+    // masquerade as a recent turn and defer a legitimate re-pin. A separate,
+    // dedicated signal is the only writer-free answer.
+    lastTurnAt: t.timestamp("last_turn_at"),
+
     createdAt: t.timestamp("created_at").notNull().defaultNow(),
     updatedAt: t.timestamp("updated_at").notNull().defaultNow(),
   }),

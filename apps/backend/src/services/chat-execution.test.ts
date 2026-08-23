@@ -104,6 +104,7 @@ import { FileValidationError } from "./file-gate.ts";
 import { resetExtractedTextCache } from "./file-extraction.ts";
 import { buildTestPdf } from "./file-extraction.test-fixtures.ts";
 import { createInMemoryChatTurnQueries } from "./chat-execution.test-fixtures.ts";
+import { formatSummariesForSystemPrompt } from "./memory-retrieval.ts";
 import { DEFAULT_DIRECT_MAX_STEPS } from "@platypus/schemas";
 import type { Provider } from "@platypus/schemas";
 import type { PlatypusUIMessage } from "../types.ts";
@@ -171,6 +172,9 @@ const baseInput = {
   user: { id: "user-1", name: "Test User" },
   messages: [],
   origin: "http://localhost:4000",
+  // Fixed, not `new Date()`: the retrieval window is an input, so a test that
+  // does not care about it must still not vary by when it ran.
+  memoriesReferenceDate: new Date("2026-05-03T12:00:00Z"),
 };
 
 describe("chat-execution", () => {
@@ -218,6 +222,147 @@ describe("chat-execution", () => {
       // dispose is idempotent and does nothing without MCP clients
       await expect(turn.dispose()).resolves.toBeUndefined();
       await expect(turn.dispose()).resolves.toBeUndefined();
+    });
+
+    it("keeps the system prompt byte-identical across turns that reuse a pinned Memories snapshot, regardless of live retrieval (ADR-0020)", async () => {
+      const day = new Date();
+      const memoryA = {
+        id: "m1",
+        userId: "user-1",
+        workspaceId: "ws-1",
+        summaryDate: "2026-04-29",
+        summary: "Likes coffee.",
+        embedding: null,
+        createdAt: day,
+        updatedAt: day,
+      };
+      const memoryB = { ...memoryA, summary: "Prefers tea." };
+
+      // Two turn resolutions with the SAME pinned snapshot but DIFFERENT live
+      // memory retrievals behind it: the retrieval varies per turn without
+      // anyone doing anything, so the renderer must consume the pin, never it.
+      const queriesLiveB = createInMemoryChatTurnQueries({
+        workspaces: [baseWorkspace],
+        agents: [baseAgent],
+        providers: [baseProvider],
+        memories: [memoryB],
+      });
+      const queriesLiveA = createInMemoryChatTurnQueries({
+        workspaces: [baseWorkspace],
+        agents: [baseAgent],
+        providers: [baseProvider],
+        memories: [memoryA],
+      });
+
+      const pinned = formatSummariesForSystemPrompt([memoryA]);
+
+      const turnA = await prepareChatTurn(
+        {
+          ...baseInput,
+          request: { agentId: baseAgent.id },
+          memorySnapshot: pinned,
+        },
+        queriesLiveB,
+      );
+      const turnB = await prepareChatTurn(
+        {
+          ...baseInput,
+          request: { agentId: baseAgent.id },
+          memorySnapshot: pinned,
+        },
+        queriesLiveA,
+      );
+
+      // Identical bytes across turns, and the content is the PIN, not the live
+      // retrieval whichever one preceded the call.
+      expect(turnB.stream.system).toBe(turnA.stream.system);
+      expect(turnA.stream.system).toContain("Likes coffee.");
+      expect(turnA.stream.system).not.toContain("Prefers tea.");
+      await turnA.dispose();
+      await turnB.dispose();
+    });
+
+    it("(control) without a pin, differing live retrieval DOES change the prefix — the pin is what stabilises it", async () => {
+      const day = new Date();
+      const memoryA = {
+        id: "m1",
+        userId: "user-1",
+        workspaceId: "ws-1",
+        summaryDate: "2026-04-29",
+        summary: "Likes coffee.",
+        embedding: null,
+        createdAt: day,
+        updatedAt: day,
+      };
+      const memoryB = { ...memoryA, summary: "Prefers tea." };
+      const queriesA = createInMemoryChatTurnQueries({
+        workspaces: [baseWorkspace],
+        agents: [baseAgent],
+        providers: [baseProvider],
+        memories: [memoryA],
+      });
+      const queriesB = createInMemoryChatTurnQueries({
+        workspaces: [baseWorkspace],
+        agents: [baseAgent],
+        providers: [baseProvider],
+        memories: [memoryB],
+      });
+
+      const turnA = await prepareChatTurn(
+        { ...baseInput, request: { agentId: baseAgent.id } },
+        queriesA,
+      );
+      const turnB = await prepareChatTurn(
+        { ...baseInput, request: { agentId: baseAgent.id } },
+        queriesB,
+      );
+
+      expect(turnB.stream.system).not.toBe(turnA.stream.system);
+      await turnA.dispose();
+      await turnB.dispose();
+    });
+
+    it("anchors a headless run's retrieval window to the caller's reference date, not a clock read (ADR-0020)", async () => {
+      const referenceDate = new Date("2026-05-03T12:00:00Z");
+      const seen: Date[] = [];
+      const queries = createInMemoryChatTurnQueries({
+        workspaces: [baseWorkspace],
+        agents: [baseAgent],
+        providers: [baseProvider],
+      });
+      const recording = {
+        ...queries,
+        getRecentMemories(userId: string, workspaceId: string, ref: Date) {
+          seen.push(ref);
+          return queries.getRecentMemories(userId, workspaceId, ref);
+        },
+      };
+
+      // Two headless runs (no pin) given the SAME reference date. Turn
+      // preparation reads no clock of its own, so the prefix cannot drift
+      // between them — the midnight rollover a Trigger used to suffer.
+      const turnA = await prepareChatTurn(
+        {
+          ...baseInput,
+          request: { agentId: baseAgent.id },
+          memoriesReferenceDate: referenceDate,
+        },
+        recording,
+      );
+      const turnB = await prepareChatTurn(
+        {
+          ...baseInput,
+          request: { agentId: baseAgent.id },
+          memoriesReferenceDate: referenceDate,
+        },
+        recording,
+      );
+
+      expect(turnB.stream.system).toBe(turnA.stream.system);
+      // The window came from the input, verbatim — both times.
+      expect(seen).toEqual([referenceDate, referenceDate]);
+      await turnA.dispose();
+      await turnB.dispose();
     });
 
     it("resolves an org-scoped (Shared) Skill referenced by the Agent only where attached", async () => {

@@ -182,6 +182,7 @@ const baseInput: RunInput = {
   runId: "run-1",
   request: { agentId: "agent-1" },
   messages: [],
+  memoriesReferenceDate: new Date("2026-05-03T12:00:00Z"),
 };
 
 const fakeTurn = (overrides?: { dispose?: () => Promise<void> }) => {

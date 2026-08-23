@@ -44,6 +44,22 @@ Once Memory is on, the retrieved summaries are injected into **every** Chat turn
 in that Workspace, for every Agent, whether or not the Agent has the memory Tool
 set. It is not opt-in per Agent and there is no way to exclude one Agent from it.
 
+Which summaries a Chat gets is fixed when it starts. A Chat keeps the same set
+for as long as you keep using it, and picks up current summaries on your next
+message after **an hour** of no activity. A new Chat always starts from current
+summaries.
+
+<Callout type="warning">
+  Saying something memorable and expecting the assistant to recall it later in
+  the same Chat is the trap. Extraction runs in the background and writes a
+  summary of today, but the Chat you are in keeps the summaries it started with
+  — so the new fact never appears, and the assistant looks like it has forgotten
+  something you just told it. Within one Chat, the **Transcript** is what
+  carries recent facts; summaries carry what happened in _other_ Chats. To pull
+  in fresh summaries now, start a new Chat. If the Agent has the memory Tool
+  set, `memorySearch` reaches current memories at any point.
+</Callout>
+
 The memory Tool set adds something different: the `memorySearch` and `memoryGet`
 tools, which let the model look up older or more specific memories beyond the
 summaries already in the prompt. Granting it widens what the model can reach;
