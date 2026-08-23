@@ -37,6 +37,13 @@ import type { ChatMessageMetadata } from "../types.ts";
  * arguments: `agentId` and `searchUnavailable` travel together at every hop
  * from Turn resolution to here, and the next such fact should not have to
  * become a fourth position that call sites read as a bare `true`.
+ *
+ * `prepDurationMs` and `driveStartMs` are the same kind of setup-time fact,
+ * for the two-phase wall clock issue #354 adds: Turn resolution has already
+ * finished by the time this extractor exists, so its duration rides `start`
+ * exactly like `agentId`; the Drive's own duration cannot ride `start` because
+ * it has not happened yet, so only the moment it began does, and each
+ * `finish-step` computes the elapsed time from it.
  */
 export type MessageMetadataFacts = {
   /** The resolved Agent id, absent on a turn that resolved no Agent. */
@@ -56,6 +63,15 @@ export type MessageMetadataFacts = {
    * the drive reads it off the plan it is about to invoke.
    */
   stepCeiling?: number;
+  /** How long Turn resolution took, in whole milliseconds. Absent for a drive
+   *  (e.g. a delegated sub-Agent) that never measured one. */
+  prepDurationMs?: number;
+  /** When the model request was sent, on the same clock as `now`. `modelDurationMs`
+   *  is the elapsed time from here, recomputed on every `finish-step`. */
+  driveStartMs?: number;
+  /** Injectable clock, so a test can assert an exact `modelDurationMs` rather
+   *  than a real elapsed delay. Defaults to `Date.now`. */
+  now?: () => number;
 };
 
 export const createMessageMetadata = ({
@@ -63,6 +79,9 @@ export const createMessageMetadata = ({
   toolDurations = new Map(),
   searchUnavailable = false,
   stepCeiling,
+  prepDurationMs,
+  driveStartMs,
+  now = Date.now,
 }: MessageMetadataFacts = {}) => {
   // Whether any step of this turn has reported an input-token count. Only
   // read to erase a reading, never to synthesise one — see the `finish-step`
@@ -72,6 +91,11 @@ export const createMessageMetadata = ({
   // finish parts this extractor already sees: the terminal finish carries no
   // step count of its own, and the run's own tally is not in scope here.
   let steps = 0;
+  // The running Token usage sum (issue #354) — folded across every step that
+  // reported one, as opposed to `contextOccupancy`'s last-value replacement
+  // right beside it.
+  let inputTokensSum = 0;
+  let outputTokensSum = 0;
 
   return ({
     part,
@@ -82,20 +106,26 @@ export const createMessageMetadata = ({
       const meta: ChatMessageMetadata = {};
       if (agentId) meta.agentId = agentId;
       if (searchUnavailable) meta.searchUnavailable = true;
+      if (typeof prepDurationMs === "number") {
+        meta.prepDurationMs = Math.round(prepDurationMs);
+      }
       return Object.keys(meta).length > 0 ? meta : undefined;
     }
-    // Context occupancy (ADR-0018), emitted per step rather than once at the
+    // Context occupancy (ADR-0018), Token usage and the Drive's elapsed time
+    // (issue #354) — all three are emitted per step rather than once at the
     // end: the terminal `finish` part is never sent on an aborted run, and
-    // cancelling a long turn is exactly when the context had grown most. The
-    // merge leaves the last step's figures standing.
+    // cancelling a long turn is exactly when the context had grown most.
     //
-    // `part.usage` here is one call's usage. The terminal finish's
-    // `totalUsage` and the run's accumulated stats both fold input tokens
-    // across every step, so on a twenty-step turn they read roughly an order
-    // of magnitude high. Correct as billing figures, wrong as occupancy.
+    // `part.usage` here is one call's usage, so occupancy reads it directly
+    // while Token usage folds it onto the running sum below — the same trap
+    // ADR-0018 already documents for occupancy applies again here if the two
+    // are ever confused: on a twenty-step turn the sum reads roughly an order
+    // of magnitude higher than any single step's count.
     if (part.type === "finish-step") {
       steps += 1;
+      const meta: ChatMessageMetadata = {};
       const { inputTokens, outputTokens } = part.usage;
+
       if (typeof inputTokens !== "number") {
         // This step's context size is unknown, so any figure already on the
         // message is a smaller, older call's — stale, and about to be read as
@@ -104,18 +134,37 @@ export const createMessageMetadata = ({
         // some step has reported a count there is nothing to erase, and the
         // key stays absent so a Provider that reports no usage at all records
         // no occupancy whatsoever.
-        return occupancyReported ? { contextOccupancy: null } : undefined;
-      }
-      occupancyReported = true;
-      return {
-        contextOccupancy: {
+        if (occupancyReported) meta.contextOccupancy = null;
+      } else {
+        occupancyReported = true;
+        meta.contextOccupancy = {
           inputTokens,
           // Concrete, never omitted, for the same reason: the merge skips
           // `undefined`, so leaving the key out would pair a fresh input count
           // with a previous step's output count.
           outputTokens: typeof outputTokens === "number" ? outputTokens : null,
-        },
-      };
+        };
+      }
+
+      // Never needs erasing, unlike occupancy: each step's usage only adds to
+      // the sum, so a step that reports nothing cannot make an earlier step's
+      // sum stale. Guarded the same way occupancy's absence is — until some
+      // step reports a number, the key stays absent rather than writing a
+      // `{ 0, 0 }` sum for a turn whose Provider never reported anything.
+      if (typeof inputTokens === "number" || typeof outputTokens === "number") {
+        inputTokensSum += inputTokens ?? 0;
+        outputTokensSum += outputTokens ?? 0;
+        meta.tokenUsage = {
+          inputTokens: inputTokensSum,
+          outputTokens: outputTokensSum,
+        };
+      }
+
+      if (typeof driveStartMs === "number") {
+        meta.modelDurationMs = Math.round(now() - driveStartMs);
+      }
+
+      return Object.keys(meta).length > 0 ? meta : undefined;
     }
     // How long the tool that just finished took. This is the ONLY way the
     // figure reaches the browser: the stream's tool reducer rebuilds the tool

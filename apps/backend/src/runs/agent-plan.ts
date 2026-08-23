@@ -1,6 +1,7 @@
 import { NotFoundError, ValidationError } from "../errors.ts";
 import { openProvider } from "../services/provider.ts";
 import {
+  contextWindowForModel,
   maxOutputTokensForModel,
   resolveModelId,
 } from "../services/model-capability.ts";
@@ -11,6 +12,7 @@ import {
 import {
   aliasNameFromReference,
   DEFAULT_AGENT_MAX_STEPS,
+  DEFAULT_DIRECT_MAX_STEPS,
 } from "@platypus/schemas";
 import type { ConcreteModelId, Provider } from "@platypus/schemas";
 import type { RunPlan } from "./run-plan.ts";
@@ -31,10 +33,11 @@ export type GenerationAgentSource = {
 /**
  * What an Agent generates under, resolved from either of its two sources: an
  * Agent row (Chat's Agent path, and every sub-Agent) or a direct Provider +
- * model selection (Chat's Direct path, which has no row and always runs one
- * step). One module decides this so the parent turn and a delegated sub-Agent
- * can never resolve it differently (issues #417, #456, #459 each had to patch
- * this logic in two places, in the same commit).
+ * model selection (Chat's Direct path, which has no row and falls back to
+ * `DEFAULT_DIRECT_MAX_STEPS`, issue #463). One module decides this so the
+ * parent turn and a delegated sub-Agent can never resolve it differently
+ * (issues #417, #456, #459 each had to patch this logic in two places, in the
+ * same commit).
  */
 export type GenerationSource =
   | { agent: GenerationAgentSource }
@@ -106,7 +109,9 @@ export const resolveGenerationPlan = async (
   const modelReference =
     "agent" in source ? source.agent.modelId : source.modelId;
   const maxSteps =
-    "agent" in source ? (source.agent.maxSteps ?? DEFAULT_AGENT_MAX_STEPS) : 1;
+    "agent" in source
+      ? (source.agent.maxSteps ?? DEFAULT_AGENT_MAX_STEPS)
+      : DEFAULT_DIRECT_MAX_STEPS;
   const samplingSource: SamplingSource =
     "agent" in source ? source.agent : source;
 
@@ -128,6 +133,7 @@ export const resolveGenerationPlan = async (
 
   const model = openProvider(provider).languageModel(resolvedModelId);
   const maxOutputTokens = maxOutputTokensForModel(provider, resolvedModelId);
+  const contextWindow = contextWindowForModel(provider, resolvedModelId);
 
   return {
     plan: {
@@ -138,6 +144,10 @@ export const resolveGenerationPlan = async (
       // assert "the key is absent" instead of guarding against `undefined`
       // sneaking in as though it were unset.
       ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
+      // Absent when the Provider declares no Context window (ADR-0018) — the
+      // sole gate on Tool-result clearing, so an undeclared window must reach
+      // `buildModelInvocation` as a true absence, not a guessed default.
+      ...(contextWindow !== undefined ? { contextWindow } : {}),
       ...resolveSamplingSettings(samplingSource),
     },
     provider,

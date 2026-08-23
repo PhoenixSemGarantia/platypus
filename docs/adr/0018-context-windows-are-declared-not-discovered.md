@@ -126,3 +126,31 @@ reports no usage, occupancy is unknown and Platypus computes nothing.
   third. `CONTEXT.md` defines Context window and Context occupancy and disclaims
   the collision on the existing Context entry, and the user-facing docs extend
   their own "two different things are called Context" section to three.
+
+## Notes
+
+Added when Tool-result clearing (issue #524) shipped, consuming this ADR's
+`contextWindow` and `contextOccupancy` as its trigger. The Context, Decision and
+Consequences above are unchanged; this section records what clearing needed
+from them that the original decision left open or silent.
+
+- **Clearing reads the fraction against the declared TOTAL window, not the
+  total less the Output ceiling.** The Decision explicitly left output-headroom
+  reservation "to auto-compaction, which is the only thing that needs it" — this
+  is that promise being kept rather than quietly broken. Both `contextWindow`
+  and `maxOutputTokens` are independently optional, so a reservation would put
+  the trigger at a different effective fraction in each of the four
+  declared/undeclared combinations, which an Operator has no way to predict from
+  the one number they set. Clearing's job is also different in kind from
+  auto-compaction's: it exists to bend the growth curve of a long tool-using
+  turn, not to prove the next call fits under a ceiling. This records clearing's
+  answer only — a future auto-compaction pass is free to want the reservation
+  the Decision reserved for it, and should not read this as having settled that
+  question.
+- **The persisted output-token count is now load-bearing.** The Consequences
+  above observe that storing it alongside occupancy "makes the next turn's
+  starting size derivable exactly." Clearing is the first consumer of that
+  derivation, reading it to gate the first model call of a turn — before that
+  turn's own first step has reported anything. Dropping the output-token figure
+  from what is persisted would silently disable clearing on exactly the call it
+  is most needed on, with no error to say so.

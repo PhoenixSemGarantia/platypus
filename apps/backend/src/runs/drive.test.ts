@@ -10,6 +10,8 @@ import { startRun } from "./run-lifecycle.ts";
 import { runRegistry, TimeoutError } from "./run-registry.ts";
 import { driveChat, driveDelegate, driveOnce } from "./drive.ts";
 import type { RunStatus } from "./types.ts";
+import { CLEARED_TOOL_RESULT_MARKER } from "./tool-result-clearing.ts";
+import type { ModelMessage } from "ai";
 
 /**
  * The drive is the seam that owns the model drill and the terminal decision.
@@ -746,3 +748,116 @@ function errorThenEndOnAbort(message: string, signal: AbortSignal) {
       }),
   });
 }
+
+/**
+ * Tool-result clearing (ADR-0018 Notes, issue #524) is wired in once at
+ * `buildModelInvocation`, which every drive shape shares — this locks that
+ * every one of the three actually inherits it, at the level closest to the
+ * wire: what the model call itself receives.
+ */
+describe("Tool-result clearing inheritance", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const staleToolMessages = (n: number): ModelMessage[] =>
+    Array.from({ length: n }, (_, i) => ({
+      role: "tool" as const,
+      content: [
+        {
+          type: "tool-result" as const,
+          toolCallId: `t${i}`,
+          toolName: "read_url",
+          output: { type: "text" as const, value: `page ${i} content` },
+        },
+      ],
+    }));
+
+  const clearingPlanOf = (model: MockLanguageModelV3) => ({
+    model,
+    tools: {},
+    maxSteps: 3,
+    contextWindow: 100,
+    initialOccupancy: 95,
+  });
+
+  const capturingStreamModel = (record: { prompt?: unknown }) =>
+    new MockLanguageModelV3({
+      doStream: (options: { prompt: unknown }) => {
+        record.prompt = options.prompt;
+        return Promise.resolve({
+          stream: simulateReadableStream({ chunks: text("t1", "ok") }),
+        });
+      },
+    });
+
+  const capturingGenerateModel = (record: { prompt?: unknown }) =>
+    new MockLanguageModelV3({
+      doGenerate: (options: { prompt: unknown }) => {
+        record.prompt = options.prompt;
+        return Promise.resolve({
+          content: [{ type: "text", text: "ok" }],
+          finishReason: { unified: "stop", raw: "stop" },
+          usage: USAGE,
+        } as unknown as LanguageModelV3GenerateResult);
+      },
+    });
+
+  it("driveChat clears stale tool results already past threshold on the first call", async () => {
+    const { run } = startRecordedRun();
+    const record: { prompt?: unknown } = {};
+    const drive = driveChat({
+      plan: clearingPlanOf(capturingStreamModel(record)),
+      run,
+      modelMessages: staleToolMessages(10),
+    });
+    for await (const _ of drive.snapshots) void _;
+    await drive.done;
+    await drive.response.cancel();
+
+    expect(JSON.stringify(record.prompt)).toContain(CLEARED_TOOL_RESULT_MARKER);
+  });
+
+  it("driveDelegate clears stale tool results already past threshold on the first call", async () => {
+    const { run } = startRecordedRun();
+    const record: { prompt?: unknown } = {};
+    const drive = driveDelegate({
+      plan: clearingPlanOf(capturingStreamModel(record)),
+      run,
+      modelMessages: staleToolMessages(10),
+    });
+    for await (const _ of drive.snapshots) void _;
+    await drive.done;
+
+    expect(JSON.stringify(record.prompt)).toContain(CLEARED_TOOL_RESULT_MARKER);
+  });
+
+  it("driveOnce clears stale tool results already past threshold on the first call", async () => {
+    const { run } = startRecordedRun();
+    const record: { prompt?: unknown } = {};
+    await driveOnce({
+      plan: clearingPlanOf(capturingGenerateModel(record)),
+      run,
+      modelMessages: staleToolMessages(10),
+    });
+
+    expect(JSON.stringify(record.prompt)).toContain(CLEARED_TOOL_RESULT_MARKER);
+  });
+
+  it("clears nothing below threshold, on any of the three drive shapes", async () => {
+    const { run } = startRecordedRun();
+    const record: { prompt?: unknown } = {};
+    await driveOnce({
+      plan: {
+        ...clearingPlanOf(capturingGenerateModel(record)),
+        initialOccupancy: 10,
+      },
+      run,
+      modelMessages: staleToolMessages(10),
+    });
+
+    expect(JSON.stringify(record.prompt)).not.toContain(
+      CLEARED_TOOL_RESULT_MARKER,
+    );
+  });
+});

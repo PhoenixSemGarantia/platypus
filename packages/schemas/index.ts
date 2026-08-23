@@ -202,6 +202,26 @@ export type ChatList = z.infer<typeof chatListSchema>;
  */
 export const DEFAULT_AGENT_MAX_STEPS = 15;
 
+/**
+ * Default agentic step ceiling for a Direct (no-Agent) Chat turn — a bare
+ * Provider+model selection with no `agent` row to declare its own `maxSteps`.
+ *
+ * Deliberately BELOW `DEFAULT_AGENT_MAX_STEPS`: a Direct chat is a
+ * conversation, not a configured workflow, it has no step-limit control in
+ * the UI, and — unlike an unattended run — it is never guarded by the
+ * no-progress detector. The ceiling itself is the only guard here, so do not
+ * raise it to match the Agent default.
+ *
+ * 10 rather than something smaller because the page-reader tool a Web-search
+ * backend contributes is meant to be called repeatedly: it slices a long page
+ * and tells the model to keep reading with a continuation index. A realistic
+ * turn looks like search → read → continuation → continuation → answer — five
+ * steps already, so a ceiling of 5 sits right on that boundary and would fail
+ * in the same silent way as the bug this constant fixes. 10 leaves headroom
+ * above it.
+ */
+export const DEFAULT_DIRECT_MAX_STEPS = 10;
+
 // An Agent is scoped to either a Workspace or an Organization (mutually
 // exclusive), mirroring the dual-scope shape of `provider`/`mcp`/`skill`.
 // Org-scoped Agents are Shared resources managed by Org Admins (ADR-0007);
@@ -761,6 +781,39 @@ const pointerModelIdSchema = z
  */
 export const CONTEXT_WINDOW_MIN = 1_000;
 export const CONTEXT_WINDOW_MAX = 10_000_000;
+
+/**
+ * Tool-result clearing (ADR-0018 Notes, issue #524).
+ *
+ * The core tool names whose results are large, disposable, and safe to clear
+ * from what a model call receives once Context occupancy crosses the
+ * threshold below. Deny by default: a new core tool is NOT clearable until
+ * added here explicitly, which is the safe direction and so needs no
+ * announcement.
+ *
+ * Excludes anything that mutates state (`fsWrite`, `fsEdit`, `shellExec`),
+ * sub-Agent delegation (its result is the point of the call, not disposable
+ * page content), and `loadSkill` (its result is instructions the model is
+ * meant to keep following, not data to discard). MCP and third-party plugin
+ * tools are out of scope until read-only hints are surfaced (#626).
+ */
+export const CLEARABLE_TOOL_NAMES: ReadonlySet<string> = new Set([
+  "web_search",
+  "read_url",
+  "fetchUrl",
+  "fsRead",
+  "fsList",
+]);
+
+/**
+ * The fraction of the declared Context window at which Tool-result clearing
+ * engages. Read against the total window, not the total less the Output
+ * ceiling — see the ADR-0018 Notes.
+ */
+export const TOOL_RESULT_CLEARING_THRESHOLD = 0.7;
+
+/** How many of the most recent clearable tool results survive a clearing pass. */
+export const TOOL_RESULT_CLEARING_KEEP_RECENT = 4;
 
 export const modelConfigSchema = z.object({
   id: z.string().min(1),

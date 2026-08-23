@@ -134,6 +134,44 @@ number on the page and the first one to look at on a slow turn.
   badge is what tells you that.
 </Callout>
 
+## Where a reply's time and tokens went
+
+An **(i)** button on an assistant message opens a panel breaking the reply down
+into whichever of these it has a reading for:
+
+- **Input**, **Output**, **Total** tokens — how many tokens this reply was
+  billed for. If it took several passes through the model (it called a Tool
+  and then answered, say), this is the total across every one of them, not
+  just the last.
+- **Preparation** — how long it took to get ready to ask the model at all:
+  opening Tool connections, loading Skills, Memories and Contexts, and turning
+  any attached files into something the model can read.
+- **Model** — how long the model itself took, from the request going out to
+  the reply finishing. Running a Tool happens inside this time, and where at
+  least one Tool ran locally, a second line underneath shows how much of it
+  was spent on Tools, labelled "measured".
+
+Preparation and Model are the two halves of the wait; there's no combined total
+figure to add them into, and the "measured" Tool line is not subtracted from
+Model — a turn that ran three Tools at once can show more Tool time than the
+Model duration it sits under, because those Tools ran concurrently rather than
+one after another.
+
+<Callout type="warning">
+  **A blank line is not a zero.** The panel only shows what it actually has a
+  reading for — a Provider that doesn't report token usage means no token
+  figures, not `0`. If nothing at all is available, the **(i)** button doesn't
+  appear. Chats from before your deployment was upgraded show no button unless
+  they happen to carry Tool timing from an earlier update.
+</Callout>
+
+The panel fills in once the reply has finished; it does not update while the
+reply is still streaming. This is a different reading from the [context
+meter](#how-full-the-conversation-is) below the input box: the meter tracks
+how full the model's window is, while this panel's token figures are what the
+reply was billed for — the same conversation can show very different numbers
+for each on a long, Tool-heavy turn.
+
 ## When a reply stops early
 
 Every model has a ceiling on how much it can write in one reply. Reach it and
@@ -215,6 +253,31 @@ would rather show nothing than a number you cannot interpret. An Org Admin
 declares the window on the Provider's model entry — see [Declaring a Context
 window](/self-hosting/providers-and-auth#declaring-a-context-window). Switching
 model switches the meter with it, since the window belongs to the model.
+
+## Freeing up space during a long tool-using turn
+
+Where a **Context window** is declared, a long turn that reads a lot of pages
+or files gets one piece of automatic help: once the meter above would be
+running high, older results from a small set of read-only tools — web search,
+reading a URL, reading a file or listing a directory in a Sandbox — stop being
+sent to the model. Only the oldest ones go, and only enough to make room; the
+most recent stay.
+
+Nothing is deleted. The full result is still in the message, still yours to
+read, and still there after a reload — this only changes what the model itself
+is sent starting from that point in the conversation. A tool result the model
+no longer has carries a small marker so you can tell; expand it to read what it
+returned.
+
+<Callout type="warning">
+  **This is retention, not summarising.** Platypus does not write a shorter
+  version of an older result — it either sends it in full or not at all. If the
+  model needs to act on something in a result that has stopped being sent, ask
+  again in a follow-up message.
+</Callout>
+
+This has no effect where no **Context window** is declared for the model — see
+above.
 
 ## Fixing a conversation instead of restarting it
 

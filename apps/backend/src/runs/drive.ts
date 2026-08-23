@@ -210,6 +210,10 @@ export type ChatDriveOptions = DriveBase &
      * never onto the prompt.
      */
     searchUnavailable?: boolean;
+    /** How long Turn resolution took, in whole milliseconds, before this drive
+     *  was reached. Stamped onto the streamed message's metadata; absent for a
+     *  drive that never measured one. */
+    prepDurationMs?: number;
     generateMessageId?: () => string;
     /** The live map the caller fills from `onToolExecutionEnd`. */
     toolDurations?: Map<string, number>;
@@ -260,6 +264,7 @@ const runStreamedDrive = (
     originalMessages = [],
     agentId,
     searchUnavailable,
+    prepDurationMs,
     generateMessageId,
     toolDurations,
     onStepFinish,
@@ -279,6 +284,13 @@ const runStreamedDrive = (
   const done = new Promise<StreamedDriveResult>((resolve) => {
     resolveDone = resolve;
   });
+
+  // The Drive's own start — the boundary the brief in issue #354 calls
+  // "where the model stream is created". Captured here, immediately before
+  // `streamText`, rather than where `createMessageMetadata` is built a few
+  // lines down: that gap is real code, not a rounding nicety, and this is the
+  // earliest point the model request can be said to have been sent.
+  const driveStartMs = Date.now();
 
   const result = streamText({
     ...modelArgs(opts, noProgress),
@@ -307,6 +319,8 @@ const runStreamedDrive = (
       // The extractor sees the terminal finish reason but has no other way to
       // know whether the loop was stopped or the model was done.
       stepCeiling: opts.plan.maxSteps,
+      prepDurationMs,
+      driveStartMs,
     }),
     onError: (error) => formatStreamError(error),
     onFinish: ({ messages: finalMessages }) => {

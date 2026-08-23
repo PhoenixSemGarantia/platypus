@@ -1321,16 +1321,21 @@ describe("AgentRunner.stream — message metadata", () => {
   it("attributes the message to the resolved agent at the start of the stream", async () => {
     const stream = await startStream(fakeTurn());
 
+    // `prepDurationMs` rides the same `start` part (issue #354) — real
+    // elapsed time from `setup()`, so only its presence and type are pinned
+    // here.
     expect(stream.metadataFor({ type: "start" })).toEqual({
       agentId: "agent-1",
+      prepDurationMs: expect.any(Number) as unknown,
     });
 
     await stream.end();
   });
 
   // A direct provider/model chat resolves no agent, so its start carries no
-  // metadata at all — which is exactly the case that had no way to be flagged
-  // while `agentId` was a required field.
+  // agent attribution — which is exactly the case that had no way to be
+  // flagged while `agentId` was a required field. `prepDurationMs` still
+  // rides `start` regardless, since it is a Turn resolution fact.
   it("still flags a truncated direct provider/model stream that has no attribution", async () => {
     const turn = fakeTurn();
     turn.resolved = {
@@ -1339,7 +1344,11 @@ describe("AgentRunner.stream — message metadata", () => {
     };
     const stream = await startStream(turn);
 
-    expect(stream.metadataFor({ type: "start" })).toBeUndefined();
+    // `prepDurationMs` is present even with no agent to attribute — it is a
+    // Turn resolution fact, not an agent one.
+    expect(stream.metadataFor({ type: "start" })).toEqual({
+      prepDurationMs: expect.any(Number) as unknown,
+    });
     expect(
       stream.metadataFor({ type: "finish", finishReason: "length" }),
     ).toEqual({ truncatedByTokenLimit: true });
@@ -1357,6 +1366,7 @@ describe("AgentRunner.stream — message metadata", () => {
     expect(stream.metadataFor({ type: "start" })).toEqual({
       agentId: "agent-1",
       searchUnavailable: true,
+      prepDurationMs: expect.any(Number) as unknown,
     });
 
     await stream.end();
@@ -1434,7 +1444,13 @@ describe("AgentRunner.stream — message metadata", () => {
         finishReason: "stop",
         usage: { inputTokens: 12_400, outputTokens: 180 },
       }),
-    ).toEqual({ contextOccupancy: { inputTokens: 12_400, outputTokens: 180 } });
+    ).toEqual({
+      contextOccupancy: { inputTokens: 12_400, outputTokens: 180 },
+      // Token usage (issue #354) and the Model duration ride the same part.
+      // On a single-step turn the sum equals this step's own reading.
+      tokenUsage: { inputTokens: 12_400, outputTokens: 180 },
+      modelDurationMs: expect.any(Number) as unknown,
+    });
 
     await stream.end();
   });
@@ -1458,24 +1474,33 @@ describe("AgentRunner.stream — message metadata", () => {
 
     expect(first).toEqual({
       contextOccupancy: { inputTokens: 1_000, outputTokens: 30 },
+      tokenUsage: { inputTokens: 1_000, outputTokens: 30 },
+      modelDurationMs: expect.any(Number) as unknown,
     });
     expect(second).toEqual({
       contextOccupancy: { inputTokens: 4_000, outputTokens: 60 },
+      // The fold, not the replace: Token usage sums both steps, unlike
+      // Context occupancy right beside it.
+      tokenUsage: { inputTokens: 5_000, outputTokens: 90 },
+      modelDurationMs: expect.any(Number) as unknown,
     });
 
     await stream.end();
   });
 
-  it("records nothing when the Provider reports no token usage", async () => {
+  it("records nothing about tokens when the Provider reports no usage", async () => {
     const stream = await startStream(fakeTurn());
 
+    // Neither Context occupancy nor Token usage — Model duration still rides
+    // this same part regardless (issue #354), since the Drive ran whether or
+    // not the Provider reported anything.
     expect(
       stream.metadataFor({
         type: "finish-step",
         finishReason: "stop",
         usage: { inputTokens: undefined, outputTokens: undefined },
       }),
-    ).toBeUndefined();
+    ).toEqual({ modelDurationMs: expect.any(Number) as unknown });
 
     await stream.end();
   });
@@ -1497,7 +1522,10 @@ describe("AgentRunner.stream — message metadata", () => {
         finishReason: "stop",
         usage: { inputTokens: undefined, outputTokens: undefined },
       }),
-    ).toEqual({ contextOccupancy: null });
+    ).toEqual({
+      contextOccupancy: null,
+      modelDurationMs: expect.any(Number) as unknown,
+    });
 
     await stream.end();
   });
@@ -1513,7 +1541,13 @@ describe("AgentRunner.stream — message metadata", () => {
         finishReason: "stop",
         usage: { inputTokens: 4_000, outputTokens: undefined },
       }),
-    ).toEqual({ contextOccupancy: { inputTokens: 4_000, outputTokens: null } });
+    ).toEqual({
+      contextOccupancy: { inputTokens: 4_000, outputTokens: null },
+      // Token usage folds a missing output count as 0 rather than omitting
+      // it, mirroring `accumulateStepStats`'s billing-sum branch.
+      tokenUsage: { inputTokens: 4_000, outputTokens: 0 },
+      modelDurationMs: expect.any(Number) as unknown,
+    });
 
     await stream.end();
   });
@@ -1531,6 +1565,7 @@ describe("AgentRunner.stream — message metadata", () => {
     expect(occupancy).not.toHaveProperty("agentId");
     expect(stream.metadataFor({ type: "start" })).toEqual({
       agentId: "agent-1",
+      prepDurationMs: expect.any(Number) as unknown,
     });
     expect(
       stream.metadataFor({ type: "finish", finishReason: "length" }),

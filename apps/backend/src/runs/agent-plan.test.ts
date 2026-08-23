@@ -12,7 +12,10 @@ import {
   type GenerationPlanQueries,
 } from "./agent-plan.ts";
 import { NotFoundError, ValidationError } from "../errors.ts";
-import { DEFAULT_AGENT_MAX_STEPS } from "@platypus/schemas";
+import {
+  DEFAULT_AGENT_MAX_STEPS,
+  DEFAULT_DIRECT_MAX_STEPS,
+} from "@platypus/schemas";
 import type { Provider } from "@platypus/schemas";
 
 const baseProvider: Provider = {
@@ -70,9 +73,11 @@ describe("resolveGenerationPlan", () => {
     ).rejects.toBeInstanceOf(ValidationError);
   });
 
-  // A direct (no-Agent) selection always runs one step — there is no Agent row
-  // to declare a ceiling.
-  it("resolves a direct Provider+model selection to a one-step plan", async () => {
+  // A direct (no-Agent) selection has no Agent row to declare a ceiling, so it
+  // falls back to DEFAULT_DIRECT_MAX_STEPS rather than 1 — a Direct turn can
+  // be served a locally-executed search tool (issue #167 / ADR-0014) whose
+  // result the model must still get a step to answer from (issue #463).
+  it("resolves a direct Provider+model selection to the Direct step ceiling", async () => {
     const { plan, resolvedModelId, modelReference } =
       await resolveGenerationPlan(
         { providerId: "p1", modelId: "gpt-4" },
@@ -80,7 +85,7 @@ describe("resolveGenerationPlan", () => {
         queriesWith([baseProvider]),
       );
 
-    expect(plan.maxSteps).toBe(1);
+    expect(plan.maxSteps).toBe(DEFAULT_DIRECT_MAX_STEPS);
     expect(resolvedModelId).toBe("gpt-4");
     expect(modelReference).toBe("gpt-4");
   });
@@ -168,6 +173,36 @@ describe("resolveGenerationPlan", () => {
     );
 
     expect(plan).not.toHaveProperty("maxOutputTokens");
+  });
+
+  // ADR-0018 / issue #524: `contextWindow` is Tool-result clearing's sole
+  // gate, so it must reach the plan the same way the output ceiling does —
+  // present when declared, absent (never a guessed default) when not.
+  it("carries the resolved model's declared Context window", async () => {
+    const provider = {
+      ...baseProvider,
+      modelIds: [
+        { id: "gpt-4", passthroughFileTypes: [], contextWindow: 128000 },
+      ],
+    } as unknown as Provider;
+
+    const { plan } = await resolveGenerationPlan(
+      { agent: { providerId: "p1", modelId: "gpt-4" } },
+      scope,
+      queriesWith([provider]),
+    );
+
+    expect(plan.contextWindow).toBe(128000);
+  });
+
+  it("leaves the Context window absent when the Provider declares none", async () => {
+    const { plan } = await resolveGenerationPlan(
+      { agent: { providerId: "p1", modelId: "gpt-4" } },
+      scope,
+      queriesWith([baseProvider]),
+    );
+
+    expect(plan).not.toHaveProperty("contextWindow");
   });
 
   it("resolves an alias reference to the model it currently points at", async () => {
