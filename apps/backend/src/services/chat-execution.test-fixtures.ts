@@ -173,7 +173,7 @@ export const createInMemoryChatTurnQueries = (
       return Promise.resolve({ global, workspace });
     },
 
-    getRecentMemories(userId, workspaceId) {
+    getRecentMemories(userId, workspaceId, _referenceDate) {
       return Promise.resolve(
         (fx.memories ?? [])
           .filter((m) => m.userId === userId && m.workspaceId === workspaceId)

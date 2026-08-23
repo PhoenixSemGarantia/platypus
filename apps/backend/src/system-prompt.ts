@@ -2,10 +2,7 @@ import { type Skill } from "@platypus/schemas";
 import type { agent as agentTable } from "./db/schema.ts";
 import { subAgentToolName } from "./tools/sub-agent.ts";
 import { MEMORY_TOOLSET_ID, SANDBOX_TOOLSET_ID } from "./tools/index.ts";
-import {
-  formatSummariesForSystemPrompt,
-  type MemorySummary,
-} from "./services/memory-retrieval.ts";
+import type { MemorySummary } from "./services/memory-retrieval.ts";
 import { renderSecurityGuardrails } from "./security-prompt.ts";
 
 // Re-exported for callers that reach the renderer through this module.
@@ -13,7 +10,37 @@ export { renderSecurityGuardrails };
 
 type AgentRecord = typeof agentTable.$inferSelect;
 
-export type SystemPromptContext = {
+/**
+ * The half of the prompt context that is per-turn and therefore must NEVER
+ * reach the prefix renderer (ADR-0020). It carries the volatile inputs a turn
+ * resolves — data that would change the prefix if a fragment read it directly.
+ *
+ * The seam is the renderer's parameter type: `renderSystemPrompt` accepts only
+ * {@link SystemPromptStableContext}, which physically lacks these fields. A
+ * future volatile fragment therefore cannot read this data — doing so requires
+ * widening the stable type, a one-line diff in a type named for stability that
+ * a reviewer will question — rather than a review-miss guardrail. Today the
+ * only volatile fragment input is the live memory retrieval, which the turn
+ * folds into the stable `memoriesBlock` text before composition.
+ */
+export type SystemPromptTurnContext = {
+  /**
+   * The memories this turn resolved, when it retrieved them live (a headless
+   * run with no Chat pin). Empty for an interactive run that re-used a pinned
+   * snapshot. Folded into `SystemPromptStableContext.memoriesBlock` before the
+   * renderer is ever called.
+   */
+  memories: MemorySummary[];
+};
+
+/**
+ * The stable half of the prompt context — everything `renderSystemPrompt`
+ * reads. By construction it carries no per-turn field (see
+ * {@link SystemPromptTurnContext}): reaching the prefix requires a field to be
+ * here, and the volatile inputs are deliberately absent, so a future fragment
+ * cannot make the prefix vary with a background writer or the wall clock.
+ */
+export type SystemPromptStableContext = {
   workspace: { id: string; context?: string };
   agent: AgentRecord | null;
   user: {
@@ -22,7 +49,15 @@ export type SystemPromptContext = {
     globalContext?: string;
     workspaceContext?: string;
   };
-  memories: MemorySummary[];
+  /**
+   * The resolved Memories block — the output of `formatSummariesForSystemPrompt`.
+   * For an interactive Chat this is the text pinned on the Chat row, re-taken
+   * only after the Chat idles past the re-pin horizon (ADR-0020); for a headless
+   * run it is the live block resolved at turn time. Empty string → no Memories
+   * block. The renderer never retrieves or reads a clock — it renders this text
+   * as given, which is what keeps the prefix byte-identical across turns.
+   */
+  memoriesBlock: string;
   skills: Array<Pick<Skill, "name" | "description">>;
   subAgents: Array<{ name: string; description?: string | null }>;
   /**
@@ -68,7 +103,7 @@ export type SystemPromptContext = {
   runMode: "interactive" | "headless";
 };
 
-type Fragment = (ctx: SystemPromptContext) => string | null;
+type Fragment = (ctx: SystemPromptStableContext) => string | null;
 
 const instructionsFragment: Fragment = (ctx) => {
   const instructions = ctx.agent?.instructions ?? ctx.fallbackInstructions;
@@ -118,9 +153,8 @@ const userContextFragment: Fragment = (ctx) => {
 };
 
 const memoriesBlockFragment: Fragment = (ctx) => {
-  const formatted = formatSummariesForSystemPrompt(ctx.memories);
-  if (!formatted) return null;
-  return `<memories>\n${formatted}\n</memories>`;
+  if (!ctx.memoriesBlock.trim()) return null;
+  return `<memories>\n${ctx.memoriesBlock.trim()}\n</memories>`;
 };
 
 const memoryToolsFragment: Fragment = (ctx) => {
@@ -128,8 +162,7 @@ const memoryToolsFragment: Fragment = (ctx) => {
     ctx.agent?.toolSetIds?.includes(MEMORY_TOOLSET_ID) ?? false;
   if (!hasMemoryTools) return null;
 
-  const hasMemoriesBlock = !!formatSummariesForSystemPrompt(ctx.memories);
-  return hasMemoriesBlock
+  return ctx.memoriesBlock.trim()
     ? "You also have access to memorySearch and memoryGet tools to look up older or more specific memories beyond what is shown above."
     : "You have access to memorySearch and memoryGet tools to look up memories from past conversations.";
 };
@@ -227,7 +260,7 @@ const FRAGMENTS: Fragment[] = [
   securityFragment,
 ];
 
-export function renderSystemPrompt(ctx: SystemPromptContext): string {
+export function renderSystemPrompt(ctx: SystemPromptStableContext): string {
   return FRAGMENTS.map((f) => f(ctx))
     .filter((p): p is string => p !== null && p.length > 0)
     .join("\n\n");

@@ -52,6 +52,7 @@ export class ChatSink implements RunSink {
   async onStart(ctx: {
     runId: RunId;
     messages: PlatypusUIMessage[];
+    memorySnapshot?: string;
   }): Promise<void> {
     this.runId = ctx.runId;
     this.latestMessages = ctx.messages;
@@ -59,13 +60,17 @@ export class ChatSink implements RunSink {
     // Upsert with the input messages so a reconnecting client can see
     // the user's question immediately, before the model produces its
     // first step. Existing rows (follow-up turns) get their messages
-    // overwritten with the fuller history the client just sent.
+    // overwritten with the fuller history the client just sent, and the
+    // pinned Memories block (ADR-0020) is written so a re-take on this turn
+    // survives for the next.
     try {
       const updated = await db
         .update(chatTable)
         .set({
           status: "running",
           messages: ctx.messages,
+          memorySnapshot: ctx.memorySnapshot ?? null,
+          lastTurnAt: new Date(),
           updatedAt: new Date(),
         })
         .where(
@@ -83,6 +88,8 @@ export class ChatSink implements RunSink {
           title: "Untitled",
           status: "running",
           messages: ctx.messages,
+          memorySnapshot: ctx.memorySnapshot ?? null,
+          lastTurnAt: new Date(),
           createdAt: new Date(),
           updatedAt: new Date(),
         });

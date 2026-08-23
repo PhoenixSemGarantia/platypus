@@ -20,6 +20,12 @@ vi.mock("../services/chat-execution.ts", () => ({
 import app from "../server.ts";
 import { NotFoundError, ValidationError } from "../errors.ts";
 import { FileValidationError } from "../services/file-gate.ts";
+import {
+  retrieveRecentSummaries,
+  formatSummariesForSystemPrompt,
+  shouldRePinMemorySnapshot,
+  type MemorySummary,
+} from "../services/memory-retrieval.ts";
 
 // Mock AI SDK
 vi.mock("ai", async () => {
@@ -70,6 +76,7 @@ vi.mock("@ai-sdk/mcp", () => ({
 vi.mock("../services/memory-retrieval.ts", () => ({
   retrieveRecentSummaries: vi.fn().mockResolvedValue([]),
   formatSummariesForSystemPrompt: vi.fn().mockReturnValue(""),
+  shouldRePinMemorySnapshot: vi.fn().mockReturnValue(true),
 }));
 
 describe("Chat Routes", () => {
@@ -217,6 +224,14 @@ describe("Chat Routes", () => {
   });
 
   describe("POST /", () => {
+    // A stream-shaped turn the route can route into streamText without
+    // exercising prepareChatTurn's internals (covered by chat-execution.test.ts).
+    const validTurn = {
+      stream: { model: {}, tools: {}, system: "", messages: [], maxSteps: 1 },
+      resolved: { providerId: "p1", modelId: "m1" },
+      dispose: vi.fn().mockResolvedValue(undefined),
+    };
+
     it("should start a chat stream", async () => {
       mockSession({
         id: "user-1",
@@ -227,6 +242,7 @@ describe("Chat Routes", () => {
       mockDb.limit.mockResolvedValueOnce([
         { ownerId: "user-1", organizationId: "org-1" },
       ]); // requireWorkspaceAccess
+      mockDb.limit.mockResolvedValueOnce([]); // ADR-0020 row lookup (new chat)
 
       // ChatSink.onStart upserts the chat row with status=running before
       // prepareChatTurn runs. Returning a non-empty array skips the insert
@@ -274,6 +290,7 @@ describe("Chat Routes", () => {
       mockDb.limit.mockResolvedValueOnce([
         { ownerId: "user-1", organizationId: "org-1" },
       ]); // requireWorkspaceAccess
+      mockDb.limit.mockResolvedValueOnce([]); // ADR-0020 row lookup (new chat)
       mockDb.returning.mockResolvedValueOnce([{ id: "chat-2" }]); // ChatSink.onStart
 
       mockPrepareChatTurn.mockRejectedValueOnce(
@@ -303,6 +320,7 @@ describe("Chat Routes", () => {
       mockDb.limit.mockResolvedValueOnce([
         { ownerId: "user-1", organizationId: "org-1" },
       ]); // requireWorkspaceAccess
+      mockDb.limit.mockResolvedValueOnce([]); // ADR-0020 row lookup (new chat)
       mockDb.returning.mockResolvedValueOnce([{ id: "chat-3" }]); // ChatSink.onStart
 
       mockPrepareChatTurn.mockRejectedValueOnce(
@@ -333,6 +351,7 @@ describe("Chat Routes", () => {
       mockDb.limit.mockResolvedValueOnce([
         { ownerId: "user-1", organizationId: "org-1" },
       ]); // requireWorkspaceAccess
+      mockDb.limit.mockResolvedValueOnce([]); // ADR-0020 row lookup (new chat)
 
       const fileError = new FileValidationError([
         { file: "scan.pdf", reason: "unextractable" },
@@ -356,6 +375,95 @@ describe("Chat Routes", () => {
         error: fileError.message,
         files: ["scan.pdf"],
       });
+    });
+
+    it("re-takes and forwards a freshly resolved Memories snapshot on a stale pin (ADR-0020)", async () => {
+      mockSession({
+        id: "user-1",
+        name: "Test User",
+        email: "test@example.com",
+      });
+      mockDb.limit.mockResolvedValueOnce([{ role: "member" }]); // requireOrgAccess
+      mockDb.limit.mockResolvedValueOnce([
+        { ownerId: "user-1", organizationId: "org-1" },
+      ]); // requireWorkspaceAccess
+      mockDb.limit.mockResolvedValueOnce([]); // ADR-0020 row lookup (no row → new chat)
+      mockDb.returning.mockResolvedValueOnce([{ id: "chat-a" }]); // ChatSink.onStart
+
+      vi.mocked(shouldRePinMemorySnapshot).mockReturnValueOnce(true);
+      vi.mocked(retrieveRecentSummaries).mockResolvedValueOnce([
+        { id: "s1", summaryDate: "2026-04-29", summary: "Likes coffee." },
+      ] as MemorySummary[]);
+      vi.mocked(formatSummariesForSystemPrompt).mockReturnValueOnce(
+        "pinned-fresh",
+      );
+      mockPrepareChatTurn.mockResolvedValueOnce(validTurn);
+
+      await app.request(baseUrl, {
+        method: "POST",
+        body: JSON.stringify({
+          id: "chat-a",
+          workspaceId,
+          providerId: "p1",
+          modelId: "m1",
+          messages: [],
+        }),
+        headers: { "Content-Type": "application/json" },
+      });
+
+      const inputArg = mockPrepareChatTurn.mock.calls[0][0] as {
+        memorySnapshot?: string;
+      };
+      // The resolved block rides down through RunInput into prepareChatTurn.
+      expect(inputArg.memorySnapshot).toBe("pinned-fresh");
+      // The two-day window is anchored to the re-take moment, not a clock read.
+      expect(retrieveRecentSummaries).toHaveBeenCalledWith(
+        "user-1",
+        "ws-1",
+        2,
+        expect.any(Date),
+      );
+    });
+
+    it("reuses the pinned snapshot when the Chat has not idled past the horizon (ADR-0020)", async () => {
+      mockSession({
+        id: "user-1",
+        name: "Test User",
+        email: "test@example.com",
+      });
+      mockDb.limit.mockResolvedValueOnce([{ role: "member" }]); // requireOrgAccess
+      mockDb.limit.mockResolvedValueOnce([
+        { ownerId: "user-1", organizationId: "org-1" },
+      ]); // requireWorkspaceAccess
+      // Row lookup resolves an existing Chat carrying a pin and a previous-turn
+      // stamp.
+      mockDb.limit.mockResolvedValueOnce([
+        { memorySnapshot: "pinned-block", lastTurnAt: new Date() },
+      ]);
+      mockDb.returning.mockResolvedValueOnce([{ id: "chat-b" }]); // ChatSink.onStart
+
+      vi.mocked(shouldRePinMemorySnapshot).mockReturnValueOnce(false);
+
+      mockPrepareChatTurn.mockResolvedValueOnce(validTurn);
+
+      await app.request(baseUrl, {
+        method: "POST",
+        body: JSON.stringify({
+          id: "chat-b",
+          workspaceId,
+          providerId: "p1",
+          modelId: "m1",
+          messages: [],
+        }),
+        headers: { "Content-Type": "application/json" },
+      });
+
+      const inputArg = mockPrepareChatTurn.mock.calls[0][0] as {
+        memorySnapshot?: string;
+      };
+      // The existing pin is forwarded verbatim — the prefix stays byte-identical.
+      expect(inputArg.memorySnapshot).toBe("pinned-block");
+      expect(retrieveRecentSummaries).not.toHaveBeenCalled();
     });
   });
 

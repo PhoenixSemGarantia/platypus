@@ -25,6 +25,12 @@ import { getOrigin } from "../utils/get-origin.ts";
 import { agentRunner } from "../runs/agent-runner.ts";
 import { ChatSink } from "../runs/sinks/chat-sink.ts";
 import type { RunInput } from "../runs/types.ts";
+import { actorUserId } from "../scope.ts";
+import {
+  formatSummariesForSystemPrompt,
+  retrieveRecentSummaries,
+  shouldRePinMemorySnapshot,
+} from "../services/memory-retrieval.ts";
 
 /**
  * The bounds an interactive Chat run is given.
@@ -133,16 +139,26 @@ chat.get(
 
     const chat = await requireOwned(db, "chat", chatId, workspaceId);
 
+    // The pinned Memories block and previous-turn stamp (ADR-0020) are internal
+    // — absent from the Chat response schema, never surfaced in the product.
+    // Strip them before serialising; the row read by the run sink still carries
+    // them.
+    const {
+      memorySnapshot: _memorySnapshot,
+      lastTurnAt: _lastTurnAt,
+      ...chatResponse
+    } = chat;
+
     // Rewrite storage:// URLs to HTTP URLs
     const origin = getOrigin(c);
-    if (chat.messages) {
-      chat.messages = rewriteStorageUrls(
-        chat.messages as PlatypusUIMessage[],
+    if (chatResponse.messages) {
+      chatResponse.messages = rewriteStorageUrls(
+        chatResponse.messages as PlatypusUIMessage[],
         origin,
       );
     }
 
-    return c.json(chat);
+    return c.json(chatResponse);
   },
 );
 
@@ -157,10 +173,60 @@ chat.post(
     const scope = workspaceScopeOf(c);
     const data = c.req.valid("json");
 
+    // ADR-0020: resolve the pinned Memories block OUTSIDE composition. The
+    // Chat route owns the chat row, so it does the arithmetic — compare the gap
+    // since the previous turn against the re-pin horizon and re-take or reuse —
+    // and the resolved block rides down through `RunInput` into
+    // `prepareChatTurn`'s input. The renderer never learns about clocks.
+    //
+    // Idleness is measured against `lastTurnAt` — stamped only by the run sink
+    // at turn boundaries — never `updatedAt`, which the memory-extraction job
+    // and auto-titling bump at their own cadence and so cannot stand in for a
+    // recent turn.
+    const existingChat = await db
+      .select({
+        memorySnapshot: chatTable.memorySnapshot,
+        lastTurnAt: chatTable.lastTurnAt,
+      })
+      .from(chatTable)
+      .where(ownedWhere("chat", data.id, scope.workspaceId))
+      .limit(1);
+    const existingSnapshot = existingChat[0]?.memorySnapshot ?? null;
+
+    const now = new Date();
+    let memorySnapshot: string;
+    if (
+      shouldRePinMemorySnapshot({
+        existingSnapshot,
+        previousTurnAt: existingChat[0]?.lastTurnAt ?? null,
+        now,
+      })
+    ) {
+      // Re-take: a fresh Chat, a row written before this feature, or a Chat
+      // that has idled past the horizon (by which point the cached prefix is
+      // provably expired, so the re-take is free). The two-day retrieval window
+      // is anchored to `now`, not a render-time clock read.
+      const summaries = await retrieveRecentSummaries(
+        actorUserId(scope.principal),
+        scope.workspaceId,
+        2,
+        now,
+      );
+      memorySnapshot = formatSummariesForSystemPrompt(summaries);
+    } else {
+      // The Chat has not idled past the horizon — keep the existing pin so the
+      // prefix stays byte-identical across its turns.
+      memorySnapshot = existingSnapshot!;
+    }
+
     const input: RunInput = {
       runId: data.id,
       request: data,
       messages: (data.messages as PlatypusUIMessage[] | undefined) ?? [],
+      memorySnapshot,
+      // The same moment the pin was resolved against, so a re-take and its
+      // retrieval window agree on "now" rather than reading the clock twice.
+      memoriesReferenceDate: now,
     };
 
     const sink = new ChatSink({
@@ -259,7 +325,16 @@ chat.put(
       throw new NotFoundError("Chat not found");
     }
 
-    return c.json(result);
+    // The pinned Memories block (ADR-0020) is internal — absent from the Chat
+    // response schema, never surfaced in the product. Strip the internal
+    // columns (`memorySnapshot`, `lastTurnAt`) before serialising.
+    const {
+      memorySnapshot: _memorySnapshot,
+      lastTurnAt: _lastTurnAt,
+      ...chatResponse
+    } = result;
+
+    return c.json(chatResponse);
   },
 );
 

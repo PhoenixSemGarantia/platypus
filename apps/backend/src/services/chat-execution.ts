@@ -23,9 +23,11 @@ import {
 import { normalizeToolResult } from "./tool-result.ts";
 import {
   renderSystemPrompt,
-  type SystemPromptContext,
+  type SystemPromptStableContext,
+  type SystemPromptTurnContext,
 } from "../system-prompt.ts";
 import {
+  formatSummariesForSystemPrompt,
   retrieveRecentSummaries,
   type MemorySummary,
 } from "./memory-retrieval.ts";
@@ -181,6 +183,21 @@ export type PrepareChatTurnInput = {
    */
   onActivity?: (event: ToolActivityEvent) => void;
   /**
+   * The pinned Memories block (ADR-0020) an interactive Chat turn resolved —
+   * the rendered summaries fragment the renderer consumes verbatim. Passed down
+   * from the Chat route through `RunInput`. Absent for headless runs (no Chat
+   * identity), which resolve the block live instead. `prepareChatTurn` stays a
+   * pure function of its inputs; the renderer never learns about clocks.
+   */
+  memorySnapshot?: string;
+  /**
+   * The moment the caller resolved this turn, anchoring the Memories retrieval
+   * window (ADR-0020). Required, and required precisely so that no caller
+   * silently inherits a clock read from inside turn preparation: the window is
+   * an input. Unused on a pinned interactive turn, which retrieves nothing.
+   */
+  memoriesReferenceDate: Date;
+  /**
    * The run this turn belongs to. Sub-agent delegate tools built here register
    * their own runs as children of it, so a delegated run is cancellable and
    * subject to the same timeouts in its own right. Absent for callers that
@@ -234,9 +251,15 @@ export type ChatTurnQueries = {
     userId: string,
     workspaceId: string,
   ): Promise<{ global?: string; workspace?: string }>;
+  /**
+   * The recent daily memory summaries, anchored to `referenceDate` for the
+   * two-day window (ADR-0020) — the caller, never the renderer, bounds
+   * freshness.
+   */
   getRecentMemories(
     userId: string,
     workspaceId: string,
+    referenceDate: Date,
   ): Promise<MemorySummary[]>;
   /**
    * Returns the *keys* of the workspace's sandbox env vars (values omitted —
@@ -356,8 +379,8 @@ export const drizzleChatTurnQueries: ChatTurnQueries = {
     return { global, workspace };
   },
 
-  async getRecentMemories(userId, workspaceId) {
-    return retrieveRecentSummaries(userId, workspaceId);
+  async getRecentMemories(userId, workspaceId, referenceDate) {
+    return retrieveRecentSummaries(userId, workspaceId, 2, referenceDate);
   },
 
   async getSandboxEnvKeys(workspaceId) {
@@ -568,7 +591,13 @@ export const prepareChatTurn = async (
     loadSkills(queries, agent, orgId, workspaceId),
     loadSubAgents(queries, agent, scope, sessionPromise, run),
     queries.getUserContexts(user.id, workspaceId),
-    queries.getRecentMemories(user.id, workspaceId),
+    resolveMemories(
+      queries,
+      user.id,
+      workspaceId,
+      input.memorySnapshot,
+      input.memoriesReferenceDate,
+    ),
     queries.getSandboxEnvKeys(workspaceId),
     resolveSearchTools(searchResolution, opened, provider, {
       orgId,
@@ -596,7 +625,15 @@ export const prepareChatTurn = async (
   Object.assign(tools, searchTools);
   Object.assign(tools, subAgentTools);
 
-  const promptCtx: SystemPromptContext = {
+  // The turn half carries what this turn resolved — the live retrieval when no
+  // pin was supplied (headless). The renderer receives only the stable half,
+  // with the memories folded into a byte-stable `memoriesBlock`: for a pinned
+  // interactive turn that is the snapshot verbatim, for a headless turn it is
+  // the live retrieval's formatted text. Nothing per-turn reaches composition
+  // directly (ADR-0020).
+  const turn: SystemPromptTurnContext = { memories };
+
+  const stable: SystemPromptStableContext = {
     workspace: { id: workspaceId, context: workspace.context ?? undefined },
     agent: agent ?? null,
     user: {
@@ -605,7 +642,8 @@ export const prepareChatTurn = async (
       globalContext: userContexts.global,
       workspaceContext: userContexts.workspace,
     },
-    memories,
+    memoriesBlock:
+      input.memorySnapshot ?? formatSummariesForSystemPrompt(turn.memories),
     skills,
     subAgents,
     unavailableSubAgents,
@@ -616,7 +654,7 @@ export const prepareChatTurn = async (
     organizationIdentityContext: organization?.identityContext,
   };
 
-  const systemPrompt = renderSystemPrompt(promptCtx);
+  const systemPrompt = renderSystemPrompt(stable);
 
   if (skills.length > 0) {
     tools.loadSkill = createLoadSkillTool(orgId, workspaceId);
@@ -749,6 +787,29 @@ export const validateTurnAttachments = async (
 };
 
 // --- Private helpers ---
+
+/**
+ * Resolves the memories this turn reaches the prompt with. An interactive Chat
+ * passes a pinned `memorySnapshot` (ADR-0020): nothing is retrieved, because
+ * the renderer must consume the snapshot verbatim. A headless run passes no
+ * pin and so resolves the live retrieval — each is a fresh conversation with no
+ * transcript to protect, so the "use the current block" behaviour is right. The
+ * window is anchored to `referenceDate`, which the caller supplies: turn
+ * preparation reads no clock of its own, so two headless runs given the same
+ * reference date render a byte-identical prefix (ADR-0020). Returns the raw
+ * summaries (the **turn** half); the caller folds them into the stable
+ * `memoriesBlock` text.
+ */
+const resolveMemories = async (
+  queries: ChatTurnQueries,
+  userId: string,
+  workspaceId: string,
+  memorySnapshot: string | undefined,
+  referenceDate: Date,
+): Promise<MemorySummary[]> => {
+  if (memorySnapshot !== undefined) return [];
+  return queries.getRecentMemories(userId, workspaceId, referenceDate);
+};
 
 /**
  * Re-exported so callers and tests that reach these through this module keep

@@ -1,16 +1,16 @@
 ---
-status: accepted-pending-implementation
+status: accepted
 implemented-by: "#623"
 ---
 
 # The system prompt is stable while a Chat is active, and volatile turn state cannot reach it by construction
 
-> **Not in the code yet.** This decision is settled, but the change lands with
-> [#623](https://github.com/willdady/platypus/issues/623). Until that merges,
-> `renderSystemPrompt` still takes one undivided `SystemPromptContext` and the
-> Memories fragment still retrieves live on every turn — the behaviour described
-> below is the target, not the current state. Whoever implements #623 flips this
-> status to `accepted` in the same PR.
+> **In the code.** Landed with [#623](https://github.com/willdady/platypus/issues/623):
+> `SystemPromptStableContext` holds the stable input to `renderSystemPrompt`,
+> including the pinned `memoriesBlock`; the volatile `SystemPromptTurnContext`
+> never reaches the renderer; the Chat route resolves and the run sink persists
+> the snapshotted block; and `retrieveRecentSummaries` takes its window
+> reference as an input.
 
 Every Provider Platypus supports caches the front of a request, and a cache is a
 prefix match: the rendered request is `tools` → `system` → `messages`, and a byte

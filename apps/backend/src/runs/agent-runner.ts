@@ -97,6 +97,8 @@ export class AgentRunner {
       user: userFromScope(scope),
       request: input.request,
       messages: input.messages,
+      memorySnapshot: input.memorySnapshot,
+      memoriesReferenceDate: input.memoriesReferenceDate,
       origin,
       frontendUrl,
       runMode: scope.principal.kind === "user" ? "interactive" : "headless",
@@ -161,7 +163,11 @@ export class AgentRunner {
       workspaceId: scope.workspaceId,
     });
 
-    await sink.onStart({ runId: input.runId, messages: input.messages });
+    await sink.onStart({
+      runId: input.runId,
+      messages: input.messages,
+      memorySnapshot: input.memorySnapshot,
+    });
 
     const state: RunState = {
       messages: input.messages,

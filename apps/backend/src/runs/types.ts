@@ -97,6 +97,21 @@ export type RunInput = {
   runId: RunId;
   request: ChatTurnRequest;
   messages: PlatypusUIMessage[];
+  /**
+   * The pinned Memories block (ADR-0020) an interactive Chat turn resolved —
+   * the rendered summaries fragment, reused or re-taken by the Chat route
+   * against the re-pin horizon. Absent for headless runs (triggers, sub-Agents),
+   * which carry no Chat identity and so take the live block instead.
+   */
+  memorySnapshot?: string;
+  /**
+   * The moment this run resolved, anchoring the Memories retrieval window
+   * (ADR-0020). Required: the window is an input, never a clock read inside
+   * turn preparation, so two runs given the same reference date render a
+   * byte-identical prefix. An interactive Chat passes the moment it resolved
+   * its pin; a headless run passes its own resolution moment.
+   */
+  memoriesReferenceDate: Date;
 };
 
 /**
@@ -148,7 +163,16 @@ export type ResolvedRunPlan = {
  *   resolution failures.
  */
 export interface RunSink {
-  onStart(ctx: { runId: RunId; messages: PlatypusUIMessage[] }): Promise<void>;
+  onStart(ctx: {
+    runId: RunId;
+    messages: PlatypusUIMessage[];
+    /**
+     * The pinned Memories block the turn resolved (ADR-0020). Only the Chat
+     * sink needs it, to persist the snapshot on its upsert/insert; headless
+     * runs pass none.
+     */
+    memorySnapshot?: string;
+  }): Promise<void>;
   onResolved(ctx: { runId: RunId; plan: ResolvedRunPlan }): Promise<void>;
   onProgress(ctx: {
     runId: RunId;
