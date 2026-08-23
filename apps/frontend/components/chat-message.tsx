@@ -50,6 +50,7 @@ import {
 } from "lucide-react";
 import { Textarea } from "./ui/textarea";
 import { toolCallDurationMs } from "@/lib/tool-duration";
+import { ResponseMetricsPopover } from "./response-metrics-popover";
 import { TurnNotice } from "./turn-notice";
 import { LoadSkillTool } from "./load-skill-tool";
 import { SubAgentTool } from "./sub-agent-tool";
@@ -502,6 +503,12 @@ export const ChatMessage = memo(function ChatMessage({
           <MessageActions
             className={message.role === "user" ? "justify-end" : "pl-8"}
           >
+            {message.role === "assistant" && (
+              // Leftmost, before Copy, and deliberately not adjacent to
+              // Delete — a frequently-poked new control beside an
+              // undoable action invites mis-clicks (issue #354).
+              <ResponseMetricsPopover metadata={message.metadata} />
+            )}
             {message.role === "user" && (
               <MessageAction
                 className="cursor-pointer text-muted-foreground"
