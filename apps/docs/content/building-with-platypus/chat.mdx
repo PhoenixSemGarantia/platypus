@@ -1,6 +1,6 @@
 ---
 title: Chat
-description: The screen you use every day — attaching files, web search, voice input, editing messages, organising a long history, and what happens when you close the tab mid-run.
+description: The screen you use every day — attaching files, web search, voice input, editing messages, organising a long history, and what happens when you lose the connection mid-run.
 ---
 
 import { Callout } from "nextra/components";
@@ -316,10 +316,12 @@ The actions are hidden while the last reply is still streaming.
 
 <Callout type="warning">
   **Delete removes the message from the view, and the next thing you send makes
-  that permanent.** Nothing is written when you click it, so reloading before
-  you send anything brings the message back. Send a message afterwards and the
-  shortened conversation is what gets stored — the deletion you thought was
-  cosmetic is now the history. Reload first if you want it back.
+  that permanent.** Nothing is written when you click it, so anything that
+  re-reads the Chat brings the message back — reloading, and also switching away
+  from the tab and returning. Send a message afterwards and the shortened
+  conversation is what gets stored — the deletion you thought was cosmetic is now
+  the history. If you are pruning a long Chat, send in the same sitting rather
+  than leaving it and coming back.
 </Callout>
 
 ## Organising a long history
@@ -359,7 +361,7 @@ then your **Agents**, **Boards** and **Triggers** by name. Selecting an Agent
 opens a new Chat already set to it. **Docs** opens this documentation site in a
 new tab.
 
-## Closing the tab mid-run
+## Losing the connection mid-run
 
 A Chat turn runs on the server, not in your browser. Closing the tab, losing your
 connection, or navigating away does not stop it. The Agent keeps working, and its
@@ -369,10 +371,30 @@ Come back to the Chat and it picks up where things got to: while the run is stil
 going, the page polls and the finished parts of the reply appear. The sidebar
 shows a spinner beside any Chat with a run in progress.
 
-While a run you didn't start in this tab is still going, the input is disabled
-and reads **Run in progress…**, and the send button becomes a stop button. That
-is deliberate — it stops a second tab kicking off a concurrent run on the same
-Chat.
+You don't have to close the tab for this to happen. Switching to another app on a
+phone, or backgrounding the tab for long enough, is usually all it takes — the
+browser tears down the connection carrying the reply. When it does, a line
+appears above the input reading **Connection interrupted. The reply is still
+being written and will keep filling in here.** Leave it be: the reply carries on
+arriving in the same Chat, a few seconds behind, and finishes on its own. There
+is nothing to press and no need to reload.
+
+While a run is still going and this tab isn't the one receiving it — a second tab
+on the same Chat, a tab that arrived mid-run, or one whose connection dropped —
+the input is disabled and reads **Run in progress…**, and the send button becomes
+a stop button. That is deliberate: it stops a second, concurrent run on a Chat
+that already has one. If a second one does get as far as being sent — two tabs
+racing, say — it is refused rather than accepted, and the running turn is left
+untouched.
+
+<Callout type="warning">
+  **A lost connection is not a failed turn, and the difference is visible.** The
+  interrupted line above means the run is fine and the reply is on its way. A
+  **Chat Error** dialog means something actually failed — the turn errored, or
+  the request was refused before it started — and that one is worth reading.
+  Reloading the page on the interrupted line does no harm, but it also buys you
+  nothing.
+</Callout>
 
 <Callout type="info">
   Pressing stop **cancels the run on the server**, not only your connection to

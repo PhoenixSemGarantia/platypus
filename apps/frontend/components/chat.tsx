@@ -36,9 +36,19 @@ import {
   isValidChatMaxSteps,
 } from "@platypus/schemas";
 import { type PlatypusUIMessage } from "@platypus/backend/src/types";
-import { joinUrl } from "@/lib/utils";
+import { joinUrl, optionalFetcher } from "@/lib/utils";
 import { writeAt, scopedPath } from "@/lib/api-write";
+import {
+  chatPollIntervalMs,
+  classifyChatError,
+  composerTurnStatus,
+  isRunHeldElsewhere,
+  snapshotIsAtLeastAsComplete,
+  snapshotMessages,
+} from "@/lib/chat-recovery";
 import { useScopedSWR } from "@/hooks/use-scoped-swr";
+import { useTurnEstablished } from "@/hooks/use-turn-established";
+import { useRevalidateOnRestore } from "@/hooks/use-revalidate-on-restore";
 import { useChatSettings } from "@/hooks/use-chat-settings";
 import { useSearchToggle } from "@/hooks/use-search-toggle";
 import { useModelSelection } from "@/hooks/use-model-selection";
@@ -66,6 +76,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { ChatMessage } from "./chat-message";
+import { ChatReconnectingNotice } from "./chat-reconnecting-notice";
 import { ModelSelectorDialog } from "./model-selector-dialog";
 import { toast } from "sonner";
 
@@ -134,20 +145,6 @@ export const Chat = ({
     [skillsData?.results],
   );
 
-  // Fetch existing chat data. Poll while the server reports the run is
-  // still in progress so users who reconnect mid-run see partial messages
-  // land without manually reloading. Stop polling once the run reaches a
-  // terminal status.
-  const { data: chatData, isLoading: isChatLoading } = useScopedSWR<ChatType>(
-    `chat/${chatId}`,
-    scope,
-    {
-      revalidateOnFocus: false,
-      revalidateOnReconnect: false,
-      refreshInterval: (data) => (data?.status === "running" ? 3000 : 0),
-    },
-  );
-
   const {
     messages,
     setMessages,
@@ -194,20 +191,78 @@ export const Chat = ({
     }),
   });
 
+  // Whether this turn's stream had started arriving before it broke — what tells
+  // a dropped connection from a request the server refused (issue #648).
+  const turnEstablished = useTurnEstablished(status);
+
+  // Fetch existing chat data, and re-read it while there is reason to believe a
+  // run is live so a client that lost its stream sees the partial answer keep
+  // filling in. `chatPollIntervalMs` owns that decision, and reads THIS tab's
+  // turn status as well as the fetched one: gated on the fetched status alone
+  // the poll could never start, because on an existing Chat that status is the
+  // previous turn's `succeeded` until something refetches it — and the only
+  // thing that would was the poll (issue #648).
+  //
+  // Focus and reconnect revalidation are deliberately left on (SWR's defaults).
+  // They are the "the user came back" and "the network returned" signals, and a
+  // frozen mobile tab's timers do not run at all while it is away, so they are
+  // the only thing that can wake a poll promptly. Safe to leave on because
+  // hydration is monotonic — see the hydrate effect below.
+  //
+  // `optionalFetcher` because a brand-new Chat is read before its row exists
+  // (the run creates it): a thrown 404 would sit in the cache as an error, and
+  // SWR does not revalidate on an interval while one is there.
+  const {
+    data: chatData,
+    isLoading: isChatLoading,
+    mutate: mutateChat,
+  } = useScopedSWR<ChatType | null>(`chat/${chatId}`, scope, {
+    fetcher: optionalFetcher,
+    refreshInterval: (data) =>
+      chatPollIntervalMs({
+        runStatus: data?.status,
+        turnStatus: status,
+        turnEstablished,
+      }),
+  });
+
+  // Re-read the row from the authority. Nothing here awaits it and a failure is
+  // not worth reporting: the poll gate reads this tab's own turn status too, so
+  // recovery never depends on one refresh landing.
+  const refreshChat = useCallback(() => {
+    void mutateChat().catch(() => {});
+  }, [mutateChat]);
+
+  // A restored page's poll was frozen the whole time it was away, and a bfcache
+  // restore is neither a focus nor a reconnect.
+  useRevalidateOnRestore(refreshChat);
+
+  // One reading of "is a run in flight?", shared by the composer guard and the
+  // error classification below, so the two cannot disagree.
+  const runBelief = {
+    runStatus: chatData?.status,
+    turnStatus: status,
+    turnEstablished,
+  };
+  const errorTreatment = classifyChatError({ error, ...runBelief });
+
   // Custom hooks for state management (must be called before any conditional returns)
   const {
     selection,
     handleModelChange,
     setters: modelSetters,
   } = useModelSelection(
-    chatData,
+    chatData ?? undefined,
     providers,
     agents,
     isChatLoading,
     workspaceId,
   );
-  const { settings, setters } = useChatSettings(chatData, selection.agentId);
-  const chatUI = useChatUI(error);
+  const { settings, setters } = useChatSettings(
+    chatData ?? undefined,
+    selection.agentId,
+  );
+  const chatUI = useChatUI(error, errorTreatment);
 
   // Extract values from hooks for easier access
   const { agentId, modelId, providerId } = selection;
@@ -319,15 +374,25 @@ export const Chat = ({
     statusRef.current = status;
   }, [status]);
 
+  // Hydration is monotonic: a fetched snapshot lands only where it is at least
+  // as far along as what is on screen (issue #648). The chat row is written on a
+  // flush interval, so a snapshot fetched mid-run lags the stream by up to one
+  // flush — applying it unconditionally is what would make the answer visibly
+  // shorten and then grow back. The comparison is made against the live message
+  // list through the updater rather than a dependency, so the effect still runs
+  // only when `chatData` changes and not on every streamed chunk.
   useEffect(() => {
+    const snapshot = snapshotMessages(chatData);
     if (
-      chatData?.messages &&
-      chatData.messages.length > 0 &&
-      statusRef.current !== "streaming" &&
-      statusRef.current !== "submitted"
+      !snapshot ||
+      statusRef.current === "streaming" ||
+      statusRef.current === "submitted"
     ) {
-      setMessages(chatData.messages);
+      return;
     }
+    setMessages((held) =>
+      snapshotIsAtLeastAsComplete(snapshot, held) ? snapshot : held,
+    );
   }, [chatData, setMessages]);
 
   // Poll for a backend-generated title while the chat is still "Untitled".
@@ -436,9 +501,14 @@ export const Chat = ({
   // so a tab that reconnects mid-run (or an unrelated tab opened on the
   // same chat) can't kick off a second concurrent run. The submit button
   // becomes a stop button and Enter is blocked by PromptInputTextarea.
-  const isReconnectedToRunningRun =
-    chatData?.status === "running" && status === "ready";
-  const effectiveStatus = isReconnectedToRunningRun ? "streaming" : status;
+  // `isRunHeldElsewhere` covers a dropped stream too, whose status is `error`
+  // rather than `ready` — the reading the old predicate missed (issue #648).
+  const runHeldElsewhere = isRunHeldElsewhere(runBelief);
+  const effectiveStatus = composerTurnStatus(runBelief, errorTreatment);
+
+  // A dropped connection to a run that is still going: an inline line, and the
+  // answer keeps arriving from the poll. The modal is for a turn that failed.
+  const isRecoveringRun = errorTreatment === "recovering";
 
   const handleSubmit = async (message: PromptInputMessage) => {
     // Stop the stream if currently streaming or submitted
@@ -496,6 +566,12 @@ export const Chat = ({
       },
       { body },
     );
+
+    // Tell the chat read a run has started rather than leaving it to infer one.
+    // The run's start hook writes `status: "running"`, and until this read
+    // learns that, nothing here can tell a live run from last turn's finished
+    // one (issue #648).
+    refreshChat();
   };
 
   return (
@@ -538,6 +614,7 @@ export const Chat = ({
       <div className="grid shrink-0 gap-4 p-4">
         <div className="flex justify-center min-w-0">
           <div className="w-full xl:w-4/5 max-w-4xl min-w-0">
+            {isRecoveringRun && <ChatReconnectingNotice />}
             {canSendMessages ? (
               <PromptInput
                 onSubmit={(message) => {
@@ -562,14 +639,14 @@ export const Chat = ({
                     onChange={(e) => setInputValue(e.target.value)}
                     className={messages.length === 0 ? "min-h-24" : undefined}
                     placeholder={
-                      isReconnectedToRunningRun
+                      runHeldElsewhere
                         ? "Run in progress…"
                         : selectedAgent?.inputPlaceholder ||
                           "What would you like to know?"
                     }
                     autoFocus
                     status={effectiveStatus}
-                    disabled={isReconnectedToRunningRun}
+                    disabled={runHeldElsewhere}
                   />
                 </PromptInputBody>
                 <PromptInputFooter className="flex-wrap">

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 
 /**
  * As much of a stream part as the metadata extractor reads. The SDK hands it
@@ -109,13 +109,14 @@ vi.mock("../logger.ts", () => ({
 }));
 
 import { AgentRunner } from "./agent-runner.ts";
+import { ConflictError, mapError } from "../errors.ts";
 import { logger } from "../logger.ts";
 import { runRegistry, TimeoutError } from "./run-registry.ts";
 import type { ResolvedRunPlan, RunInput, RunSink, RunStats } from "./types.ts";
 import type { WorkspaceScope } from "../scope.ts";
 
 type LifecycleEvent =
-  | { name: "onStart"; runId: string }
+  | { name: "onStart"; runId: string; messages?: unknown[] }
   | { name: "onResolved"; runId: string; plan: ResolvedRunPlan }
   | { name: "onProgress"; runId: string }
   | {
@@ -130,8 +131,12 @@ type LifecycleEvent =
 class RecordingSink implements RunSink {
   events: LifecycleEvent[] = [];
 
-  onStart(ctx: { runId: string }): Promise<void> {
-    this.events.push({ name: "onStart", runId: ctx.runId });
+  onStart(ctx: { runId: string; messages?: unknown[] }): Promise<void> {
+    this.events.push({
+      name: "onStart",
+      runId: ctx.runId,
+      messages: ctx.messages,
+    });
     return Promise.resolve();
   }
   onResolved(ctx: { runId: string; plan: ResolvedRunPlan }): Promise<void> {
@@ -782,6 +787,117 @@ describe("AgentRunner.stream — failure paths", () => {
     expect(finish.status).toBe("failed");
     expect(finish.error).toBe("Workspace missing");
     // Stream was never invoked
+    expect(mockStreamText).not.toHaveBeenCalled();
+  });
+});
+
+// Issue #648. A Chat run's id IS the chat id, so a duplicate submission into a
+// Chat with a live turn arrives with a runId the registry already holds. The
+// ORDER is the whole point: the claim has to come before the sink's start hook,
+// because that hook overwrites the row's messages with the second request's
+// history. Claim second and the duplicate destroys the live run's persisted
+// state on its way to failing.
+describe("AgentRunner — duplicate submission for a live run", () => {
+  let runner: AgentRunner;
+  beforeEach(() => {
+    runner = new AgentRunner();
+    vi.clearAllMocks();
+    resetStreamHarness();
+  });
+
+  // These runs are deliberately left in flight, so the registry entries and the
+  // unconsumed `once` mock values have to be cleared by hand — `clearAllMocks`
+  // resets recorded calls but not a queued `mockResolvedValueOnce`.
+  afterEach(() => {
+    runRegistry.unregister("chat-live");
+    runRegistry.unregister("chat-start-throws");
+    mockPrepareChatTurn.mockReset();
+    mockStreamText.mockReset();
+  });
+
+  const liveRun = async (sink: RecordingSink) => {
+    mockPrepareChatTurn.mockResolvedValueOnce(fakeTurn());
+    streamHarness.queue = new streamHarness.AsyncQueue();
+    primeStreamText();
+    await runner.stream({
+      scope,
+      input: {
+        ...baseInput,
+        runId: "chat-live",
+        messages: [{ id: "u1", role: "user", parts: [] }] as never,
+      },
+      sink,
+      options: { origin: "http://test" },
+    });
+  };
+
+  it("rejects the duplicate with a ConflictError (409) and writes nothing", async () => {
+    const sink = new RecordingSink();
+    await liveRun(sink);
+
+    // The second submission carries its own history — what would have replaced
+    // the live run's messages.
+    await expect(
+      runner.stream({
+        scope,
+        input: {
+          ...baseInput,
+          runId: "chat-live",
+          messages: [
+            { id: "u1", role: "user", parts: [] },
+            { id: "a1", role: "assistant", parts: [] },
+            { id: "u2", role: "user", parts: [] },
+          ] as never,
+        },
+        sink,
+        options: { origin: "http://test" },
+      }),
+    ).rejects.toThrow(ConflictError);
+
+    expect(mapError(new ConflictError("x"))?.status).toBe(409);
+    // One start hook, carrying the live run's own history — byte-for-byte what
+    // it was registered with.
+    const starts = sink.events.filter((e) => e.name === "onStart");
+    expect(starts).toHaveLength(1);
+    expect(starts[0]).toMatchObject({ messages: [{ id: "u1" }] });
+    expect(mockValidateTurnAttachments).toHaveBeenCalledTimes(2);
+  });
+
+  it("leaves the live run running rather than terminating it", async () => {
+    const sink = new RecordingSink();
+    await liveRun(sink);
+
+    await expect(
+      runner.stream({
+        scope,
+        input: { ...baseInput, runId: "chat-live" },
+        sink,
+        options: { origin: "http://test" },
+      }),
+    ).rejects.toThrow(ConflictError);
+
+    expect(sink.names()).not.toContain("onFinish");
+    expect(runRegistry.has("chat-live")).toBe(true);
+  });
+
+  // The claim being first means a hook that throws would otherwise hold the id
+  // forever — and since the id is the chat id, that locks the Chat out of every
+  // later turn, not just this one.
+  it("releases the claim when the start hook throws", async () => {
+    mockPrepareChatTurn.mockResolvedValueOnce(fakeTurn());
+    const sink = new RecordingSink();
+    sink.onStart = () => Promise.reject(new Error("row write failed"));
+
+    await expect(
+      runner.stream({
+        scope,
+        input: { ...baseInput, runId: "chat-start-throws" },
+        sink,
+        options: { origin: "http://test" },
+      }),
+    ).rejects.toThrow("row write failed");
+
+    expect(runRegistry.has("chat-start-throws")).toBe(false);
     expect(mockStreamText).not.toHaveBeenCalled();
   });
 });

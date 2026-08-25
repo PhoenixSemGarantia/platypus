@@ -6,6 +6,7 @@ import {
   DEFAULT_PER_RUN_TIMEOUT_MS,
   describeTimeout,
 } from "./run-registry.ts";
+import { ConflictError, mapError } from "../errors.ts";
 
 describe("RunRegistry", () => {
   let registry: RunRegistry;
@@ -29,6 +30,39 @@ describe("RunRegistry", () => {
 
   it("cancel(unknown) returns false and does not throw", () => {
     expect(registry.cancel("nope")).toBe(false);
+  });
+
+  // Issue #648. A Chat run's id IS the chat id, so a second submission into a
+  // Chat with a live turn lands here — and the claim is now the first thing a
+  // run does, ahead of any persistence, so this rejection is what protects the
+  // live run's state. Typed as a `ConflictError` because ADR-0010's central
+  // handler answers 409 for one; a plain `Error` became a 500.
+  it("rejects a duplicate runId with a ConflictError the handler maps to 409", () => {
+    registry.register("dup-1");
+
+    expect(() => registry.register("dup-1")).toThrow(ConflictError);
+    expect(mapError(new ConflictError("x"))?.status).toBe(409);
+  });
+
+  it("frees the id for a later run once the first unregisters", () => {
+    registry.register("dup-2");
+    registry.unregister("dup-2");
+
+    expect(() => registry.register("dup-2")).not.toThrow();
+  });
+
+  // The rejection must not disturb the run that holds the id: its signal and
+  // its timers belong to the first claim.
+  it("leaves the holding run untouched when a duplicate is rejected", () => {
+    const handle = registry.register("dup-3", {
+      perStepTimeoutMs: 1000,
+      perRunTimeoutMs: 1_000_000,
+    });
+
+    expect(() => registry.register("dup-3")).toThrow(ConflictError);
+
+    expect(handle.signal.aborted).toBe(false);
+    expect(registry.cancel("dup-3")).toBe(true);
   });
 
   it("cancel is idempotent", () => {
@@ -204,11 +238,6 @@ describe("RunRegistry", () => {
     vi.advanceTimersByTime(2000);
 
     expect(onTimeout).not.toHaveBeenCalled();
-  });
-
-  it("registering the same runId twice throws", () => {
-    registry.register("dup");
-    expect(() => registry.register("dup")).toThrow(/already registered/);
   });
 
   it("default timeouts are exported and reasonable", () => {

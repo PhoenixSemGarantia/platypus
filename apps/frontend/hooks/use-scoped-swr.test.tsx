@@ -11,15 +11,18 @@ vi.mock("@/components/auth-provider", () => ({
 }));
 
 let capturedKey: unknown;
+let capturedFetcher: unknown;
 vi.mock("swr", () => ({
   __esModule: true,
-  default: (key: unknown) => {
+  default: (key: unknown, fn: unknown) => {
     capturedKey = key;
+    capturedFetcher = fn;
     return { data: undefined, isLoading: false };
   },
 }));
 
 import { useScopedSWR } from "./use-scoped-swr";
+import { fetcher, optionalFetcher } from "@/lib/utils";
 
 describe("useScopedSWR", () => {
   afterEach(() => {
@@ -51,5 +54,21 @@ describe("useScopedSWR", () => {
       useScopedSWR("providers", { orgId: "org1", workspaceId: "ws1" }),
     );
     expect(capturedKey).toBeNull();
+  });
+
+  it("reads through the shared fetcher by default", () => {
+    renderHook(() => useScopedSWR("providers", { orgId: "org1" }));
+    expect(capturedFetcher).toBe(fetcher);
+  });
+
+  // Issue #648: the Chat detail read needs 404-as-absence, and only that read.
+  it("lets one read swap its reader without changing the default", () => {
+    renderHook(() =>
+      useScopedSWR("chat/c1", { orgId: "org1" }, { fetcher: optionalFetcher }),
+    );
+    expect(capturedFetcher).toBe(optionalFetcher);
+
+    renderHook(() => useScopedSWR("agents", { orgId: "org1" }));
+    expect(capturedFetcher).toBe(fetcher);
   });
 });
