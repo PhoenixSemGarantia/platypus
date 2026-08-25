@@ -1,3 +1,4 @@
+import { ConflictError } from "../errors.ts";
 import type { RunId } from "./types.ts";
 
 /**
@@ -127,10 +128,21 @@ type Entry = {
 export class RunRegistry {
   private readonly entries = new Map<RunId, Entry>();
 
+  /**
+   * Claims `runId` and returns its handle.
+   *
+   * A runId that is already claimed is a second run for something that already
+   * has one — a Chat whose turn has not finished, since a Chat run's id IS the
+   * chat id. Typed as a `ConflictError` so the central error handler answers
+   * 409 (ADR-0010) instead of an unhandled throw becoming a 500, and so the
+   * claim can be made the first thing a run does: registering before anything
+   * is persisted is what stops a duplicate submission overwriting the live
+   * run's messages on its way to failing (issue #648).
+   */
   register(runId: RunId, options: RegisterOptions = {}): RunHandle {
     const existing = this.entries.get(runId);
     if (existing) {
-      throw new Error(`RunRegistry: run '${runId}' already registered`);
+      throw new ConflictError(`A run is already in progress for '${runId}'`);
     }
 
     const controller = new AbortController();

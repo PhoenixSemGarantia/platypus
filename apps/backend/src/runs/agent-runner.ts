@@ -16,6 +16,7 @@ import type { PlatypusUIMessage } from "../types.ts";
 import { runRegistry, type RunTimeouts } from "./run-registry.ts";
 import { startRun } from "./run-lifecycle.ts";
 import { driveChat, driveOnce } from "./drive.ts";
+import { withStreamKeepalive } from "./stream-keepalive.ts";
 import type {
   ResolvedRunPlan,
   RunId,
@@ -163,16 +164,17 @@ export class AgentRunner {
       workspaceId: scope.workspaceId,
     });
 
-    await sink.onStart({
-      runId: input.runId,
-      messages: input.messages,
-      memorySnapshot: input.memorySnapshot,
-    });
-
     const state: RunState = {
       messages: input.messages,
     };
 
+    // Claim the run BEFORE the sink writes anything (issue #648). A second
+    // submission for a Chat that already has a live run reaches here with the
+    // same runId — a Chat run's id is the chat id — and `startRun` rejects it
+    // with a `ConflictError` the central handler answers 409 (ADR-0010). Run
+    // the other way round and the duplicate's start hook overwrites the live
+    // run's persisted messages with its own history first, then fails: the
+    // client gets an error AND the run it interrupted loses its state.
     const run = startRun({
       runId: input.runId,
       timeouts: params.timeouts,
@@ -203,6 +205,22 @@ export class AgentRunner {
           );
       },
     });
+
+    // Registered now, so a start hook that throws releases the claim rather
+    // than leaving the runId held by a run that never began — which, with the
+    // claim taken first, would lock the Chat out of every later turn.
+    try {
+      await sink.onStart({
+        runId: input.runId,
+        messages: input.messages,
+        memorySnapshot: input.memorySnapshot,
+      });
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      logger.error({ error, runId: input.runId }, "Run sink onStart failed");
+      await run.finish("failed", err);
+      throw err;
+    }
 
     try {
       state.turn = await this.prepare(
@@ -320,7 +338,13 @@ export class AgentRunner {
       logger.error({ err, runId: input.runId }, "Chat drive background error"),
     );
 
-    return createUIMessageStreamResponse({ stream: drive.response });
+    // Wrapped past the tee, so the heartbeat reaches the client and not the
+    // server-side drain above (issue #648). The no-buffering header a reverse
+    // proxy needs is already on the response the SDK builds; `stream-keepalive`
+    // carries it through, and its test pins that it is still there.
+    return withStreamKeepalive(
+      createUIMessageStreamResponse({ stream: drive.response }),
+    );
   }
 
   /**
