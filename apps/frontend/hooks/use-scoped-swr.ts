@@ -12,6 +12,10 @@ import { scopedUrl, type Scope } from "@/lib/api-write";
  * `scope: null` (rather than a boolean `enabled`) lets a caller withhold the
  * fetch for the same reason it can't yet name a scope — e.g. a dialog that
  * hasn't opened, or an id that hasn't resolved.
+ *
+ * `config.fetcher` swaps the reader for one read — `optionalFetcher` for a row
+ * that may not exist yet (issue #648). Absent one, every read keeps `fetcher`'s
+ * contract, where any non-OK response is an error.
  */
 export function useScopedSWR<T>(
   entity: string,
@@ -22,5 +26,5 @@ export function useScopedSWR<T>(
   const backendUrl = useBackendUrl();
   const key =
     backendUrl && user && scope ? scopedUrl(backendUrl, entity, scope) : null;
-  return useSWR<T>(key, fetcher, config);
+  return useSWR<T>(key, config?.fetcher ?? fetcher, config);
 }

@@ -1,7 +1,17 @@
 import { useState } from "react";
 import { useResetOnChange } from "@/hooks/use-reset-on-change";
+import type { ChatErrorTreatment } from "@/lib/chat-recovery";
 
-export const useChatUI = (error: Error | undefined) => {
+export const useChatUI = (
+  error: Error | undefined,
+  /**
+   * How this error should be surfaced, from `classifyChatError`. Only a
+   * `failure` opens the modal: a dropped connection to a run that is still
+   * going gets an inline line instead, because the turn has not failed and the
+   * answer keeps filling in on its own (issue #648).
+   */
+  errorTreatment: ChatErrorTreatment,
+) => {
   const [isModelSelectorOpen, setIsModelSelectorOpen] = useState(false);
   const [isSettingsDialogOpen, setIsSettingsDialogOpen] = useState(false);
   const [isAgentInfoDialogOpen, setIsAgentInfoDialogOpen] = useState(false);
@@ -13,7 +23,7 @@ export const useChatUI = (error: Error | undefined) => {
   // Show error dialog when a new error arrives from useChat. Keyed on the error
   // so the user can still dismiss the dialog while the error persists.
   useResetOnChange(error, () => {
-    if (error) {
+    if (error && errorTreatment === "failure") {
       setShowErrorDialog(true);
     }
   });
