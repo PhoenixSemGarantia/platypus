@@ -41,6 +41,7 @@ import { writeAt, scopedPath } from "@/lib/api-write";
 import {
   chatPollIntervalMs,
   classifyChatError,
+  composerTurnStatus,
   isRunHeldElsewhere,
   snapshotIsAtLeastAsComplete,
   snapshotMessages,
@@ -503,7 +504,7 @@ export const Chat = ({
   // `isRunHeldElsewhere` covers a dropped stream too, whose status is `error`
   // rather than `ready` — the reading the old predicate missed (issue #648).
   const runHeldElsewhere = isRunHeldElsewhere(runBelief);
-  const effectiveStatus = runHeldElsewhere ? "streaming" : status;
+  const effectiveStatus = composerTurnStatus(runBelief, errorTreatment);
 
   // A dropped connection to a run that is still going: an inline line, and the
   // answer keeps arriving from the poll. The modal is for a turn that failed.

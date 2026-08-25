@@ -6,6 +6,7 @@ import {
   CHAT_POLL_INTERVAL_MS,
   chatPollIntervalMs,
   classifyChatError,
+  composerTurnStatus,
   isRunHeldElsewhere,
   snapshotIsAtLeastAsComplete,
   snapshotMessages,
@@ -191,6 +192,49 @@ describe("classifyChatError", () => {
         classifyChatError({ error, ...belief(runStatus, "error", false) }),
       ).toBe("failure");
     }
+  });
+});
+
+describe("composerTurnStatus", () => {
+  // A run this tab is not receiving reads as streaming, so the submit button is
+  // a stop button and Enter is blocked.
+  it("presents a run held elsewhere as streaming", () => {
+    expect(composerTurnStatus(belief("running", "ready"), "none")).toBe(
+      "streaming",
+    );
+    expect(
+      composerTurnStatus(belief("running", "error", true), "recovering"),
+    ).toBe("streaming");
+  });
+
+  // The defect this exists for: once recovery finishes the turn is still sitting
+  // at `error`, and passing that through puts a failure icon on the submit
+  // button — the same "a dropped connection reported as a failed turn" symptom
+  // the modal fix removed, only moved onto the button.
+  it("clears a recovered drop rather than leaving a failure on the button", () => {
+    expect(
+      composerTurnStatus(belief("succeeded", "error", true), "none"),
+    ).toBe("ready");
+  });
+
+  // A turn that genuinely failed keeps its reading: the button should say so.
+  it("keeps the error reading for a turn that actually failed", () => {
+    expect(composerTurnStatus(belief("failed", "error", true), "failure")).toBe(
+      "error",
+    );
+    expect(
+      composerTurnStatus(belief(undefined, "error", false), "failure"),
+    ).toBe("error");
+  });
+
+  it("passes an ordinary turn through untouched", () => {
+    expect(composerTurnStatus(belief(undefined, "ready"), "none")).toBe("ready");
+    expect(composerTurnStatus(belief("running", "streaming"), "none")).toBe(
+      "streaming",
+    );
+    expect(composerTurnStatus(belief("running", "submitted"), "none")).toBe(
+      "submitted",
+    );
   });
 });
 

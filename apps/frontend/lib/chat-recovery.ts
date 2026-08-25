@@ -121,6 +121,28 @@ export const classifyChatError = ({
 };
 
 /**
+ * The status the composer should present, which is not always the turn's own.
+ *
+ * Two corrections to the raw reading:
+ *
+ * - A run this tab is not streaming reads as `streaming`, so the submit button
+ *   is a stop button and Enter is blocked.
+ * - A turn left at `error` by a drop that has since been recovered from reads as
+ *   `ready`. The answer arrived, nothing failed, and the composer is usable —
+ *   but the raw `error` leaves a failure icon on the submit button, which is the
+ *   same "a dropped connection reported as a failed turn" defect the modal fix
+ *   removed, only moved onto the button.
+ */
+export const composerTurnStatus = (
+  belief: RunBelief,
+  treatment: ChatErrorTreatment,
+): TurnStatus => {
+  if (isRunHeldElsewhere(belief)) return "streaming";
+  if (belief.turnStatus === "error" && treatment !== "failure") return "ready";
+  return belief.turnStatus;
+};
+
+/**
  * How far a transcript has got: the message count, the part count, and the
  * length of the text those parts carry.
  *
