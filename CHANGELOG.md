@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.0.1](https://github.com/willdady/platypus/compare/v3.0.0...v3.0.1) (2026-08-27)
+
+
+### Bug Fixes
+
+* **backend:** validate a Trigger's config when its type changes ([#707](https://github.com/willdady/platypus/issues/707)) ([d2355d1](https://github.com/willdady/platypus/commit/d2355d1796c33954779c6dd49701d64a64571415))
+* **docs:** move the Docker image tag examples to the 3.x line ([#706](https://github.com/willdady/platypus/issues/706)) ([be4f366](https://github.com/willdady/platypus/commit/be4f3668dd297ac2b593ed95464ee71cea81b30b))
+
 ## [3.0.0](https://github.com/willdady/platypus/compare/v2.11.0...v3.0.0) (2026-08-27)
 
 
