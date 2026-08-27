@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Tool } from "ai";
 import { WEB_BACKEND_TOOL_MARKER } from "@platypus/schemas";
-import { callTool } from "../test-utils.ts";
+import { callTool, makePluginContext } from "../test-utils.ts";
 import { EGRESS_BLOCKED_MESSAGE } from "../utils/egress-guard.ts";
 import { logger } from "../logger.ts";
 import { runCloser, type CoreCloserRegistrar } from "../tools/closers.ts";
@@ -48,14 +48,25 @@ const CTX = {
   workspaceId: "ws-1",
   userId: "user-1",
   providerId: "provider-1",
+  registerCloser: () => {},
 };
 
-// The plugin-facing subset, fixed by ADR-0014 at `{ orgId, workspaceId, userId }`.
+// The plugin-facing subset, fixed by ADR-0014 at `{ orgId, workspaceId, userId }`
+// plus the one capability the context carries. `registerCloser` is required as of
+// API v2, so it is part of the exact shape a backend is handed — matched as any
+// function, because what crosses the seam is core's registrar re-bound to this
+// backend's attribution rather than the one core holds.
 const PLUGIN_CTX = {
   orgId: CTX.orgId,
   workspaceId: CTX.workspaceId,
   userId: CTX.userId,
+  registerCloser: expect.any(Function) as unknown,
 };
+
+// The deploy-time block core resolves per plugin and forwards to
+// `createExecutors`. One shared instance, so a test that asserts on the forward
+// can compare identity.
+const PLUGIN = makePluginContext();
 
 // A public address for the injected resolver, so the real egress guard stays in
 // the path (these tests assert core's guarding, not DNS).
@@ -79,6 +90,7 @@ const buildTools = (
     contribution: contribution(executors, overrides),
     pluginName: "@acme/searx",
     resolveHostname: resolvePublic,
+    plugin: PLUGIN,
   }).buildTurnTools(CTX);
 
 const search = (tool: Tool, query: string) =>
@@ -107,6 +119,7 @@ describe("web-backend registry", () => {
         { backend },
       ),
       pluginName: "@acme/searx",
+      plugin: PLUGIN,
     });
 
   // The store's own contract — miss semantics, duplicate rejection,
@@ -173,7 +186,10 @@ describe("composeWebBackend — tool construction", () => {
     const createExecutors = vi.fn(() => ({
       web_search: () => ({ query: "q", results: [] }),
     }));
-    const plugin = { config: { region: "eu" }, credentials: { apiKey: "k" } };
+    const plugin = makePluginContext({
+      config: { region: "eu" },
+      credentials: { apiKey: "k" },
+    });
 
     await composeWebBackend({
       contribution: contribution({}, { createExecutors }),
@@ -220,6 +236,7 @@ describe("composeWebBackend — tool construction", () => {
         },
       ),
       pluginName: "@acme/searx",
+      plugin: PLUGIN,
     }).buildTurnTools(CTX);
 
     expect(tools).toEqual({});
@@ -248,6 +265,7 @@ describe("composeWebBackend — tool construction", () => {
         },
       ),
       pluginName: "@acme/searx",
+      plugin: PLUGIN,
     }).buildTurnTools(CTX);
 
     expect(tools).toEqual({});
@@ -980,6 +998,7 @@ describe("composeWebBackend — the contribution is not copied", () => {
       // The loader's namespaced id rides alongside, not over, the contribution.
       backend: "acme.searx",
       pluginName: "@acme/searx",
+      plugin: PLUGIN,
     });
 
     expect(registration.backend).toBe("acme.searx");
@@ -1122,6 +1141,7 @@ describe("the signal an executor is handed", () => {
       }),
       pluginName: "@acme/searx",
       resolveHostname,
+      plugin: PLUGIN,
     }).buildTurnTools(CTX);
 
     const result = (await callTool(
@@ -1186,15 +1206,13 @@ describe("the closer a backend registers", () => {
     await composeWebBackend({
       contribution: contribution({}, { createExecutors }),
       pluginName: "@acme/searx",
+      plugin: PLUGIN,
     }).buildTurnTools(ctxWith(() => {}));
 
     // An exact match, not `objectContaining`: deriving this context is a spread
     // of core's own, so it is the one path a core-only field can ride across the
     // seam on. A leaked `providerId` fails here.
-    expect(createExecutors).toHaveBeenCalledWith(
-      { ...PLUGIN_CTX, registerCloser: expect.any(Function) as unknown },
-      undefined,
-    );
+    expect(createExecutors).toHaveBeenCalledWith(PLUGIN_CTX, PLUGIN);
   });
 
   it("attributes what it registers to the plugin and the backend", async () => {
@@ -1213,6 +1231,7 @@ describe("the closer a backend registers", () => {
       ),
       backend: "acme.searx",
       pluginName: "@acme/searx",
+      plugin: PLUGIN,
     }).buildTurnTools(ctxWith(register));
 
     // The closer itself passes through unwrapped, so a session still dedupes on
@@ -1238,6 +1257,7 @@ describe("the closer a backend registers", () => {
         },
       ),
       pluginName: "@acme/searx",
+      plugin: PLUGIN,
     }).buildTurnTools(
       ctxWith((close, attribution) => {
         registered.push(() => runCloser(close, attribution));
@@ -1254,28 +1274,26 @@ describe("the closer a backend registers", () => {
     );
   });
 
-  it("degrades to no search tools when a backend calls the registrar unguarded on an older core", async () => {
+  it("hands every turn a registrar, so an unguarded call is not a fault", async () => {
     const tools = await composeWebBackend({
       contribution: contribution(
         {},
         {
           createExecutors: (ctx) => {
-            // The `!` this contract's docs tell an author not to write. On a core
-            // without the member it is a TypeError out of the factory.
-            ctx.registerCloser!(() => {});
+            // Unguarded, which is what the v2 contract tells an author to write:
+            // `registerCloser` is required and core always supplies one, so there
+            // is no core left for this call to be a TypeError on.
+            ctx.registerCloser(() => {});
             return { web_search: () => ({ query: "q", results: [] }) };
           },
         },
       ),
       pluginName: "@acme/searx",
+      plugin: PLUGIN,
     }).buildTurnTools(CTX);
 
-    expect(tools).toEqual({});
-    expect(mockLogger.warn).toHaveBeenCalledTimes(1);
-    expect(mockLogger.warn).toHaveBeenCalledWith(
-      expect.objectContaining({ plugin: "@acme/searx", backend: "searx" }),
-      expect.stringContaining("createExecutors threw"),
-    );
+    expect(Object.keys(tools)).toContain("web_search");
+    expect(mockLogger.warn).not.toHaveBeenCalled();
   });
 });
 

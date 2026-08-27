@@ -12,9 +12,19 @@ import {
   type WebBackendContribution,
 } from "./index.ts";
 
+// A `PluginLogger` that records nothing, for the blocks below that are not
+// asserting on log output. Required on the block as of API v2, so every context
+// a test builds carries one.
+const silentLogger = (): PluginLogger => ({
+  debug: () => {},
+  info: () => {},
+  warn: () => {},
+  error: () => {},
+});
+
 describe("@platypuschat/plugin-sdk", () => {
   it("pins the plugin API version", () => {
-    expect(PLUGIN_API_VERSION).toBe(1);
+    expect(PLUGIN_API_VERSION).toBe(2);
   });
 
   it("supports one previous major (N and N−1), floored at 1 (no phantom v0)", () => {
@@ -23,6 +33,14 @@ describe("@platypuschat/plugin-sdk", () => {
     );
     // There is no major 0, so the oldest supported major is never below 1.
     expect(OLDEST_SUPPORTED_API_VERSION).toBeGreaterThanOrEqual(1);
+  });
+
+  it("opens a genuine N−1 slot at v2, so a v1 plugin still loads", () => {
+    // The floor stopped deciding the window at v2: a plugin built against v1 is
+    // inside `[1, 2]` and keeps loading on this core. That is the whole of what
+    // the major bump promises an author who has not migrated yet.
+    expect(OLDEST_SUPPORTED_API_VERSION).toBe(1);
+    expect(PLUGIN_API_VERSION).toBeGreaterThan(OLDEST_SUPPORTED_API_VERSION);
   });
 
   it("accepts a well-formed manifest with a static-map tool set", () => {
@@ -78,22 +96,24 @@ describe("@platypuschat/plugin-sdk", () => {
     expect(plugin.configSchema).toBeDefined();
   });
 
-  it("injects a shared PluginConfigContext into factories (optional to consume)", () => {
+  it("injects a shared PluginConfigContext into every factory", () => {
     const shared: PluginConfigContext<
       { region: string },
       { apiToken: string }
     > = {
       config: { region: "eu" },
       credentials: { apiToken: "tok" },
+      logger: silentLogger(),
     };
 
-    // A tool-set factory may accept the appended `plugin` argument…
+    // A tool-set factory may ignore the `plugin` argument, or read it — and read
+    // it unguarded, since core always supplies it.
     const toolSet: ToolSetContribution = {
       id: "scoped",
       name: "Scoped",
       category: "Productivity",
       tools: (_ctx, plugin) => {
-        expect(plugin?.credentials).toEqual({ apiToken: "tok" });
+        expect(plugin.credentials).toEqual({ apiToken: "tok" });
         return {};
       },
     };
@@ -146,11 +166,11 @@ describe("@platypuschat/plugin-sdk", () => {
       id: "scoped",
       name: "Scoped",
       category: "Productivity",
-      // The shape an author writes: optional chaining all the way, because the
-      // field is appended and a plugin may run on a core that predates it.
+      // The shape an author writes from API v2 on: no chaining, because both
+      // the block and its logger are required and core always supplies them.
       tools: (ctx, plugin) => {
-        plugin?.logger?.info({ workspaceId: ctx.workspaceId }, "Resolving");
-        plugin?.logger?.warn("Bare message, no fields");
+        plugin.logger.info({ workspaceId: ctx.workspaceId }, "Resolving");
+        plugin.logger.warn("Bare message, no fields");
         return {};
       },
     };
@@ -171,21 +191,54 @@ describe("@platypuschat/plugin-sdk", () => {
     ]);
   });
 
-  it("leaves a logger-less block usable (the field is optional)", () => {
-    // A plugin compiled against this SDK must still work where `logger` is
-    // absent — that is the whole point of appending it as optional.
-    const shared: PluginConfigContext = { config: {}, credentials: {} };
+  it("hands a Sandbox backend's create the same block, logger included", () => {
+    // `logger` is required from API v2 on, so `create` reads it the same way a
+    // Tool-set factory does — no chaining, no fallback.
+    const written: string[] = [];
+    const shared: PluginConfigContext = {
+      config: {},
+      credentials: {},
+      logger: { ...silentLogger(), debug: (m) => written.push(String(m)) },
+    };
     const backend: SandboxBackendContribution = {
       backend: "cloud",
       name: "Cloud",
       configSchema: z.object({}),
       credentialsSchema: z.object({}),
       create: (_config, _credentials, plugin) => {
-        plugin?.logger?.debug("never written");
+        plugin.logger.debug("instantiating");
         return {} as never;
       },
     };
-    expect(() => backend.create({}, {}, shared)).not.toThrow();
+    backend.create({}, {}, shared);
+    expect(written).toEqual(["instantiating"]);
+  });
+
+  it("resolves a configSchema factory against the whole block, not just config", () => {
+    // Re-signed in API v2: the factory sees the same `PluginConfigContext` that
+    // `create` does, so a per-Workspace schema can read the plugin's credentials
+    // and write to the plugin's logger rather than narrowing a bare `unknown`.
+    const seen: PluginConfigContext[] = [];
+    const backend: SandboxBackendContribution = {
+      backend: "fenced",
+      name: "Fenced",
+      configSchema: (plugin) => {
+        seen.push(plugin);
+        return z.object({ net: z.string() });
+      },
+      credentialsSchema: z.object({}),
+      create: () => ({}) as never,
+    };
+    const shared: PluginConfigContext = {
+      config: { allowed: ["shared"] },
+      credentials: { token: "t" },
+      logger: silentLogger(),
+    };
+    if (typeof backend.configSchema !== "function") {
+      throw new Error("expected a factory");
+    }
+    backend.configSchema(shared);
+    expect(seen).toEqual([shared]);
   });
 
   it("satisfies PluginLogger with a pino-shaped logger (no adapter)", () => {
@@ -246,8 +299,13 @@ describe("@platypuschat/plugin-sdk", () => {
     // The executors are plain functions, not AI SDK Tools: core owns the schemas,
     // the caps, the slicing, the timeout, and the egress guard (ADR-0014).
     const executors = await contribution.createExecutors(
-      { orgId: "o", workspaceId: "w", userId: "u" },
-      { config: {}, credentials: { apiKey: "k" } },
+      {
+        orgId: "o",
+        workspaceId: "w",
+        userId: "u",
+        registerCloser: () => {},
+      },
+      { config: {}, credentials: { apiKey: "k" }, logger: silentLogger() },
     );
     // Core supplies the call's signal as an appended second argument. Reading it
     // is the executor's choice; passing it is not core's.
@@ -272,8 +330,13 @@ describe("@platypuschat/plugin-sdk", () => {
     };
 
     const executors = await contribution.createExecutors(
-      { orgId: "o", workspaceId: "w", userId: "u" },
-      undefined,
+      {
+        orgId: "o",
+        workspaceId: "w",
+        userId: "u",
+        registerCloser: () => {},
+      },
+      { config: undefined, credentials: undefined, logger: silentLogger() },
     );
     const cancelled = new AbortController();
     cancelled.abort();
@@ -288,9 +351,9 @@ describe("@platypuschat/plugin-sdk", () => {
       backend: "searx",
       name: "SearXNG",
       createExecutors: (ctx) => {
-        // Guarded, never `!`: the member is optional so that a plugin built
-        // against this SDK still loads on a core that predates it.
-        ctx.registerCloser?.(() => {
+        // Unguarded: `registerCloser` is required from API v2 on, and a manifest
+        // declaring v2 cannot be loaded by a core that lacks it.
+        ctx.registerCloser(() => {
           closed.push("pool");
         });
         return { web_search: () => ({ query: "q", results: [] }) };
@@ -305,7 +368,7 @@ describe("@platypuschat/plugin-sdk", () => {
         userId: "u",
         registerCloser: (close) => registered.push(close),
       },
-      undefined,
+      { config: undefined, credentials: undefined, logger: silentLogger() },
     );
 
     expect(registered).toHaveLength(1);
@@ -320,20 +383,23 @@ describe("@platypuschat/plugin-sdk", () => {
       name: "Kanban",
       category: "Productivity",
       tools: (ctx) => {
-        ctx.registerCloser?.(() => {});
+        ctx.registerCloser(() => {});
         return {};
       },
     };
 
     if (typeof contribution.tools === "function") {
-      contribution.tools({
-        orgId: "o",
-        workspaceId: "w",
-        agentId: "a",
-        userId: "u",
-        frontendUrl: undefined,
-        registerCloser: (close) => registered.push(close),
-      });
+      contribution.tools(
+        {
+          orgId: "o",
+          workspaceId: "w",
+          agentId: "a",
+          userId: "u",
+          frontendUrl: undefined,
+          registerCloser: (close) => registered.push(close),
+        },
+        { config: undefined, credentials: undefined, logger: silentLogger() },
+      );
     }
     expect(registered).toHaveLength(1);
   });

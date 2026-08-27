@@ -28,10 +28,10 @@ export const plugin: PlatypusPlugin = {
           "A tiny example tool set contributed by a third-party plugin",
         // A factory rather than a static map, because only a factory is handed
         // the deploy-time block — and with it the logger core has already bound
-        // to this manifest's name. Optional-chained the whole way so the same
-        // code runs on a core that predates the field.
+        // to this manifest's name. Both are required as of API v2, so neither
+        // reads through a `?.`.
         tools: (ctx, plugin) => {
-          plugin?.logger?.debug(
+          plugin.logger.debug(
             { workspaceId: ctx.workspaceId, agentId: ctx.agentId },
             "Resolving the greeting tool set for a turn",
           );

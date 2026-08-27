@@ -4,13 +4,15 @@ import {
   type PlatypusPlugin,
   type PluginConfigContext,
   type PluginLogger,
-  type SandboxBackendContribution,
 } from "@platypuschat/plugin-sdk";
 import { MAX_PLUGIN_NAME_LENGTH } from "@platypus/schemas";
 import { logger } from "../logger.ts";
 import { ALWAYS_ON_PLUGINS, BUILTIN_PLUGINS } from "./builtin.ts";
 import { registerToolSet, type ToolSetRegistration } from "../tools/index.ts";
-import { registerSandboxBackend } from "../sandbox/index.ts";
+import {
+  registerSandboxBackend,
+  type SandboxBackendRegistration,
+} from "../sandbox/index.ts";
 import {
   registerWebBackend,
   type WebBackendRegistration,
@@ -123,8 +125,14 @@ export interface LoadPluginsOptions {
    * Defaults to the core `registerToolSet`.
    */
   register?: (id: string, registration: ToolSetRegistration) => void;
-  /** Registers one Sandbox-backend contribution. Defaults to core `registerSandboxBackend`. */
-  registerSandbox?: (contribution: SandboxBackendContribution) => void;
+  /**
+   * Registers one Sandbox backend. Takes the *composed* registration — core has
+   * already resolved the contribution's `configSchema` factory form away and
+   * bound its `create` to the plugin's config block — rather than the raw
+   * contribution, for the same reason `register` and `registerWeb` do
+   * (ADR-0013/0014). Defaults to core `registerSandboxBackend`.
+   */
+  registerSandbox?: (registration: SandboxBackendRegistration) => void;
   /**
    * Registers one Web-search backend. Takes the *composed* registration — core
    * has already wrapped the contribution's executors in its own Tools — rather

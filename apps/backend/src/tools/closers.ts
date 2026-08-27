@@ -101,7 +101,7 @@ export type CoreCloserRegistrar = (
  * context, so what reaches a Contribution is still the published shape.
  */
 export type WithCoreRegistrar<T> = Omit<T, "registerCloser"> & {
-  registerCloser?: CoreCloserRegistrar;
+  registerCloser: CoreCloserRegistrar;
 };
 
 /**
@@ -130,18 +130,15 @@ export const attributeCloser = (
  * seam by accident — core-only fields have to be stripped by the caller *before*
  * this point, and one shared helper is one place to check that.
  *
- * A context that carries no registrar is returned as-is, so a core that never
- * supplies one hands a Contribution exactly the object it did before.
+ * There is no "context without a registrar" branch: `registerCloser` is required
+ * on both published contexts as of API v2, and core has always supplied one.
  */
 export const withAttributedRegistrar = <
-  T extends { registerCloser?: CoreCloserRegistrar },
+  T extends { registerCloser: CoreCloserRegistrar },
 >(
   ctx: T,
   attribution: Record<string, unknown>,
-): Omit<T, "registerCloser"> & { registerCloser?: CloserRegistrar } => {
-  if (!ctx.registerCloser) return ctx;
-  return {
-    ...ctx,
-    registerCloser: attributeCloser(ctx.registerCloser, attribution),
-  };
-};
+): Omit<T, "registerCloser"> & { registerCloser: CloserRegistrar } => ({
+  ...ctx,
+  registerCloser: attributeCloser(ctx.registerCloser, attribution),
+});

@@ -42,6 +42,7 @@ import {
   RESERVED_TURN_TOOL_NAMES,
   WEB_SEARCH_TOOL_NAME,
 } from "./turn-tool-names.ts";
+import { makePluginContext } from "../test-utils.ts";
 
 // The store's own contract — miss semantics, duplicate rejection, prototype-key
 // safety, listing, reset — is covered once in
@@ -117,6 +118,7 @@ describe("Tool Set Registry", () => {
         id,
         pluginName: "test-plugin",
         isCore: false,
+        plugin: makePluginContext(),
         contribution: { name, category: "Test", tools: {} },
       });
 
@@ -148,6 +150,7 @@ describe("composeToolSet", () => {
     agentId: "agent-1",
     userId: "user-1",
     frontendUrl: undefined,
+    registerCloser: () => {},
   };
 
   // Third-party by default, which is the interesting origin: its tool names are
@@ -161,6 +164,7 @@ describe("composeToolSet", () => {
       id: isCore ? "widgets" : "acme.widgets",
       pluginName,
       isCore,
+      plugin: makePluginContext(),
       contribution: { name: "Widgets", category: "Test", tools },
     });
 
@@ -180,24 +184,20 @@ describe("composeToolSet", () => {
     );
   });
 
-  // The Tool-set half of the version-skew guarantee the Web-search side pins in
-  // `web-backends/index.test.ts`. `ctx` above carries no `registerCloser`, which
-  // is exactly what a factory compiled against a newer SDK meets on an older
-  // core — the member is optional precisely so this is a guarded call.
-  it("serves no tools when a factory calls the registrar unguarded on an older core", async () => {
+  // The Tool-set half of what API v2 settled: `registerCloser` is required and
+  // core supplies one on every turn, so the guarded call a v1 author had to write
+  // is no longer what stands between a factory and its tools. The Web-search side
+  // pins the same property in `web-backends/index.test.ts`.
+  it("hands every turn a registrar, so an unguarded call is not a fault", async () => {
     const registration = compose((ctx) => {
-      // The `!` this contract's docs tell an author never to write. On a core
-      // without the member it is a TypeError out of the factory.
-      ctx.registerCloser!(() => {});
-      return {};
+      ctx.registerCloser(() => {});
+      return { widget: { description: "w" } as unknown as Tool };
     });
 
-    await expect(registration.buildTurnTools(ctx)).resolves.toEqual({});
-    expect(logger.warn).toHaveBeenCalledTimes(1);
-    expect(logger.warn).toHaveBeenCalledWith(
-      expect.objectContaining({ plugin: "acme", toolSet: "acme.widgets" }),
-      expect.stringContaining("Tool set factory threw"),
+    await expect(registration.buildTurnTools(ctx)).resolves.toHaveProperty(
+      "acme__widget",
     );
+    expect(logger.warn).not.toHaveBeenCalled();
   });
 
   it("serves no tools when a factory resolves to something that is not a tool map", async () => {
@@ -282,7 +282,7 @@ describe("composeToolSet", () => {
 
   it("binds the plugin's deploy-time config into the factory", async () => {
     const tools = vi.fn().mockResolvedValue({});
-    const plugin = { config: { region: "eu" }, credentials: undefined };
+    const plugin = makePluginContext({ config: { region: "eu" } });
     await composeToolSet({
       id: "acme.widgets",
       pluginName: "acme",
@@ -291,7 +291,12 @@ describe("composeToolSet", () => {
       contribution: { name: "Widgets", category: "Test", tools },
     }).buildTurnTools(ctx);
 
-    expect(tools).toHaveBeenCalledWith(ctx, plugin);
+    // The registrar the factory meets is core's, re-bound to this Tool set's
+    // attribution, so it is matched as any function rather than by identity.
+    expect(tools).toHaveBeenCalledWith(
+      { ...ctx, registerCloser: expect.any(Function) as unknown },
+      plugin,
+    );
   });
 
   it("exposes a static map to the catalogs, and a factory's tools not at all", () => {
@@ -317,6 +322,7 @@ describe("composeToolSet tool-name namespacing", () => {
     agentId: "agent-1",
     userId: "user-1",
     frontendUrl: undefined,
+    registerCloser: () => {},
   };
 
   const stub = (description: string) => ({ description }) as unknown as Tool;
@@ -329,6 +335,7 @@ describe("composeToolSet tool-name namespacing", () => {
       id: isCore ? "widgets" : `${pluginName}.widgets`,
       pluginName,
       isCore,
+      plugin: makePluginContext(),
       contribution: { name: "Widgets", category: "Test", tools },
     });
 

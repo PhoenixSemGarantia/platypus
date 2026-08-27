@@ -256,16 +256,15 @@ export class SshSandboxTransport implements SandboxTransport {
    * The logger core bound to `@platypus/ssh` and injected on the plugin's
    * deploy-time block (ADR-0013) — see the Docker transport for why an in-tree
    * plugin consumes the third-party contract rather than importing core's
-   * logger. Optional because {@link PluginConfigContext.logger} is, so the one
-   * call site below is written `this.logger?.…`; the connection is still made
-   * when it is absent, silently.
+   * logger. Required, as {@link PluginConfigContext.logger} has been since API
+   * v2.
    */
-  private logger?: PluginLogger;
+  private logger: PluginLogger;
 
   constructor(
     config: SshSandboxConfig,
     credentials: SshSandboxCredentials,
-    logger?: PluginLogger,
+    logger: PluginLogger,
   ) {
     this.config = config;
     this.credentials = credentials;
@@ -314,7 +313,7 @@ export class SshSandboxTransport implements SandboxTransport {
       // Public-key auth still prevents credential theft by an impostor host; the
       // residual risk is session/output exposure to a MITM. Pin `hostKey` on
       // internet-facing hosts.
-      this.logger?.warn(
+      this.logger.warn(
         { host, port },
         "SSH sandbox connecting WITHOUT host-key verification — session and injected env are exposed to a MITM. Set `hostKey` to pin the host.",
       );
@@ -640,8 +639,8 @@ export class SshSandboxTransport implements SandboxTransport {
 export const createSshSandboxBackend = (
   config: SshSandboxConfig,
   credentials: SshSandboxCredentials,
-  plugin?: PluginConfigContext,
+  plugin: PluginConfigContext,
 ): SandboxBackend =>
   createPosixSandbox(
-    new SshSandboxTransport(config, credentials, plugin?.logger),
+    new SshSandboxTransport(config, credentials, plugin.logger),
   );

@@ -30,7 +30,7 @@ export const plugin: PlatypusPlugin = {
         category: "Examples",
         tools: (ctx, plugin) => {
           // Core's logger, already tagged with `example`
-          plugin?.logger?.debug({ workspaceId: ctx.workspaceId }, "Resolving");
+          plugin.logger.debug({ workspaceId: ctx.workspaceId }, "Resolving");
           return {
             // bare — core namespaces it to `example__greet`
             greet: tool({

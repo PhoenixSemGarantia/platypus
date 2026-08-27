@@ -96,23 +96,28 @@ export const sandboxBackendPoint = (
   prepare: (raw, { pluginName, id, plugin }) => {
     const contribution = raw as unknown as SandboxBackendContribution;
 
-    // Resolve a factory-form configSchema against the boot-resolved plugin
-    // config so the three static `configSchema.safeParse` consumers (save route,
+    // Resolve a factory-form configSchema against the boot-resolved plugin block
+    // so the three static `configSchema.safeParse` consumers (save route,
     // teardown, tool resolver) always receive a concrete schema — they never see
-    // plugin config. A plain schema passes through untouched (append-only:
-    // plugin-config-agnostic backends are unaffected).
+    // plugin config. A plain schema passes through untouched: plugin-config-
+    // agnostic backends are unaffected.
     //
-    // The factory is third-party code reading a config block it narrows itself,
-    // so it can throw — a plugin that assumes an Operator supplied
-    // `config.region` raises a bare `Cannot read properties of undefined` naming
-    // nothing. Attributed here for the same reason the shape checks exist: the
-    // schema check below only catches a factory that *returns* a non-schema, not
-    // one that throws on the way there.
+    // The factory is handed the whole `PluginConfigContext`, the same object
+    // `create` gets, rather than the `config` half alone (API v2). It was the one
+    // factory on this surface that could reach neither the plugin's credentials
+    // nor its logger — so the one with no way to say why it refused a value.
+    //
+    // The factory is third-party code narrowing that block itself, so it can
+    // throw — a plugin that assumes an Operator supplied `config.region` raises a
+    // bare `Cannot read properties of undefined` naming nothing. Attributed here
+    // for the same reason the shape checks exist: the schema check below only
+    // catches a factory that *returns* a non-schema, not one that throws on the
+    // way there.
     let configSchema: SandboxBackendRegistration["configSchema"];
     try {
       configSchema =
         typeof contribution.configSchema === "function"
-          ? contribution.configSchema(plugin.config)
+          ? contribution.configSchema(plugin)
           : contribution.configSchema;
     } catch (cause) {
       throw new Error(

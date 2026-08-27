@@ -53,6 +53,7 @@ const ctx: ToolSetContext = {
   orgId: "org-1",
   frontendUrl: "http://localhost:3000",
   userId: "u-1",
+  registerCloser: () => {},
 };
 
 describe("@platypus/tools-platform plugin manifest", () => {

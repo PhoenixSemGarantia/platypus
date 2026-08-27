@@ -163,8 +163,15 @@ export interface ComposeToolSetOptions {
   contribution: Omit<ToolSetContribution, "id">;
   /** The id this Tool set registers under (namespaced, for a third-party plugin). */
   id: string;
-  /** The plugin's boot-resolved deploy-time config/credentials (ADR-0013). */
-  plugin?: PluginConfigContext;
+  /**
+   * The plugin's boot-resolved deploy-time config/credentials (ADR-0013).
+   * Required, as the contribution-facing argument it is forwarded to has been
+   * since API v2. A core registration that is not a plugin contribution — there
+   * is one, the `sandbox` Tool set below — builds {@link CORE_PLUGIN_CONTEXT}
+   * rather than passing nothing, so "core always supplies it" is true in the
+   * code and not only in the SDK's prose.
+   */
+  plugin: PluginConfigContext;
   /**
    * Owning plugin's manifest name, for attribution in every log line — and, for
    * a third-party plugin, the namespace its tool names enter a turn under.
@@ -410,6 +417,29 @@ export const composeToolSet = (
   };
 };
 
+/**
+ * The deploy-time block for a core registration that no plugin contributes.
+ *
+ * Every Tool set factory is handed a {@link PluginConfigContext} (required as of
+ * API v2), and the loader builds one per plugin. The `sandbox` Tool set below is
+ * the lone Tool set that does not come from a manifest, so it has no Operator-
+ * supplied config or credentials to resolve — both are `undefined`, exactly as
+ * they are for a plugin whose manifest declares no schema. The logger is bound
+ * the same way the loader binds a plugin's, so a line this factory writes is
+ * attributed like every other Tool set's.
+ */
+const CORE_PLUGIN_CONTEXT: PluginConfigContext = {
+  config: undefined,
+  credentials: undefined,
+  // A getter, so the child is derived on read rather than at module load.
+  // `logger` is a module singleton that tests replace wholesale, and calling
+  // `child()` while this module is still being imported would make importing it
+  // at all depend on the shape of whatever replaced it.
+  get logger() {
+    return logger.child({ plugin: CORE_BUILTIN_OWNER });
+  },
+};
+
 // Tool set ID constants for referencing registered tool sets by name
 export const MEMORY_TOOLSET_ID = "memory";
 
@@ -440,6 +470,7 @@ registerToolSet(
   composeToolSet({
     id: SANDBOX_TOOLSET_ID,
     pluginName: CORE_BUILTIN_OWNER,
+    plugin: CORE_PLUGIN_CONTEXT,
     isCore: true,
     contribution: {
       name: "Sandbox",

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { Mock } from "vitest";
+import { makePluginContext } from "../test-utils.ts";
 
 type NativeSearchTool = Mock<() => { _nativeSearch: true }>;
 
@@ -1394,6 +1395,7 @@ describe("chat-execution", () => {
               ...overrides,
             },
             pluginName: "@acme/searx",
+            plugin: makePluginContext(),
           }),
         );
 
@@ -1551,6 +1553,7 @@ describe("chat-execution", () => {
               },
             },
             pluginName: "@acme/searx",
+            plugin: makePluginContext(),
           }),
         );
 
@@ -1897,6 +1900,7 @@ describe("chat-execution", () => {
               .fn()
               .mockRejectedValue(new Error("tool-set factory failed")),
           },
+          plugin: makePluginContext(),
         }),
       );
 
@@ -1912,6 +1916,7 @@ describe("chat-execution", () => {
             category: "Test",
             tools: { stillHere: { description: "x" } as never },
           },
+          plugin: makePluginContext(),
         }),
       );
 
@@ -1958,6 +1963,7 @@ describe("chat-execution", () => {
           pluginName: "acme",
           isCore: false,
           contribution: { name: "Acme", category: "Test", tools },
+          plugin: makePluginContext(),
         }),
       );
       return { ...baseAgent, toolSetIds: [id] };
@@ -1982,6 +1988,7 @@ describe("chat-execution", () => {
             }),
           },
           pluginName: "@acme/searx",
+          plugin: makePluginContext(),
         }),
       );
       const provider = { ...baseProvider, searchSource: "searx-664" };

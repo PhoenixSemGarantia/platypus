@@ -33,8 +33,29 @@ import type { z } from "zod";
  * A genuinely **breaking** change — removing or re-signing a required member — is
  * a **windowed major bump**: the major increments, and during the window core
  * runs both N and N−1 so authors have a release to migrate.
+ *
+ * ## What v2 changed
+ *
+ * v2 is the first such bump, and it spends the window on one thing: every member
+ * core has always supplied unconditionally is now **required** rather than
+ * optional. `ToolSetContext.registerCloser`, `WebBackendContext.registerCloser`,
+ * `PluginConfigContext.logger` and the trailing `plugin` argument on all three
+ * contribution factories were optional only because a v1 manifest could not ask
+ * for a core new enough to have them. A v2 manifest can: a v1 core rejects
+ * `apiVersion: 2` at boot and names the upgrade, so the guard those members
+ * needed — `ctx.registerCloser?.(…)`, `plugin?.logger?.…` — is no longer
+ * load-bearing.
+ *
+ * {@link SandboxConfigSchema}'s factory form is re-signed in the same window: it
+ * receives the whole {@link PluginConfigContext} rather than the `config` half
+ * alone, so a per-Workspace schema can read the plugin's credentials and write to
+ * the plugin's logger like every other factory.
+ *
+ * Migrating a v1 plugin: set `apiVersion` to 2, drop the `?.` guards, and — if
+ * you use the `configSchema` factory form — read `plugin.config` where the
+ * argument itself used to be the config.
  */
-export const PLUGIN_API_VERSION = 1 as const;
+export const PLUGIN_API_VERSION = 2 as const;
 
 /**
  * The oldest plugin API major core still accepts — one below the current major
@@ -42,8 +63,9 @@ export const PLUGIN_API_VERSION = 1 as const;
  * targets a dropped major and is rejected at boot. See {@link PLUGIN_API_VERSION}.
  *
  * Floored at `1`: there is no major `0`, so at the first major (N = 1) the window
- * collapses to `[1, 1]` rather than admitting a phantom `v0`. Once core reaches
- * major 2 this becomes `1`, opening the genuine N−1 slot.
+ * collapsed to `[1, 1]` rather than admitting a phantom `v0`. At v2 the floor is
+ * no longer what decides it — the window is a genuine `[1, 2]`, and every v1
+ * plugin in the field keeps loading on a v2 core.
  */
 export const OLDEST_SUPPORTED_API_VERSION = Math.max(1, PLUGIN_API_VERSION - 1);
 
@@ -84,14 +106,15 @@ export interface ToolSetContext {
    * Register something to close when this turn ends — see
    * {@link CloserRegistrar}.
    *
-   * **Optional on purpose, and it must stay optional.** A manifest declares a
-   * *major* `apiVersion` only, so a plugin cannot ask for a core new enough to
-   * have this member; on an older core it is genuinely absent. Call it guarded —
-   * `ctx.registerCloser?.(close)` — and never with `!`: an unguarded call on
-   * older core throws out of your factory, which costs the turn every tool in
-   * this set. Core always supplies it.
+   * **Required as of API v2** (see {@link PLUGIN_API_VERSION}), and core has
+   * always supplied it. Call it directly — `ctx.registerCloser(close)`. It was
+   * optional through v1 for one reason: a v1 manifest could not ask for a core
+   * new enough to have the member, so on an older core it was genuinely absent
+   * and an unguarded call threw out of the factory, costing the turn every tool
+   * in this set. A v2 manifest cannot reach such a core — it is refused at boot —
+   * so the guard has nothing left to protect against.
    */
-  registerCloser?: CloserRegistrar;
+  registerCloser: CloserRegistrar;
 }
 
 /**
@@ -146,11 +169,11 @@ export interface PluginConfigContext<
    * line the plugin writes lands in core's stream already attributed and at the
    * verbosity the Operator asked for. Reach for it instead of `console.*`.
    *
-   * Optional, and appended (append-only compatibility, ADR-0013) — write
-   * `plugin?.logger?.info(...)`. Core always supplies it; the optionality is
-   * what keeps a plugin built against an earlier SDK compiling unchanged.
+   * **Required as of API v2** (see {@link PLUGIN_API_VERSION}), and core has
+   * always supplied it — write `plugin.logger.info(...)` rather than the doubly
+   * guarded `plugin?.logger?.info(...)` a v1 plugin had to.
    */
-  logger?: PluginLogger;
+  logger: PluginLogger;
 }
 
 /**
@@ -160,9 +183,11 @@ export interface PluginConfigContext<
  *
  * The factory's second argument is the deploy-time {@link PluginConfigContext}
  * — the plugin's shared config/credentials block, the same object handed to
- * every one of the plugin's contribution factories. It is appended and optional
- * so existing single-argument factories keep working unchanged (append-only
- * compatibility, ADR-0013). Core always supplies it at Chat-turn time.
+ * every one of the plugin's contribution factories. **Required as of API v2**
+ * (see {@link PLUGIN_API_VERSION}), which costs a single-argument factory
+ * nothing: TypeScript lets a function ignore arguments it is passed, so
+ * `(ctx) => …` still satisfies this type. What it buys a factory that *does*
+ * read the block is a value that is never `undefined`.
  *
  * Write **bare** tool names. For a third-party plugin core namespaces each one
  * under the manifest {@link PlatypusPlugin.name} before the model sees it, so
@@ -176,7 +201,7 @@ export type ToolSetTools =
   | Record<string, Tool>
   | ((
       ctx: ToolSetContext,
-      plugin?: PluginConfigContext,
+      plugin: PluginConfigContext,
     ) => Record<string, Tool> | Promise<Record<string, Tool>>);
 
 /**
@@ -291,15 +316,20 @@ export interface SandboxBackend {
  * The factory form lets a backend derive its per-Workspace validation from
  * Operator-owned plugin config — e.g. `@platypus/docker` closes over the
  * Operator's network allowlist so an out-of-allowlist `networks` entry is
- * rejected at config-save time. This is **append-only** within the major API
- * version: a plain schema stays valid, so backends that don't need plugin config
- * are untouched. Core resolves the factory against the boot-validated {@link
- * PluginConfigContext.config} before the three static `configSchema.safeParse`
- * consumers (save route, teardown, tool resolver) ever see it — they always
- * receive a concrete schema.
+ * rejected at config-save time. A plain schema stays valid, so backends that
+ * don't need plugin config are untouched. Core resolves the factory before the
+ * three static `configSchema.safeParse` consumers (save route, teardown, tool
+ * resolver) ever see it — they always receive a concrete schema.
+ *
+ * **Re-signed in API v2** (see {@link PLUGIN_API_VERSION}): the factory receives
+ * the whole {@link PluginConfigContext}, where through v1 it received the
+ * `config` half alone, as `unknown`. It was the one factory in this SDK that
+ * could reach neither the plugin's credentials nor its logger — so the one
+ * factory with no way to say *why* it refused a value. A v1 factory migrates by
+ * reading `plugin.config` where its argument used to be the config itself.
  */
 export type SandboxConfigSchema<TConfig = unknown> =
-  z.ZodType<TConfig> | ((pluginConfig: unknown) => z.ZodType<TConfig>);
+  z.ZodType<TConfig> | ((plugin: PluginConfigContext) => z.ZodType<TConfig>);
 
 /**
  * A single Sandbox-backend contribution — the payload core's internal
@@ -308,10 +338,9 @@ export type SandboxConfigSchema<TConfig = unknown> =
  * per-Workspace jsonb columns before `create()` instantiates an adapter.
  *
  * `configSchema` may be a plain Zod schema or a {@link SandboxConfigSchema}
- * factory of the plugin's deploy-time config (resolved at load, append-only).
- * The factory receives the boot-validated {@link PluginConfigContext.config} as
- * `unknown` — the same opaque shape `create()`'s `plugin` argument carries — and
- * narrows it itself (a plugin knows its own config schema).
+ * factory of the plugin's deploy-time block (resolved at load). The factory
+ * receives the same {@link PluginConfigContext} `create()` does, and narrows
+ * `config` / `credentials` itself — a plugin knows its own schemas.
  */
 export interface SandboxBackendContribution<
   TConfig = unknown,
@@ -325,14 +354,15 @@ export interface SandboxBackendContribution<
    * Instantiate the adapter. `config` / `credentials` are the per-Workspace
    * values validated against the schemas above; `plugin` is the deploy-time
    * {@link PluginConfigContext} shared across every one of the plugin's
-   * contributions (ADR-0013). `plugin` is appended and optional so existing
-   * two-argument factories keep working unchanged (append-only compatibility).
-   * Core always supplies it when instantiating the adapter.
+   * contributions (ADR-0013). **Required as of API v2** (see {@link
+   * PLUGIN_API_VERSION}), which costs a two-argument `create` nothing — it still
+   * satisfies this type — and gives one that reads the block a value that is
+   * never `undefined`.
    */
   create(
     config: TConfig,
     credentials: TCredentials,
-    plugin?: PluginConfigContext,
+    plugin: PluginConfigContext,
   ): SandboxBackend;
 }
 
@@ -344,7 +374,7 @@ export interface SandboxBackendContribution<
  * upstream does so as its own implementation detail, using its own Plugin
  * credentials (ADR-0014).
  *
- * No longer plain data: it carries exactly one capability, `registerCloser`.
+ * Not plain data: it carries exactly one capability, `registerCloser`.
  * Everything else on it is still a value to read.
  */
 export interface WebBackendContext {
@@ -356,14 +386,14 @@ export interface WebBackendContext {
    * {@link CloserRegistrar}. This is where a browser pool or a keep-alive
    * connection opened by `createExecutors` gets released.
    *
-   * **Optional on purpose, and it must stay optional.** A manifest declares a
-   * *major* `apiVersion` only, so a plugin cannot ask for a core new enough to
-   * have this member; on an older core it is genuinely absent. Call it guarded —
-   * `ctx.registerCloser?.(close)` — and never with `!`: an unguarded call on
-   * older core throws out of `createExecutors`, which costs the turn its search
-   * tools entirely. Core always supplies it.
+   * **Required as of API v2** (see {@link PLUGIN_API_VERSION}), and core has
+   * always supplied it. Call it directly — `ctx.registerCloser(close)`. It was
+   * optional through v1 for one reason: a v1 manifest could not ask for a core
+   * new enough to have the member, so on an older core it was genuinely absent
+   * and an unguarded call threw out of `createExecutors`, costing the turn its
+   * search tools entirely. A v2 manifest cannot reach such a core.
    */
-  registerCloser?: CloserRegistrar;
+  registerCloser: CloserRegistrar;
 }
 
 /** One search hit. Core caps the count and truncates the strings (ADR-0014). */
@@ -488,9 +518,10 @@ export interface WebBackendContribution {
   /**
    * Build this backend's executors for one Chat turn. `plugin` is the deploy-time
    * {@link PluginConfigContext} shared across every one of the plugin's
-   * contributions (ADR-0013) — where a backend's endpoint and API key live. It is
-   * appended and optional so a single-argument factory keeps working unchanged
-   * (append-only compatibility); core always supplies it.
+   * contributions (ADR-0013) — where a backend's endpoint and API key live.
+   * **Required as of API v2** (see {@link PLUGIN_API_VERSION}), which costs a
+   * single-argument factory nothing — it still satisfies this type — and gives
+   * one that reads the block a value that is never `undefined`.
    *
    * Boot is fail-loud, runtime is graceful: a contribution that omits this
    * function is rejected at load by plugin name, but a factory that *throws* or
@@ -500,7 +531,7 @@ export interface WebBackendContribution {
    */
   createExecutors(
     ctx: WebBackendContext,
-    plugin?: PluginConfigContext,
+    plugin: PluginConfigContext,
   ): WebBackendExecutors | Promise<WebBackendExecutors>;
 }
 

@@ -6,6 +6,7 @@ import {
   type ExtensionPoint,
   type RawContribution,
 } from "./contribution-pipeline.ts";
+import { makeFakePluginLogger } from "../test-utils.ts";
 
 // Every Extension point runs the same seven steps over its slice of a manifest —
 // shape check, id and name checks, namespacing, owner-attributed collision
@@ -13,7 +14,11 @@ import {
 // against a stand-in point, so `loader.test.ts` is left testing what each real
 // point *adds* rather than re-testing this sequence three times.
 
-const PLUGIN: PluginConfigContext = { config: { key: "k" }, credentials: {} };
+const PLUGIN: PluginConfigContext = {
+  config: { key: "k" },
+  credentials: {},
+  logger: makeFakePluginLogger(),
+};
 
 type Widget = { id: string; label: string; plugin: PluginConfigContext };
 
