@@ -221,6 +221,16 @@ describe("MessageEditor", () => {
     }
   });
 
+  // Opening on a message means opening ready to replace it, not ready to
+  // append to it.
+  it("selects the text it opens on", () => {
+    renderEditor();
+
+    const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+    expect(textarea.selectionStart).toBe(0);
+    expect(textarea.selectionEnd).toBe("What does this say?".length);
+  });
+
   // The composer owns the window-level drop (`globalDrop`); a second input
   // claiming it would take the same file a second time.
   it("does not claim a file dropped on the window", () => {
@@ -234,6 +244,29 @@ describe("MessageEditor", () => {
     });
 
     expect(screen.queryByText("dropped.png")).toBeNull();
+  });
+
+  // …but a file dropped ON the edit surface is the edit's, and it must not fall
+  // through to the composer's window-level listener.
+  it("keeps a file dropped on itself, and stops it bubbling onward", () => {
+    const onWindowDrop = vi.fn();
+    document.addEventListener("drop", onWindowDrop);
+    // Both types read natively, so the compatibility notice stays out of the
+    // way — it would otherwise name the dropped file a second time.
+    const { container } = renderEditor({
+      passthroughFileTypes: ["application/pdf", "image/png"],
+    });
+
+    fireEvent.drop(container.querySelector("form")!, {
+      dataTransfer: {
+        types: ["Files"],
+        files: [new File(["hi"], "dropped.png", { type: "image/png" })],
+      },
+    });
+
+    expect(screen.getByText("dropped.png")).toBeInTheDocument();
+    expect(onWindowDrop).not.toHaveBeenCalled();
+    document.removeEventListener("drop", onWindowDrop);
   });
 
   it("writes dictation into the edited message", async () => {

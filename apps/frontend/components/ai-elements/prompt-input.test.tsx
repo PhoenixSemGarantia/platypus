@@ -179,6 +179,78 @@ describe("PromptInput attachments", () => {
   });
 });
 
+/**
+ * Two inputs on one page (issue #710: the composer plus an inline edit
+ * surface). The composer claims the window-level drop; the edit surface must
+ * still keep a file dropped on itself, and exactly one of them may take it.
+ */
+describe("PromptInput drop routing with two inputs", () => {
+  const named = (label: string, globalDrop: boolean) => (
+    <PromptInput globalDrop={globalDrop} multiple onSubmit={vi.fn()}>
+      <PromptInputAttachments className="w-full">
+        {(attachment) => (
+          <PromptInputAttachment
+            data={attachment}
+            data-testid={`${label}-chip`}
+          />
+        )}
+      </PromptInputAttachments>
+      <PromptInputBody>
+        <PromptInputTextarea />
+      </PromptInputBody>
+    </PromptInput>
+  );
+
+  const dropOn = (target: Element | Document) =>
+    fireEvent.drop(target, {
+      dataTransfer: {
+        types: ["Files"],
+        files: [new File(["hi"], "dropped.png", { type: "image/png" })],
+      },
+    });
+
+  const chips = (label: string) => screen.queryAllByTestId(`${label}-chip`);
+
+  const renderBoth = () =>
+    render(
+      <>
+        {named("composer", true)}
+        {named("editor", false)}
+      </>,
+    ).container.querySelectorAll("form");
+
+  // The defect: the edit surface's own drop never bound (the ref was resolved
+  // by walking up from a span rendered OUTSIDE the form), so the file fell
+  // through to the composer's window-level listener — landing in the composer
+  // and never in the surface it was dropped on.
+  it("gives a file dropped on the inline input to that input alone", () => {
+    const forms = renderBoth();
+
+    dropOn(forms[1]);
+
+    expect(chips("editor")).toHaveLength(1);
+    expect(chips("composer")).toHaveLength(0);
+  });
+
+  it("takes a file dropped on the composer once, not twice", () => {
+    const forms = renderBoth();
+
+    dropOn(forms[0]);
+
+    expect(chips("composer")).toHaveLength(1);
+    expect(chips("editor")).toHaveLength(0);
+  });
+
+  it("leaves a drop on neither input to whichever claimed the window", () => {
+    renderBoth();
+
+    dropOn(document);
+
+    expect(chips("composer")).toHaveLength(1);
+    expect(chips("editor")).toHaveLength(0);
+  });
+});
+
 describe("PromptInputAttachment image parts", () => {
   // issue #579: a part can carry an image media type with nothing a client
   // can fetch (e.g. Provider-reference-only). It should render as the plain

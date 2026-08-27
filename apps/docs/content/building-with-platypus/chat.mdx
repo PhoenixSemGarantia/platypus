@@ -318,14 +318,15 @@ the text, selected so typing replaces it, and the files attached to it. It works
 like the one at the bottom of the screen — attach more files, remove the ones
 that are there, dictate into it, pick a different model.
 
-**Enter** saves, **Shift+Enter** adds a line, and **Escape** cancels; the **✕**
-beside the send button cancels too.
+On a full-width screen **Enter** saves and **Shift+Enter** adds a line; on a
+narrow one Enter adds a line and the send button saves, the same as the input
+below. **Escape** cancels, and so does the **✕** beside the send button.
 
-The model picker is in the box because an edit runs against whatever this Chat
-is currently set to, not against the model that answered the first time. Change
-the picker an hour ago and the edit re-runs on the new selection, so the box
-names what it is about to use. Changing it there changes it for the Chat, the
-same as changing it below.
+The box carries a model picker, and it is the picker that matters: an edit
+re-runs on whatever this Chat is set to **now**, not on the model that answered
+the first time. Change the picker earlier in the session and the edit goes to
+the new selection. Read the picker in the box before saving, and change it there
+if that isn't what you want — it changes the Chat's selection too.
 
 <Callout type="warning">
   **Edit discards everything after the message you edited.** Saving the edit
