@@ -265,6 +265,14 @@ export type PromptInputProps = Omit<
 > & {
   accept?: string; // e.g., "image/*", ".pdf", or a comma-separated list of either
   multiple?: boolean;
+  /**
+   * Parts the input opens holding, for a surface editing a message that already
+   * carries attachments (issue #710). Read once, on mount: after that the list
+   * is the user's, so a later change to this prop leaves it alone. Persisted
+   * parts carry a fetchable URL rather than a `blob:` one, so they pass through
+   * submit untouched.
+   */
+  initialAttachments?: FileUIPart[];
   // When true, accepts drops anywhere on document. Default false (opt-in).
   globalDrop?: boolean;
   // Minimal constraints
@@ -284,6 +292,7 @@ export const PromptInput = ({
   className,
   accept,
   multiple,
+  initialAttachments,
   globalDrop,
   maxFiles,
   maxFileSize,
@@ -305,7 +314,9 @@ export const PromptInput = ({
     }
   }, []);
 
-  const [files, setItems] = useState<(FileUIPart & { id: string })[]>([]);
+  const [files, setItems] = useState<(FileUIPart & { id: string })[]>(() =>
+    (initialAttachments ?? []).map((part) => ({ ...part, id: nanoid() })),
+  );
 
   const openFileDialog = useCallback(() => {
     inputRef.current?.click();
@@ -565,6 +576,7 @@ export const PromptInputTextarea = ({
   className,
   placeholder = "What would you like to know?",
   status,
+  onKeyDown,
   ...props
 }: PromptInputTextareaProps) => {
   const attachments = usePromptInputAttachments();
@@ -572,6 +584,15 @@ export const PromptInputTextarea = ({
   const isMobile = useIsMobile();
 
   const handleKeyDown: KeyboardEventHandler<HTMLTextAreaElement> = (e) => {
+    // A caller's handler runs first and claims the key by preventing the
+    // default — Escape cancelling an inline edit, say (issue #710). Leaving
+    // `onKeyDown` in the spread below would replace this handler outright
+    // instead, taking Enter-to-submit and Backspace-removes-attachment with it.
+    onKeyDown?.(e);
+    if (e.defaultPrevented) {
+      return;
+    }
+
     if (e.key === "Enter") {
       if (isComposing || e.nativeEvent.isComposing) {
         return;
