@@ -1,5 +1,8 @@
 import { vi, type Mock } from "vitest";
-import type { PluginLogger } from "@platypuschat/plugin-sdk";
+import type {
+  PluginConfigContext,
+  PluginLogger,
+} from "@platypuschat/plugin-sdk";
 import type {
   ContributionOwners,
   LoadedPlugin,
@@ -302,4 +305,22 @@ export const makeFakePluginLogger = (): FakePluginLogger => ({
   info: vi.fn(),
   warn: vi.fn(),
   error: vi.fn(),
+});
+
+/**
+ * A plugin's deploy-time block, as core resolves it once per plugin and hands to
+ * every one of that plugin's contribution factories (ADR-0013).
+ *
+ * Required on all three factories as of API v2, so a test that composes a
+ * contribution supplies one rather than omitting it. `config` and `credentials`
+ * default to `undefined` — what a manifest declaring no schema resolves to — and
+ * the logger is a spy, so a test can assert on what the contribution wrote.
+ */
+export const makePluginContext = (
+  over: Partial<PluginConfigContext> = {},
+): PluginConfigContext => ({
+  config: undefined,
+  credentials: undefined,
+  logger: makeFakePluginLogger(),
+  ...over,
 });

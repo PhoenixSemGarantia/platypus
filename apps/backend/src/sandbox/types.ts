@@ -1,14 +1,35 @@
 import { z } from "zod";
+import type {
+  FsEditInput as SdkFsEditInput,
+  FsEditOutput,
+  FsListInput as SdkFsListInput,
+  FsListEntry,
+  FsListOutput,
+  FsReadInput as SdkFsReadInput,
+  FsReadOutput,
+  FsWriteInput as SdkFsWriteInput,
+  FsWriteOutput,
+  SandboxBackend,
+  SandboxContext,
+  ShellExecInput as SdkShellExecInput,
+  ShellExecOutput,
+} from "@platypuschat/plugin-sdk";
 
-// Context handed to every adapter call. The (orgId, workspaceId) tuple is the
-// stable identity key for the Sandbox; adapters use it to find or provision
-// their external resource. userId is the Workspace owner and is included for
-// audit/identification, not isolation (Workspaces are single-user — see
-// CONTEXT.md).
-export type SandboxContext = {
-  orgId: string;
-  workspaceId: string;
-  userId: string;
+// The adapter contract itself is published in `@platypuschat/plugin-sdk` — a
+// Sandbox backend is an Extension point, so its shape belongs to the SDK a
+// third-party author compiles against, not to core. Core re-exports it here so
+// its own modules keep one import path, and so there is exactly one definition
+// to change. These were duplicated verbatim until the API v2 sweep; identical
+// twins with no compiler link between them is the drift this removes.
+export type {
+  FsEditOutput,
+  FsListEntry,
+  FsListOutput,
+  FsReadOutput,
+  FsWriteOutput,
+  SandboxBackend,
+  SandboxContext,
+  ShellExecOutput,
 };
 
 // All paths are workspace-root-relative. The workspace root is conventionally
@@ -30,14 +51,6 @@ export const shellExecInputSchema = z.object({
 });
 export type ShellExecInput = z.infer<typeof shellExecInputSchema>;
 
-export type ShellExecOutput = {
-  stdout: string;
-  stderr: string;
-  exitCode: number;
-  truncated: boolean;
-  durationMs: number;
-};
-
 // fs.read ---------------------------------------------------------------------
 
 export const fsReadInputSchema = z.object({
@@ -48,12 +61,6 @@ export const fsReadInputSchema = z.object({
 });
 export type FsReadInput = z.infer<typeof fsReadInputSchema>;
 
-export type FsReadOutput = {
-  content: string;
-  lineCount: number;
-  truncated: boolean;
-};
-
 // fs.write --------------------------------------------------------------------
 
 export const fsWriteInputSchema = z.object({
@@ -62,10 +69,6 @@ export const fsWriteInputSchema = z.object({
   mode: z.enum(["create", "overwrite"]),
 });
 export type FsWriteInput = z.infer<typeof fsWriteInputSchema>;
-
-export type FsWriteOutput = {
-  bytesWritten: number;
-};
 
 // fs.edit ---------------------------------------------------------------------
 
@@ -76,10 +79,6 @@ export const fsEditInputSchema = z.object({
 });
 export type FsEditInput = z.infer<typeof fsEditInputSchema>;
 
-export type FsEditOutput = {
-  replacements: 1;
-};
-
 // fs.list ---------------------------------------------------------------------
 
 export const fsListInputSchema = z.object({
@@ -89,36 +88,25 @@ export const fsListInputSchema = z.object({
 });
 export type FsListInput = z.infer<typeof fsListInputSchema>;
 
-export type FsListEntry = {
-  path: string;
-  type: "file" | "dir";
-  size?: number;
-};
-
-export type FsListOutput = {
-  entries: FsListEntry[];
-  truncated: boolean;
-};
-
-// Backend interface -----------------------------------------------------------
-
-// Implemented by every Sandbox adapter. Methods take a SandboxContext plus
-// their typed input; they MUST honour the Platypus-defined output bounds from
-// ./index.ts and set the `truncated` flag when they apply them.
-//
-// destroy() MUST be idempotent: safe to call on a resource that's already gone.
-// See ADR-0001 for the teardown contract.
-export interface SandboxBackend {
-  shellExec(
-    ctx: SandboxContext,
-    input: ShellExecInput,
-  ): Promise<ShellExecOutput>;
-  fsRead(ctx: SandboxContext, input: FsReadInput): Promise<FsReadOutput>;
-  fsWrite(ctx: SandboxContext, input: FsWriteInput): Promise<FsWriteOutput>;
-  fsEdit(ctx: SandboxContext, input: FsEditInput): Promise<FsEditOutput>;
-  fsList(ctx: SandboxContext, input: FsListInput): Promise<FsListOutput>;
-  destroy(ctx: SandboxContext): Promise<void>;
-}
+// Input types stay inferred from the schemas above, because core owns the
+// validation an adapter is handed values through — but they must stay the shape
+// the published `SandboxBackend` declares, or a core adapter and a third-party
+// one would be implementing two different interfaces. Asserted both ways, so a
+// drift in either the schema or the SDK is a type error here rather than a
+// mismatch nobody notices until an adapter is written against the wrong one.
+type MutuallyAssignable<A extends B, B extends C, C = A> = true;
+export type SandboxInputTypesMatchSdk = [
+  MutuallyAssignable<ShellExecInput, SdkShellExecInput>,
+  MutuallyAssignable<SdkShellExecInput, ShellExecInput>,
+  MutuallyAssignable<FsReadInput, SdkFsReadInput>,
+  MutuallyAssignable<SdkFsReadInput, FsReadInput>,
+  MutuallyAssignable<FsWriteInput, SdkFsWriteInput>,
+  MutuallyAssignable<SdkFsWriteInput, FsWriteInput>,
+  MutuallyAssignable<FsEditInput, SdkFsEditInput>,
+  MutuallyAssignable<SdkFsEditInput, FsEditInput>,
+  MutuallyAssignable<FsListInput, SdkFsListInput>,
+  MutuallyAssignable<SdkFsListInput, FsListInput>,
+];
 
 // Registered once per backend type. The discriminator string lives in the
 // `sandbox.backend` column. configSchema and credentialsSchema validate the

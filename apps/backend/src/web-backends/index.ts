@@ -286,8 +286,13 @@ export interface ComposeWebBackendOptions {
    * contribution's own bare id is already the effective one.
    */
   backend?: string;
-  /** The plugin's boot-resolved deploy-time config/credentials (ADR-0013). */
-  plugin?: PluginConfigContext;
+  /**
+   * The plugin's boot-resolved deploy-time config/credentials (ADR-0013).
+   * Required, as the contribution-facing argument it is forwarded to has been
+   * since API v2 — every web backend reaches core through the loader, which
+   * always resolves one.
+   */
+  plugin: PluginConfigContext;
   /** Owning plugin's manifest name, for attribution in every log line. */
   pluginName: string;
   /**

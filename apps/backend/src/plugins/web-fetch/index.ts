@@ -36,8 +36,7 @@ export const plugin: PlatypusPlugin = {
         // tool reads `ignoreRobotsTxt` from deploy-time config, not process.env.
         tools: (_ctx, plugin) =>
           createWebFetchTools(
-            (plugin?.config as WebFetchConfig | undefined)?.ignoreRobotsTxt ??
-              false,
+            (plugin.config as WebFetchConfig).ignoreRobotsTxt,
           ),
       },
     ],

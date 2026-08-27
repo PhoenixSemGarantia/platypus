@@ -396,7 +396,11 @@ describe("sshSandboxConfigSchema / credentialsSchema", () => {
 describe("SshSandboxTransport — connect", () => {
   it("connects with public-key auth and creates the default workspace root", async () => {
     queueExec({ stdout: "hi", exitCode: 0 });
-    const backend = createSshSandboxBackend(CONFIG, CREDENTIALS);
+    const backend = createSshSandboxBackend(
+      CONFIG,
+      CREDENTIALS,
+      withPluginLogger(),
+    );
     await backend.shellExec(ctx, { command: "echo hi" });
 
     expect(mockState.connectConfigs).toHaveLength(1);
@@ -416,10 +420,14 @@ describe("SshSandboxTransport — connect", () => {
 
   it("passes the passphrase through when provided", async () => {
     queueExec({ exitCode: 0 });
-    const backend = createSshSandboxBackend(CONFIG, {
-      privateKey: "K",
-      passphrase: "secret",
-    });
+    const backend = createSshSandboxBackend(
+      CONFIG,
+      {
+        privateKey: "K",
+        passphrase: "secret",
+      },
+      withPluginLogger(),
+    );
     await backend.shellExec(ctx, { command: "true" });
     expect(mockState.connectConfigs[0].passphrase).toBe("secret");
   });
@@ -443,6 +451,7 @@ describe("SshSandboxTransport — connect", () => {
     const backend = createSshSandboxBackend(
       { ...CONFIG, rootDir: "/srv/agent" },
       CREDENTIALS,
+      withPluginLogger(),
     );
     await backend.shellExec(ctx, { command: "true" });
     expect(mockState.execCommands[0]).toContain("ROOT='/srv/agent'");
@@ -450,7 +459,11 @@ describe("SshSandboxTransport — connect", () => {
 
   it("rejects when the SSH connection errors", async () => {
     mockState.connectShouldFail = new Error("auth failed");
-    const backend = createSshSandboxBackend(CONFIG, CREDENTIALS);
+    const backend = createSshSandboxBackend(
+      CONFIG,
+      CREDENTIALS,
+      withPluginLogger(),
+    );
     await expect(backend.shellExec(ctx, { command: "true" })).rejects.toThrow(
       /auth failed/,
     );
@@ -458,7 +471,11 @@ describe("SshSandboxTransport — connect", () => {
 
   it("throws when the workspace root cannot be created", async () => {
     mockState.rootCreateFails = true;
-    const backend = createSshSandboxBackend(CONFIG, CREDENTIALS);
+    const backend = createSshSandboxBackend(
+      CONFIG,
+      CREDENTIALS,
+      withPluginLogger(),
+    );
     await expect(backend.shellExec(ctx, { command: "true" })).rejects.toThrow(
       /failed to create workspace root/,
     );
@@ -491,6 +508,7 @@ describe("SshSandboxTransport — host-key verification", () => {
     const backend = createSshSandboxBackend(
       { ...CONFIG, hostKey: WRONG_HOST_KEY_B64 },
       CREDENTIALS,
+      withPluginLogger(),
     );
     await expect(backend.shellExec(ctx, { command: "true" })).rejects.toThrow(
       /host-key verification failed/,
@@ -520,6 +538,7 @@ describe("SshSandboxTransport — host-key verification", () => {
     const backend = createSshSandboxBackend(
       { ...CONFIG, hostKey: "# not a key" },
       CREDENTIALS,
+      withPluginLogger(),
     );
     await expect(backend.shellExec(ctx, { command: "true" })).rejects.toThrow(
       /hostKey/,
@@ -532,7 +551,11 @@ describe("SshSandboxTransport — host-key verification", () => {
 describe("SshSandboxTransport — shellExec", () => {
   it("prefixes cd <rootDir> and returns stdout/stderr/exitCode/durationMs", async () => {
     queueExec({ stdout: "out", stderr: "err", exitCode: 3 });
-    const backend = createSshSandboxBackend(CONFIG, CREDENTIALS);
+    const backend = createSshSandboxBackend(
+      CONFIG,
+      CREDENTIALS,
+      withPluginLogger(),
+    );
     const res = await backend.shellExec(ctx, { command: "run" });
 
     // Core hands the transport an argv (`/bin/sh -c <command>`); a login shell
@@ -550,7 +573,11 @@ describe("SshSandboxTransport — shellExec", () => {
 
   it("resolves cwd relative to the rootDir", async () => {
     queueExec({ exitCode: 0 });
-    const backend = createSshSandboxBackend(CONFIG, CREDENTIALS);
+    const backend = createSshSandboxBackend(
+      CONFIG,
+      CREDENTIALS,
+      withPluginLogger(),
+    );
     await backend.shellExec(ctx, { command: "ls", cwd: "sub/dir" });
     expect(mockState.execCommands[1]).toBe(
       "cd '/home/platypus/platypus-workspace/sub/dir' && '/bin/sh' '-c' 'ls'",
@@ -559,7 +586,11 @@ describe("SshSandboxTransport — shellExec", () => {
 
   it("applies env via export statements (not the ssh2 env option)", async () => {
     queueExec({ exitCode: 0 });
-    const backend = createSshSandboxBackend(CONFIG, CREDENTIALS);
+    const backend = createSshSandboxBackend(
+      CONFIG,
+      CREDENTIALS,
+      withPluginLogger(),
+    );
     await backend.shellExec(ctx, {
       command: "printenv",
       env: { FOO: "bar", TOKEN: "a b'c" },
@@ -574,7 +605,11 @@ describe("SshSandboxTransport — shellExec", () => {
 
   it("drops env keys that are not valid POSIX identifiers", async () => {
     queueExec({ exitCode: 0 });
-    const backend = createSshSandboxBackend(CONFIG, CREDENTIALS);
+    const backend = createSshSandboxBackend(
+      CONFIG,
+      CREDENTIALS,
+      withPluginLogger(),
+    );
     await backend.shellExec(ctx, {
       command: "run",
       // A malformed key (model-supplied env is not schema-key-validated) must
@@ -591,7 +626,11 @@ describe("SshSandboxTransport — shellExec", () => {
     // fake emits more than the cap in one chunk and only the cap is retained.
     const huge = "a".repeat(MAX_SHELL_OUTPUT_BYTES + 5_000);
     queueExec({ stdout: huge, exitCode: 0 });
-    const backend = createSshSandboxBackend(CONFIG, CREDENTIALS);
+    const backend = createSshSandboxBackend(
+      CONFIG,
+      CREDENTIALS,
+      withPluginLogger(),
+    );
     const res = await backend.shellExec(ctx, { command: "yes" });
     expect(res.stdout.length).toBe(MAX_SHELL_OUTPUT_BYTES);
     expect(res.truncated).toBe(true);
@@ -600,7 +639,11 @@ describe("SshSandboxTransport — shellExec", () => {
   it("returns exit code 124 when a command exceeds its timeout", async () => {
     // Channel closes after 200ms; timeout is 20ms, so the adapter closes first.
     queueExec({ closeDelayMs: 200, exitCode: 0 });
-    const backend = createSshSandboxBackend(CONFIG, CREDENTIALS);
+    const backend = createSshSandboxBackend(
+      CONFIG,
+      CREDENTIALS,
+      withPluginLogger(),
+    );
     const res = await backend.shellExec(ctx, {
       command: "sleep 5",
       timeoutMs: 20,
@@ -613,7 +656,11 @@ describe("SshSandboxTransport — connection lifecycle", () => {
   it("reuses a single connection across tool calls within a turn", async () => {
     queueExec({ exitCode: 0 });
     queueExec({ exitCode: 0 });
-    const backend = createSshSandboxBackend(CONFIG, CREDENTIALS);
+    const backend = createSshSandboxBackend(
+      CONFIG,
+      CREDENTIALS,
+      withPluginLogger(),
+    );
     await backend.shellExec(ctx, { command: "a" });
     await backend.shellExec(ctx, { command: "b" });
 
@@ -625,7 +672,11 @@ describe("SshSandboxTransport — connection lifecycle", () => {
   it("concurrent first-callers share one connect (inflight promise)", async () => {
     queueExec({ exitCode: 0 });
     queueExec({ exitCode: 0 });
-    const backend = createSshSandboxBackend(CONFIG, CREDENTIALS);
+    const backend = createSshSandboxBackend(
+      CONFIG,
+      CREDENTIALS,
+      withPluginLogger(),
+    );
     await Promise.all([
       backend.shellExec(ctx, { command: "a" }),
       backend.shellExec(ctx, { command: "b" }),
@@ -637,7 +688,11 @@ describe("SshSandboxTransport — connection lifecycle", () => {
     vi.useFakeTimers();
     try {
       queueExec({ exitCode: 0 });
-      const backend = createSshSandboxBackend(CONFIG, CREDENTIALS);
+      const backend = createSshSandboxBackend(
+        CONFIG,
+        CREDENTIALS,
+        withPluginLogger(),
+      );
       await backend.shellExec(ctx, { command: "true" });
       expect(mockState.ended).toBe(0);
 
@@ -658,7 +713,11 @@ describe("SshSandboxTransport — connection lifecycle", () => {
 describe("SshSandboxTransport — destroy() is a no-op", () => {
   it("disconnects without running any remote mutation command", async () => {
     queueExec({ exitCode: 0 });
-    const backend = createSshSandboxBackend(CONFIG, CREDENTIALS);
+    const backend = createSshSandboxBackend(
+      CONFIG,
+      CREDENTIALS,
+      withPluginLogger(),
+    );
     await backend.shellExec(ctx, { command: "true" });
     const execCountBefore = mockState.execCommands.length;
 
@@ -670,7 +729,11 @@ describe("SshSandboxTransport — destroy() is a no-op", () => {
   });
 
   it("is safe to call when never connected", async () => {
-    const backend = createSshSandboxBackend(CONFIG, CREDENTIALS);
+    const backend = createSshSandboxBackend(
+      CONFIG,
+      CREDENTIALS,
+      withPluginLogger(),
+    );
     await expect(backend.destroy(ctx)).resolves.toBeUndefined();
     expect(mockState.connectConfigs).toHaveLength(0);
     expect(mockState.ended).toBe(0);
@@ -693,7 +756,11 @@ function seedFile(rel: string, content: string | Buffer) {
 describe("SshSandboxTransport — fs.write (SFTP)", () => {
   it("create mode fails cleanly when the target already exists", async () => {
     seedFile("exists.txt", "old");
-    const backend = createSshSandboxBackend(CONFIG, CREDENTIALS);
+    const backend = createSshSandboxBackend(
+      CONFIG,
+      CREDENTIALS,
+      withPluginLogger(),
+    );
     await expect(
       backend.fsWrite(ctx, {
         path: "exists.txt",
@@ -708,7 +775,11 @@ describe("SshSandboxTransport — fs.write (SFTP)", () => {
   });
 
   it("auto-creates parent directories (mkdir -p) before writing", async () => {
-    const backend = createSshSandboxBackend(CONFIG, CREDENTIALS);
+    const backend = createSshSandboxBackend(
+      CONFIG,
+      CREDENTIALS,
+      withPluginLogger(),
+    );
     await backend.fsWrite(ctx, {
       path: "a/b/c/deep.txt",
       content: "x",
@@ -723,7 +794,11 @@ describe("SshSandboxTransport — fs.write (SFTP)", () => {
   });
 
   it("writes paths literally over SFTP (no shell quoting/injection)", async () => {
-    const backend = createSshSandboxBackend(CONFIG, CREDENTIALS);
+    const backend = createSshSandboxBackend(
+      CONFIG,
+      CREDENTIALS,
+      withPluginLogger(),
+    );
     const weird = `foo";rm -rf /.txt`;
     await backend.fsWrite(ctx, {
       path: weird,
@@ -744,7 +819,11 @@ describe("SshSandboxTransport — fs.read (SFTP)", () => {
     // file costs the cap and no more. What that means for `truncated` is core's
     // call, not this adapter's — see sandbox/posix.test.ts.
     seedFile("big.txt", "a".repeat(MAX_READ_BYTES + 5_000));
-    const backend = createSshSandboxBackend(CONFIG, CREDENTIALS);
+    const backend = createSshSandboxBackend(
+      CONFIG,
+      CREDENTIALS,
+      withPluginLogger(),
+    );
     const res = await backend.fsRead(ctx, { path: "big.txt" });
     expect(res.content.length).toBe(MAX_READ_BYTES);
   });
@@ -753,7 +832,11 @@ describe("SshSandboxTransport — fs.read (SFTP)", () => {
     // min(size, cap) must not over-request either: asking for `cap` bytes of a
     // short file is what a naive read would do, and SFTP would pad the buffer.
     seedFile("small.txt", "abc");
-    const backend = createSshSandboxBackend(CONFIG, CREDENTIALS);
+    const backend = createSshSandboxBackend(
+      CONFIG,
+      CREDENTIALS,
+      withPluginLogger(),
+    );
     const res = await backend.fsRead(ctx, { path: "small.txt" });
     expect(res.content).toBe("abc");
   });
@@ -761,7 +844,11 @@ describe("SshSandboxTransport — fs.read (SFTP)", () => {
 
 describe("SshSandboxTransport — SFTP session lifecycle", () => {
   it("opens the SFTP subsystem once and reuses it across fs calls in a turn", async () => {
-    const backend = createSshSandboxBackend(CONFIG, CREDENTIALS);
+    const backend = createSshSandboxBackend(
+      CONFIG,
+      CREDENTIALS,
+      withPluginLogger(),
+    );
     await backend.fsWrite(ctx, { path: "a.txt", content: "1", mode: "create" });
     await backend.fsRead(ctx, { path: "a.txt" });
     await backend.fsEdit(ctx, {
@@ -776,7 +863,11 @@ describe("SshSandboxTransport — SFTP session lifecycle", () => {
 
   it("propagates an SFTP subsystem open failure", async () => {
     mockState.sftpShouldFail = new Error("sftp channel refused");
-    const backend = createSshSandboxBackend(CONFIG, CREDENTIALS);
+    const backend = createSshSandboxBackend(
+      CONFIG,
+      CREDENTIALS,
+      withPluginLogger(),
+    );
     await expect(backend.fsRead(ctx, { path: "a.txt" })).rejects.toThrow(
       /sftp channel refused/,
     );
@@ -795,7 +886,11 @@ const PRINTF_ARG = String.raw`'-printf' '%y\t%s\t%P\n'`;
 describe("SshSandboxTransport — fs.list (exec find)", () => {
   it("quotes every element of the find argv core handed it", async () => {
     queueExec({ stdout: "", exitCode: 0 });
-    const backend = createSshSandboxBackend(CONFIG, CREDENTIALS);
+    const backend = createSshSandboxBackend(
+      CONFIG,
+      CREDENTIALS,
+      withPluginLogger(),
+    );
     await backend.fsList(ctx, {});
     // Core passes cwd=rootDir, so the `cd` prefix precedes find as well; the
     // argv itself (find, its target, its flags) is core's — this only asserts
@@ -807,7 +902,11 @@ describe("SshSandboxTransport — fs.list (exec find)", () => {
 
   it("single-quotes the list path so shell metacharacters cannot break out", async () => {
     queueExec({ stdout: "", exitCode: 0 });
-    const backend = createSshSandboxBackend(CONFIG, CREDENTIALS);
+    const backend = createSshSandboxBackend(
+      CONFIG,
+      CREDENTIALS,
+      withPluginLogger(),
+    );
     // A metachar-laden path (schema rejects absolute/`..`, but quote defensively).
     await backend.fsList(ctx, { path: `foo; rm -rf ~` });
     // The whole path is inside one single-quoted argument.
@@ -818,7 +917,11 @@ describe("SshSandboxTransport — fs.list (exec find)", () => {
 
   it("escapes an embedded single quote in the path", async () => {
     queueExec({ stdout: "", exitCode: 0 });
-    const backend = createSshSandboxBackend(CONFIG, CREDENTIALS);
+    const backend = createSshSandboxBackend(
+      CONFIG,
+      CREDENTIALS,
+      withPluginLogger(),
+    );
     await backend.fsList(ctx, { path: `it's` });
     // classic '\'' escape idiom, matching shQuote.
     expect(lastFindCommand()).toContain(`'find' '${ROOT}/it'\\''s'`);
@@ -854,7 +957,11 @@ describe("SshSandboxTransport — plugin-injected logger", () => {
     // and the connection must still be made rather than throwing.
     queueExec({ exitCode: 0 });
 
-    const backend = createSshSandboxBackend(CONFIG, CREDENTIALS);
+    const backend = createSshSandboxBackend(
+      CONFIG,
+      CREDENTIALS,
+      withPluginLogger(),
+    );
     await expect(
       backend.shellExec(ctx, { command: "true" }),
     ).resolves.toBeDefined();
@@ -916,7 +1023,7 @@ describe("SshSandboxTransport — plugin-injected logger", () => {
       baseLogger,
     });
 
-    const backend = captured[0].create(CONFIG, CREDENTIALS);
+    const backend = captured[0].create(CONFIG, CREDENTIALS, withPluginLogger());
     await backend.shellExec(ctx, { command: "true" });
 
     expect(lines).toContainEqual({

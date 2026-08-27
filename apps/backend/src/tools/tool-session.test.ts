@@ -44,6 +44,11 @@ import { composeToolSet, registerToolSet } from "./index.ts";
 import { CORE_BUILTIN_OWNER } from "../plugins/registry.ts";
 import { logger } from "../logger.ts";
 import type { mcp as mcpTable } from "../db/schema.ts";
+import { makePluginContext } from "../test-utils.ts";
+
+// The deploy-time block core resolves per plugin. One shared instance, so a test
+// asserting on what a factory was handed can compare identity.
+const PLUGIN = makePluginContext();
 
 type McpRow = typeof mcpTable.$inferSelect;
 
@@ -115,6 +120,7 @@ const register = (
       pluginName,
       isCore,
       contribution: { name: id, category: "Test", tools },
+      plugin: PLUGIN,
     }),
   );
 };
@@ -182,7 +188,7 @@ describe("openToolSession", () => {
         // The scope's fields, plus the one capability on the context.
         registerCloser: expect.any(Function) as unknown,
       },
-      undefined,
+      PLUGIN,
     );
   });
 
@@ -874,7 +880,7 @@ describe("openToolSession", () => {
           workspaceId: "ws-1",
           userId: "user-1",
         }),
-        undefined,
+        PLUGIN,
       );
     });
 

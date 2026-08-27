@@ -280,6 +280,7 @@ import { loadPlugins } from "../loader.ts";
 import type { SandboxBackendContribution } from "@platypuschat/plugin-sdk";
 import {
   makeFakePluginLogger,
+  makePluginContext,
   type FakePluginLogger,
 } from "../../test-utils.ts";
 import {
@@ -383,7 +384,7 @@ describe("DockerSandboxTransport — provisioning", () => {
     // Plus an exec for the actual tool call.
     queueExec({ stdout: "hi", exitCode: 0 });
 
-    const backend = createDockerSandboxBackend({}, {});
+    const backend = createDockerSandboxBackend({}, {}, withPluginLogger());
     await backend.shellExec(ctx, { command: "echo hi" });
 
     expect(mockState.pullCalls).toEqual(["debian:stable-slim"]);
@@ -401,7 +402,7 @@ describe("DockerSandboxTransport — provisioning", () => {
     setupFreshProvision();
     queueExec({ exitCode: 0 });
 
-    const backend = createDockerSandboxBackend({}, {});
+    const backend = createDockerSandboxBackend({}, {}, withPluginLogger());
     await backend.shellExec(ctx, { command: "true" });
 
     const opts = mockState.createContainerCalls[0];
@@ -433,7 +434,7 @@ describe("DockerSandboxTransport — provisioning", () => {
     );
     queueExec({ stdout: "ok", exitCode: 0 });
 
-    const backend = createDockerSandboxBackend({}, {});
+    const backend = createDockerSandboxBackend({}, {}, withPluginLogger());
     await backend.shellExec(ctx, { command: "true" });
 
     expect(mockState.createContainerCalls).toHaveLength(0);
@@ -449,7 +450,7 @@ describe("DockerSandboxTransport — provisioning", () => {
     );
     queueExec({ exitCode: 0 });
 
-    const backend = createDockerSandboxBackend({}, {});
+    const backend = createDockerSandboxBackend({}, {}, withPluginLogger());
     await backend.shellExec(ctx, { command: "true" });
 
     expect(mockState.existingContainer.start).toHaveBeenCalledTimes(1);
@@ -462,7 +463,7 @@ describe("DockerSandboxTransport — provisioning", () => {
     queueExec({ exitCode: 0 });
     queueExec({ exitCode: 0 });
 
-    const backend = createDockerSandboxBackend({}, {});
+    const backend = createDockerSandboxBackend({}, {}, withPluginLogger());
     await Promise.all([
       backend.shellExec(ctx, { command: "a" }),
       backend.shellExec(ctx, { command: "b" }),
@@ -477,7 +478,7 @@ describe("DockerSandboxTransport — argv safety", () => {
     setupFreshProvision();
     queueExec({ stdout: "data", exitCode: 0 });
 
-    const backend = createDockerSandboxBackend({}, {});
+    const backend = createDockerSandboxBackend({}, {}, withPluginLogger());
     const malicious = `foo";rm -rf /`;
     await backend.fsRead(ctx, { path: malicious });
 
@@ -493,7 +494,7 @@ describe("DockerSandboxTransport — argv safety", () => {
     setupFreshProvision();
     queueExec({ stdout: "a".repeat(MAX_READ_BYTES + 5_000), exitCode: 0 });
 
-    const backend = createDockerSandboxBackend({}, {});
+    const backend = createDockerSandboxBackend({}, {}, withPluginLogger());
     const res = await backend.fsRead(ctx, { path: "big.txt" });
 
     expect(res.content).toHaveLength(MAX_READ_BYTES);
@@ -508,7 +509,7 @@ describe("DockerSandboxTransport — argv safety", () => {
     );
     queueExec({ stdout: "", exitCode: 0 });
 
-    const backend = createDockerSandboxBackend({}, {});
+    const backend = createDockerSandboxBackend({}, {}, withPluginLogger());
     await backend.fsList(ctx, { glob: "**/*.ts" });
 
     // What the glob rules *are* is core's business (posix.test.ts). What this
@@ -525,7 +526,7 @@ describe("DockerSandboxTransport — argv safety", () => {
     // probe — file exists (exit 0).
     queueExec({ exitCode: 0 });
 
-    const backend = createDockerSandboxBackend({}, {});
+    const backend = createDockerSandboxBackend({}, {}, withPluginLogger());
     await expect(
       backend.fsWrite(ctx, {
         path: "foo",
@@ -546,7 +547,7 @@ describe("DockerSandboxTransport — argv safety", () => {
       Promise.resolve({ State: { Running: true } }),
     );
 
-    const backend = createDockerSandboxBackend({}, {});
+    const backend = createDockerSandboxBackend({}, {}, withPluginLogger());
     await backend.fsWrite(ctx, {
       path: "foo.txt",
       content: "hello",
@@ -652,7 +653,7 @@ describe("DockerSandboxTransport — shellExec output handling", () => {
     // Long-running exec — close after 200ms; timeout will be 20ms.
     queueExec({ closeDelayMs: 200, exitCode: 0 });
 
-    const backend = createDockerSandboxBackend({}, {});
+    const backend = createDockerSandboxBackend({}, {}, withPluginLogger());
     const res = await backend.shellExec(ctx, {
       command: "sleep 5",
       timeoutMs: 20,
@@ -666,7 +667,7 @@ describe("DockerSandboxTransport — shellExec output handling", () => {
     const huge = "a".repeat(MAX_SHELL_OUTPUT_BYTES + 5_000);
     queueExec({ stdout: huge, exitCode: 0 });
 
-    const backend = createDockerSandboxBackend({}, {});
+    const backend = createDockerSandboxBackend({}, {}, withPluginLogger());
     const res = await backend.shellExec(ctx, { command: "yes" });
 
     expect(res.stdout.length).toBe(MAX_SHELL_OUTPUT_BYTES);
@@ -682,6 +683,7 @@ describe("DockerSandboxTransport — host reachability (ADR-0005)", () => {
     const backend = createDockerSandboxBackend(
       { extraHosts: ["host.docker.internal:host-gateway"] },
       {},
+      withPluginLogger(),
     );
     await backend.shellExec(ctx, { command: "true" });
 
@@ -697,6 +699,7 @@ describe("DockerSandboxTransport — host reachability (ADR-0005)", () => {
     const backend = createDockerSandboxBackend(
       { networks: ["primary", "secondary", "tertiary"] },
       {},
+      withPluginLogger(),
     );
     await backend.shellExec(ctx, { command: "true" });
 
@@ -717,7 +720,11 @@ describe("DockerSandboxTransport — host reachability (ADR-0005)", () => {
     setupFreshProvision();
     queueExec({ exitCode: 0 });
 
-    const backend = createDockerSandboxBackend({ networks: ["only"] }, {});
+    const backend = createDockerSandboxBackend(
+      { networks: ["only"] },
+      {},
+      withPluginLogger(),
+    );
     await backend.shellExec(ctx, { command: "true" });
 
     expect(mockState.createContainerCalls[0].HostConfig?.NetworkMode).toBe(
@@ -731,37 +738,53 @@ describe("DockerSandboxTransport — host reachability (ADR-0005)", () => {
   // `allowedNetworks`, no longer from process.env.
   describe("dockerSandboxConfigSchema (factory of plugin config)", () => {
     it("defaults to empty arrays for {}", () => {
-      const parsed = dockerSandboxConfigSchema({ allowedNetworks: [] }).parse(
-        {},
-      );
+      const parsed = dockerSandboxConfigSchema(
+        makePluginContext({ config: { allowedNetworks: [] } }),
+      ).parse({});
       expect(parsed).toEqual({ networks: [], extraHosts: [] });
     });
 
     it("accepts networks that are in the operator allowlist", () => {
-      const parsed = dockerSandboxConfigSchema({
-        allowedNetworks: ["shared", "tools"],
-      }).parse({ networks: ["shared"] });
+      const parsed = dockerSandboxConfigSchema(
+        makePluginContext({
+          config: {
+            allowedNetworks: ["shared", "tools"],
+          },
+        }),
+      ).parse({ networks: ["shared"] });
       expect(parsed.networks).toEqual(["shared"]);
     });
 
     it("rejects networks outside the operator allowlist", () => {
-      const result = dockerSandboxConfigSchema({
-        allowedNetworks: ["shared"],
-      }).safeParse({ networks: ["not-allowed"] });
+      const result = dockerSandboxConfigSchema(
+        makePluginContext({
+          config: {
+            allowedNetworks: ["shared"],
+          },
+        }),
+      ).safeParse({ networks: ["not-allowed"] });
       expect(result.success).toBe(false);
     });
 
     it("rejects any network under an empty allowlist (default-deny)", () => {
-      const result = dockerSandboxConfigSchema({
-        allowedNetworks: [],
-      }).safeParse({ networks: ["shared"] });
+      const result = dockerSandboxConfigSchema(
+        makePluginContext({
+          config: {
+            allowedNetworks: [],
+          },
+        }),
+      ).safeParse({ networks: ["shared"] });
       expect(result.success).toBe(false);
     });
 
     it("names the plugin-config allowlist source in the error", () => {
-      const result = dockerSandboxConfigSchema({
-        allowedNetworks: [],
-      }).safeParse({ networks: ["nope"] });
+      const result = dockerSandboxConfigSchema(
+        makePluginContext({
+          config: {
+            allowedNetworks: [],
+          },
+        }),
+      ).safeParse({ networks: ["nope"] });
       expect(result.success).toBe(false);
       if (!result.success) {
         expect(result.error.issues[0].message).toContain(
@@ -771,9 +794,13 @@ describe("DockerSandboxTransport — host reachability (ADR-0005)", () => {
     });
 
     it("rejects malformed extraHosts entries", () => {
-      const result = dockerSandboxConfigSchema({
-        allowedNetworks: [],
-      }).safeParse({ extraHosts: ["not a valid entry"] });
+      const result = dockerSandboxConfigSchema(
+        makePluginContext({
+          config: {
+            allowedNetworks: [],
+          },
+        }),
+      ).safeParse({ extraHosts: ["not a valid entry"] });
       expect(result.success).toBe(false);
     });
   });
@@ -844,7 +871,7 @@ describe("DockerSandboxTransport — plugin-injected logger", () => {
     mockState.containerStop = () =>
       Promise.reject(makeStatusError("internal", 500));
 
-    const backend = createDockerSandboxBackend({}, {});
+    const backend = createDockerSandboxBackend({}, {}, withPluginLogger());
     await expect(backend.destroy(ctx)).resolves.toBeUndefined();
     expect(logger.warn).not.toHaveBeenCalled();
   });
@@ -904,7 +931,7 @@ describe("DockerSandboxTransport — plugin-injected logger", () => {
       baseLogger,
     });
 
-    const backend = captured[0].create({}, {});
+    const backend = captured[0].create({}, {}, withPluginLogger());
     await backend.shellExec(ctx, { command: "echo hi" });
 
     expect(lines).toContainEqual({

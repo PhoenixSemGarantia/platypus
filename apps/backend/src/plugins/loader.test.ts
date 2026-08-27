@@ -16,6 +16,7 @@ import {
   MAX_WEB_TIMEOUT_MS,
   type WebBackendRegistration,
 } from "../web-backends/index.ts";
+import type { SandboxBackendRegistration } from "../sandbox/index.ts";
 import {
   loadPlugins,
   parsePluginConfig,
@@ -38,11 +39,14 @@ const makeRegister = () => {
   return { register, calls };
 };
 
-// A capturing `registerSandbox` for the Sandbox-backend extension point.
+// A capturing `registerSandbox` for the Sandbox-backend extension point. It
+// captures the *composed registration* — factory-form `configSchema` resolved
+// away, `create` already bound to the plugin's block — which is what the loader
+// hands this seam, not the raw contribution.
 const makeSandboxRegister = () => {
-  const calls: SandboxBackendContribution[] = [];
-  const registerSandbox = (contribution: SandboxBackendContribution) => {
-    calls.push(contribution);
+  const calls: SandboxBackendRegistration[] = [];
+  const registerSandbox = (registration: SandboxBackendRegistration) => {
+    calls.push(registration);
   };
   return { registerSandbox, calls };
 };
@@ -698,8 +702,8 @@ describe("loadPlugins — sandbox backends", () => {
     const factoryBackend: SandboxBackendContribution = {
       backend: "fenced",
       name: "Fenced",
-      configSchema: (pluginConfig) => {
-        const { allowed } = pluginConfig as { allowed: string[] };
+      configSchema: (plugin) => {
+        const { allowed } = plugin.config as { allowed: string[] };
         return z
           .object({ net: z.string() })
           .refine((c) => allowed.includes(c.net), { message: "not allowed" });
@@ -730,9 +734,11 @@ describe("loadPlugins — sandbox backends", () => {
 
     const [registered] = calls;
     // Registered as a CONCRETE schema (the factory is resolved away), reflecting
-    // the resolved plugin config.
+    // the resolved plugin config. The registration type says so — `configSchema`
+    // on it is a plain `z.ZodType`, with no factory arm left to narrow — so the
+    // runtime check below is the one that earns its keep.
     expect(typeof registered.configSchema).not.toBe("function");
-    const schema = registered.configSchema as z.ZodType;
+    const schema = registered.configSchema;
     expect(schema.safeParse({ net: "ok" }).success).toBe(true);
     expect(schema.safeParse({ net: "blocked" }).success).toBe(false);
   });
@@ -992,13 +998,20 @@ describe("loadPlugins — web-search backends", () => {
     // Core's own context; `providerId` is stripped before the plugin-facing
     // call, so the factory sees only the ADR-0014 shape.
     const pluginCtx = { orgId: "org-1", workspaceId: "ws-1", userId: "user-1" };
-    await calls[0].buildTurnTools({ ...pluginCtx, providerId: "provider-1" });
-
-    expect(createExecutors).toHaveBeenCalledWith(pluginCtx, {
-      config: { endpoint: "https://searx.internal" },
-      credentials: { apiKey: "sk-test" },
-      logger: A_LOGGER_MATCHER,
+    await calls[0].buildTurnTools({
+      ...pluginCtx,
+      providerId: "provider-1",
+      registerCloser: () => {},
     });
+
+    expect(createExecutors).toHaveBeenCalledWith(
+      { ...pluginCtx, registerCloser: expect.any(Function) as unknown },
+      {
+        config: { endpoint: "https://searx.internal" },
+        credentials: { apiKey: "sk-test" },
+        logger: A_LOGGER_MATCHER,
+      },
+    );
   });
 });
 
@@ -1101,8 +1114,8 @@ describe("loadPlugins — deploy-time plugin config injection", () => {
     const register = (id: string, registration: ToolSetRegistration) => {
       registered[id] = registration;
     };
-    const sandboxCalls: SandboxBackendContribution[] = [];
-    const registerSandbox = (c: SandboxBackendContribution) => {
+    const sandboxCalls: SandboxBackendRegistration[] = [];
+    const registerSandbox = (c: SandboxBackendRegistration) => {
       sandboxCalls.push(c);
     };
 
@@ -1129,6 +1142,7 @@ describe("loadPlugins — deploy-time plugin config injection", () => {
       orgId: "o",
       frontendUrl: undefined,
       userId: "u",
+      registerCloser: () => {},
     });
 
     // Sandbox create(): invoked as core would, with the per-Workspace values.
@@ -1155,7 +1169,7 @@ describe("loadPlugins — deploy-time plugin config injection", () => {
     const register = (id: string, registration: ToolSetRegistration) => {
       registered[id] = registration;
     };
-    const sandboxCalls: SandboxBackendContribution[] = [];
+    const sandboxCalls: SandboxBackendRegistration[] = [];
 
     await loadPlugins({
       pluginNames: ["acmecloud"],
@@ -1178,6 +1192,7 @@ describe("loadPlugins — deploy-time plugin config injection", () => {
       orgId: "o",
       frontendUrl: undefined,
       userId: "u",
+      registerCloser: () => {},
     });
     sandboxCalls[0].create({}, {});
 
@@ -1265,6 +1280,7 @@ describe("loadPlugins — deploy-time plugin config injection", () => {
       orgId: "o",
       frontendUrl: undefined,
       userId: "u",
+      registerCloser: () => {},
     });
 
     expect(seenPlugin).toEqual({
@@ -1333,7 +1349,7 @@ describe("loadPlugins — plugin logger injection", () => {
     seen: Record<string, PluginConfigContext | undefined>;
   }) => {
     const registered: Record<string, ToolSetRegistration> = {};
-    const sandboxCalls: SandboxBackendContribution[] = [];
+    const sandboxCalls: SandboxBackendRegistration[] = [];
     const { registerWeb, calls: webCalls } = makeWebRegister();
 
     await loadPlugins({
@@ -1357,6 +1373,7 @@ describe("loadPlugins — plugin logger injection", () => {
       orgId: "o",
       frontendUrl: undefined,
       userId: "u",
+      registerCloser: () => {},
     });
     sandboxCalls[0].create({}, {});
     await webCalls[0].buildTurnTools({
@@ -1364,6 +1381,7 @@ describe("loadPlugins — plugin logger injection", () => {
       workspaceId: "w",
       userId: "u",
       providerId: "p",
+      registerCloser: () => {},
     });
   };
 
@@ -1432,7 +1450,7 @@ describe("loadPlugins — example third-party plugin", () => {
   // BOTH its Sandbox backend and its management Tool set (ADR-0013).
   it("shares one credential block across its two contributions", async () => {
     const registered: Record<string, ToolSetRegistration> = {};
-    const sandboxCalls: SandboxBackendContribution[] = [];
+    const sandboxCalls: SandboxBackendRegistration[] = [];
 
     const { plugins: loaded } = await loadPlugins({
       pluginNames: ["example-cloud-sandbox"],
@@ -1476,6 +1494,7 @@ describe("loadPlugins — example third-party plugin", () => {
       orgId: "o",
       frontendUrl: undefined,
       userId: "u",
+      registerCloser: () => {},
     })) as unknown as Record<
       string,
       { execute: (i: unknown) => Promise<string> }
@@ -2000,6 +2019,7 @@ describe("loadPlugins — example third-party npm package (end to end)", () => {
       orgId: "org-1",
       frontendUrl: undefined,
       userId: "user-1",
+      registerCloser: () => {},
     });
     // The author writes `greet`; the model is offered `example__greet`
     // (issue #664). The bare name is gone, so core's own turn tools have nothing
@@ -2041,6 +2061,7 @@ describe("loadPlugins — example third-party npm package (end to end)", () => {
       orgId: "org-1",
       frontendUrl: undefined,
       userId: "user-1",
+      registerCloser: () => {},
     });
 
     expect(lines).toEqual([]);

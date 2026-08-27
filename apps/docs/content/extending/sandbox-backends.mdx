@@ -80,8 +80,10 @@ Add an entry to `contributes.sandboxBackends`. A
 - **`name`** — the label an Org Admin picks from.
 - **`configSchema`** — a Zod schema for the non-secret per-Workspace settings
   (region, image, host). It may also be a **factory** taking the plugin's
-  deploy-time config, when the allowed shape depends on what the Operator
-  configured.
+  deploy-time block, when the allowed shape depends on what the Operator
+  configured. Read the allowed shape off `plugin.config`; `plugin.credentials`
+  and `plugin.logger` are there too, so the factory can say why it refused a
+  value.
 - **`credentialsSchema`** — a Zod schema for the secret per-Workspace material
   (API tokens, private keys).
 - **`create`** — returns your adapter, given the validated per-Workspace config

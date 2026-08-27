@@ -3,6 +3,7 @@ import { PLUGIN_API_VERSION } from "@platypuschat/plugin-sdk";
 import { plugin } from "./index.ts";
 import { loadPlugins } from "../loader.ts";
 import { getToolSet, getToolSets } from "../../tools/index.ts";
+import { makePluginContext } from "../../test-utils.ts";
 
 describe("@platypus/web-fetch plugin manifest", () => {
   it("declares its identity and API version", () => {
@@ -37,8 +38,9 @@ describe("@platypus/web-fetch plugin manifest", () => {
         orgId: "o",
         frontendUrl: undefined,
         userId: "u",
+        registerCloser: () => {},
       },
-      { config: { ignoreRobotsTxt: false }, credentials: undefined },
+      makePluginContext({ config: { ignoreRobotsTxt: false } }),
     );
     expect(tools).toHaveProperty("fetchUrl");
   });
@@ -71,6 +73,7 @@ describe("@platypus/web-fetch plugin manifest", () => {
       orgId: "o",
       frontendUrl: undefined,
       userId: "u",
+      registerCloser: () => {},
     });
     expect(tools).toHaveProperty("fetchUrl");
   });

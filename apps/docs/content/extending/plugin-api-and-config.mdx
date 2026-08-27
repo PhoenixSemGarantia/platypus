@@ -110,18 +110,35 @@ The practical consequence for you: a two-argument `create` keeps working after
 core started passing a third argument, and a single-argument factory keeps working
 after core started passing a second. Consume the new argument when you want it.
 
-The same rule cuts the other way on the contexts core hands you. A capability
-that arrived after your Plugin was written is an **optional** field, so call it
-guarded:
+## Moving to API v2
 
-- `ctx.registerCloser?.(close)` — register something to close when the turn ends,
+v2 is the first major bump, and it does one thing: everything core has always
+supplied on every turn is now **required** rather than optional. Set your
+`apiVersion` to 2 and you can write these without a guard:
+
+- `ctx.registerCloser(close)` — register something to close when the turn ends,
   on a [Tool set](/extending/tool-sets#releasing-what-a-factory-opened) or a
   [Web-search backend](/extending/web-search-backends#releasing-what-you-opened).
-- `plugin?.logger?.info(...)` — the [logger](#logging) core binds to your name.
+- `plugin.logger.info(...)` — the [logger](#logging) core binds to your name.
+- `plugin` itself, on all three contribution factories.
 
-Writing `ctx.registerCloser!(close)` to silence the compiler is the trap: on a
-core that predates the field it is a `TypeError` thrown out of your factory, and
-your Contribution serves nothing that turn.
+One member changed shape rather than optionality. A Sandbox backend's
+`configSchema` **factory** now receives the whole deploy-time block, where before
+it received the `config` half on its own. Read `plugin.config` where the argument
+used to be the config itself — and you can now reach `plugin.credentials` and
+`plugin.logger` from there too.
+
+<Callout type="warning">
+  Upgrading the SDK without raising `apiVersion` to 2 is the trap. Nothing stops
+  you dropping the guards while your manifest still says 1, and it will run
+  correctly on a current core — then a self-hoster on the previous release
+  installs it, core loads it because 1 is inside the window, and your first
+  unguarded call throws inside somebody's Chat turn. Raising the number is what
+  makes that core refuse the Plugin at boot instead.
+</Callout>
+
+Staying on `apiVersion: 1` is also fine: core supports 1 and 2 together, so an
+unmigrated Plugin keeps loading. Keep the guards while you do.
 
 ## Deploy-time config and credentials
 
@@ -140,7 +157,8 @@ injects the resolved block into **every one** of your contributions:
 - a **Web-search backend** `createExecutors` receives it as a second argument,
   alongside the request context.
 
-All three are optional to consume.
+You can ignore the argument in all three. What you cannot do from `apiVersion: 2`
+on is receive nothing: core always passes it.
 
 **One block is shared** across all of a plugin's contributions and all tenants.
 That is deliberate, and it is the mechanism that lets a plugin's Sandbox backend
@@ -168,7 +186,7 @@ message, or a message on its own:
 
 ```ts
 tools: (ctx, plugin) => {
-  plugin?.logger?.info({ workspaceId: ctx.workspaceId }, "Resolving tool set");
+  plugin.logger.info({ workspaceId: ctx.workspaceId }, "Resolving tool set");
   return {
     /* … */
   };
@@ -198,9 +216,10 @@ Three things core does for you, and one thing to get right yourself:
   lands in the Operator's pipeline as an unparseable line between two JSON ones.
 </Callout>
 
-Write `plugin?.logger?.` — both are optional members, which is what lets one
-build of your plugin run on a core new enough to supply the logger and one that
-predates it. Core always supplies it.
+On `apiVersion: 2` both the block and its logger are required, so write
+`plugin.logger.` — no chaining, no fallback. On `apiVersion: 1` keep
+`plugin?.logger?.`, which is what lets one build run on a core that predates the
+member.
 
 Deploy-time scope is all a logger line carries. Workspace, Agent and run ids are
 not bound for you; include the ones you have from your own context, as the

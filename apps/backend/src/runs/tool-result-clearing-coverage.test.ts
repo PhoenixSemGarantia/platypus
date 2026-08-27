@@ -87,6 +87,7 @@ const STUB_CONTEXT: ToolSetContext = {
   orgId: "org-1",
   frontendUrl: "http://localhost:3000",
   userId: "user-1",
+  registerCloser: () => {},
 };
 
 let materializedNames: string[] = [];

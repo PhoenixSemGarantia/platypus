@@ -147,8 +147,8 @@ browser page, a pool, a keep-alive connection — register a way to close it:
 
 ```ts
 createExecutors(ctx, plugin) {
-  const pool = createPool(plugin?.config.endpoint);
-  ctx.registerCloser?.(() => pool.close());
+  const pool = createPool(plugin.config.endpoint);
+  ctx.registerCloser(() => pool.close());
   return { web_search: (input, { signal }) => pool.search(input.query, signal) };
 }
 ```
@@ -159,13 +159,12 @@ rest still run; one that never settles is abandoned after **5 seconds**, because
 teardown happens while the reader is still waiting on the reply.
 
 <Callout type="warning">
-  **Write `ctx.registerCloser?.(...)`, not `ctx.registerCloser!(...)`.** Your
-  manifest's `apiVersion` names a *major*, so it cannot ask for a core new
-  enough to have this — on an older one the field is genuinely absent, and the
-  unguarded call throws out of your factory. The turn then serves **no search
-  tools at all**, with a warning in the Operator's log as the only sign. The
-  guard is the difference between "no teardown on old core" and "no search on
-  old core".
+  The call above is unguarded, and that is only safe on **`apiVersion: 2`**.
+  Writing it on a manifest that still says 1 is the trap: a self-hoster on an
+  older core loads your Plugin, the field is genuinely absent there, and the call
+  throws out of `createExecutors`. The turn then serves **no search tools at
+  all**, with a warning in the Operator's log as the only sign. Either raise the
+  number or keep `ctx.registerCloser?.(...)`.
 </Callout>
 
 <Callout type="info">
@@ -268,7 +267,7 @@ inside the factory:
 ```ts
 createExecutors(ctx, plugin) {
   const endpoint =
-    plugin?.config.endpoints[ctx.orgId] ?? plugin?.config.endpoints.default;
+    plugin.config.endpoints[ctx.orgId] ?? plugin.config.endpoints.default;
   // ...
 }
 ```

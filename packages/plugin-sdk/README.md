@@ -78,6 +78,19 @@ after a core upgrade; a genuinely breaking change is a windowed major bump. Boot
 is fail-loud: a plugin outside the supported window is rejected with a
 plugin-named error.
 
+**v2 is the current major**, and a v1 plugin still loads on it. v2 made required
+everything core had always supplied on every turn — `ctx.registerCloser`,
+`plugin.logger`, and the `plugin` argument on all three contribution factories —
+so none of them needs a `?.` any more. It also re-signed one member: a Sandbox
+backend's `configSchema` **factory** now receives the whole deploy-time block
+rather than the `config` half alone, so read `plugin.config` where the argument
+used to be the config itself.
+
+Raising `apiVersion` to 2 is what makes those unguarded reads safe. Dropping the
+guards while the manifest still says 1 is the trap — a core on the previous
+release will load the plugin, because 1 is inside its window, and the first
+unguarded read throws mid-turn.
+
 ## What you can contribute
 
 - **Tool sets** (`contributes.toolSets`) — named, categorised groups of
@@ -102,15 +115,15 @@ the Operator set with `LOG_LEVEL`:
 tools: (ctx, plugin) => {
   // `debug` / `info` / `warn` / `error`, each taking a fields object with an
   // optional message, or a message on its own.
-  plugin?.logger?.info({ workspaceId: ctx.workspaceId }, "Resolving tool set");
+  plugin.logger.info({ workspaceId: ctx.workspaceId }, "Resolving tool set");
   return {/* … */};
 };
 ```
 
 Prefer the object form — those fields stay queryable where an interpolated string
-does not. Don't put your plugin's name in them; core binds it for you. And keep
-the optional chaining: `logger` is an appended optional member, so
-`plugin?.logger?.` is what lets the same code run on a core that predates it.
+does not. Don't put your plugin's name in them; core binds it for you. The block
+and its `logger` are both required from `apiVersion: 2` on, so neither needs a
+`?.`; on `apiVersion: 1` write `plugin?.logger?.` instead.
 
 ## Closing what a factory opened
 
@@ -121,7 +134,7 @@ socket — hand core its close:
 ```ts
 tools: (ctx) => {
   const client = connect(ctx.workspaceId);
-  ctx.registerCloser?.(() => client.close());
+  ctx.registerCloser(() => client.close());
   return createTools(client);
 };
 ```
@@ -133,10 +146,11 @@ to keep between turns. A closer that throws is logged against your plugin and th
 rest still run; one that never settles is abandoned after 5 seconds, because
 teardown happens while the reader is still waiting on the reply.
 
-Keep the optional chaining here too, for the same reason as the logger — and with
-a sharper consequence. `registerCloser!(…)` on a core that predates the member is
-a `TypeError` thrown out of your factory, and your contribution then serves
-**nothing** that turn.
+The unguarded call above needs `apiVersion: 2`. Writing it while your manifest
+still says 1 is the trap: an older core loads the plugin, the member is genuinely
+absent there, and the call is a `TypeError` thrown out of your factory — your
+contribution then serves **nothing** that turn. Either raise the number or write
+`ctx.registerCloser?.(…)`.
 
 ## Web-search backends
 
@@ -176,13 +190,13 @@ export const plugin: PlatypusPlugin = {
         // web tools that turn (warn-logged, never fatal).
         timeoutMs: 5_000,
         createExecutors: (ctx, plugin) => {
-          const pool = createPool(plugin?.config.endpoint);
+          const pool = createPool(plugin.config.endpoint);
           // Anything with a lifetime gets a close core will run when the turn
           // ends — on a normal finish and on a cancellation alike. Guarded,
           // never `!`: the member is optional so this plugin still loads on a
           // core that predates it, and an unguarded call would cost the turn
           // its search tools entirely.
-          ctx.registerCloser?.(() => pool.close());
+          ctx.registerCloser(() => pool.close());
           return {
             // Mandatory. Return results; never truncate or paginate — core does.
             // `signal` fires when the User cancels or `timeoutMs` runs out;
