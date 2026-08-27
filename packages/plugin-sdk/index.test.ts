@@ -52,7 +52,7 @@ describe("@platypuschat/plugin-sdk", () => {
         echo: tool({
           description: "Echo the input",
           inputSchema: z.object({ text: z.string() }),
-          execute: ({ text }: { text: string }) => text,
+          execute: ({ text }) => text,
         }),
       },
     };
