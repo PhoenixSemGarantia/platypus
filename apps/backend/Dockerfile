@@ -55,11 +55,14 @@ RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 hono && \
     mkdir -p /data/files && chown hono:nodejs /data/files
 
+# Switch to the non-root user
+USER hono
+
 # Copy prod dependencies (includes root node_modules and workspace node_modules)
-COPY --from=prod-deps /app .
+COPY --from=prod-deps --chown=hono:nodejs /app .
 
 # Copy source code
-COPY --from=builder /app/out/full/ .
+COPY --from=builder --chown=hono:nodejs /app/out/full/ .
 
 # Expose port
 EXPOSE 4000

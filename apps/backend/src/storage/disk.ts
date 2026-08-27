@@ -17,21 +17,34 @@ export class DiskStorage implements StorageBackend {
   constructor(
     basePath: string = process.env.STORAGE_DISK_PATH || "./data/files",
   ) {
-    this.basePath = basePath;
+    this.basePath = path.resolve(basePath);
+  }
+
+  /**
+   * Safely resolves a key against the base path, preventing directory traversal.
+   */
+  private resolveKey(key: string, suffix: string = ""): string {
+    const targetPath = path.resolve(this.basePath, key + suffix);
+    // Ensure the resolved path strictly resides within the base directory.
+    // Appending path.sep ensures we don't match sibling directories (e.g., /data/files_secret).
+    if (!targetPath.startsWith(this.basePath + path.sep)) {
+      throw new Error(`Invalid storage key (path traversal detected): ${key}`);
+    }
+    return targetPath;
   }
 
   /**
    * Get the full filesystem path for a storage key.
    */
   private getFilePath(key: string): string {
-    return path.join(this.basePath, key);
+    return this.resolveKey(key);
   }
 
   /**
    * Get the path to the metadata sidecar file.
    */
   private getMetaPath(key: string): string {
-    return path.join(this.basePath, `${key}.meta`);
+    return this.resolveKey(key, ".meta");
   }
 
   /**
