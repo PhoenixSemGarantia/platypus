@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    // `dom` is here for one web-standard global: `URL`, which `isPresentableUrl`
+    // constructs. `node` (via `@types/node`) covers `Buffer`, used to bound sandbox
+    // env sizes. The package is types-only and depends on neither DOM nor Node —
+    // two globals are cheaper than two type-system dependencies.
+    "lib": ["esnext", "dom"],
+    "types": ["node"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true
+  },
+  "include": ["index.ts", "index.test.ts"],
+  "exclude": ["node_modules"]
+}

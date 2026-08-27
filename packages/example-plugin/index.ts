@@ -41,7 +41,7 @@ export const plugin: PlatypusPlugin = {
               inputSchema: z.object({
                 name: z.string().describe("Who to greet"),
               }),
-              execute: ({ name }) => `Hello, ${name}! 👋`,
+              execute: ({ name }: { name: string }) => `Hello, ${name}! 👋`,
             }),
           };
         },

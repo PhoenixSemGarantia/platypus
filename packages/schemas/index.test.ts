@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { type ZodType } from "zod";
 import {
   organizationSchema,
   organizationUpdateSchema,
@@ -391,20 +392,23 @@ describe("Agent Schema", () => {
   // A maxSteps below 1 reaches `stepCountIs(n)`, which compares `n` against a
   // step count that is never less than 1 — so it silently removes the ceiling
   // instead of tightening it. Reject it here rather than at the run.
-  it.each([0, -1, 2.5])("should reject a maxSteps of %s", (maxSteps) => {
-    const result = agentSchema.safeParse({
-      id: "789",
-      workspaceId: "456",
-      providerId: "provider-123",
-      name: "Test Agent",
-      description: "A test agent",
-      modelId: "gpt-4",
-      maxSteps,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-    expect(result.success).toBe(false);
-  });
+  it.each([0, -1, 2.5])(
+    "should reject a maxSteps of %s",
+    (maxSteps: number) => {
+      const result = agentSchema.safeParse({
+        id: "789",
+        workspaceId: "456",
+        providerId: "provider-123",
+        name: "Test Agent",
+        description: "A test agent",
+        modelId: "gpt-4",
+        maxSteps,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      expect(result.success).toBe(false);
+    },
+  );
 });
 
 describe("Chat Submit Schema", () => {
@@ -442,7 +446,7 @@ describe("Chat Submit Schema", () => {
   // below 1 can never equal a real step count.
   it.each([0, -1, 2.5, 51])(
     "should reject a chat maxSteps of %s",
-    (maxSteps) => {
+    (maxSteps: number) => {
       const result = chatSubmitSchema.safeParse({ ...baseSubmit, maxSteps });
       expect(result.success).toBe(false);
     },
@@ -452,18 +456,21 @@ describe("Chat Submit Schema", () => {
 describe("isValidChatMaxSteps", () => {
   // The predicate the Chat settings input and the send guard both decide from,
   // so an inline error and a 400 can never disagree about the bound.
-  it.each([1, 10, 50])("accepts %s", (value) => {
+  it.each([1, 10, 50])("accepts %s", (value: number) => {
     expect(isValidChatMaxSteps(value)).toBe(true);
   });
 
-  it.each([0, -1, 2.5, 51])("rejects %s", (value) => {
+  it.each([0, -1, 2.5, 51])("rejects %s", (value: number) => {
     expect(isValidChatMaxSteps(value)).toBe(false);
   });
 
   // Unset is not an error — it means fall back to the Direct default.
-  it.each([null, undefined])("treats %s as valid", (value) => {
-    expect(isValidChatMaxSteps(value)).toBe(true);
-  });
+  it.each([null, undefined])(
+    "treats %s as valid",
+    (value: number | null | undefined) => {
+      expect(isValidChatMaxSteps(value)).toBe(true);
+    },
+  );
 
   it("agrees with the request schema it is derived from", () => {
     const base = {
@@ -626,9 +633,16 @@ describe("providerHasNativeSearch", () => {
     ["Bedrock", "responses", false],
   ];
 
-  it.each(cases)("%s on the %s API → %s", (providerType, apiMode, expected) => {
-    expect(providerHasNativeSearch({ providerType, apiMode })).toBe(expected);
-  });
+  it.each(cases)(
+    "%s on the %s API → %s",
+    (
+      providerType: Provider["providerType"],
+      apiMode: "chat" | "responses",
+      expected: boolean,
+    ) => {
+      expect(providerHasNativeSearch({ providerType, apiMode })).toBe(expected);
+    },
+  );
 
   it("treats an unknown provider type as having no native search", () => {
     expect(
@@ -768,7 +782,7 @@ describe("Provider modelIds (per-model config)", () => {
     ["update", providerUpdateSchema],
   ])(
     "leaves maxOutputTokens undefined on %s when not declared",
-    (_, schema) => {
+    (_, schema: ZodType<any>) => {
       const result = schema.safeParse({ ...base, modelIds: [{ id: "qwen" }] });
       expect(result.success).toBe(true);
       if (result.success) {
@@ -830,16 +844,19 @@ describe("Provider modelIds (per-model config)", () => {
   it.each([
     ["create", providerCreateSchema],
     ["update", providerUpdateSchema],
-  ])("leaves contextWindow undefined on %s when not declared", (_, schema) => {
-    const result = schema.safeParse({ ...base, modelIds: [{ id: "qwen" }] });
-    expect(result.success).toBe(true);
-    if (result.success) {
-      // Asserted, not optional-chained: a schema that dropped `modelIds`
-      // entirely would satisfy an `undefined` expectation vacuously.
-      expect(result.data.modelIds).toHaveLength(1);
-      expect(result.data.modelIds![0].contextWindow).toBeUndefined();
-    }
-  });
+  ])(
+    "leaves contextWindow undefined on %s when not declared",
+    (_, schema: ZodType<any>) => {
+      const result = schema.safeParse({ ...base, modelIds: [{ id: "qwen" }] });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        // Asserted, not optional-chained: a schema that dropped `modelIds`
+        // entirely would satisfy an `undefined` expectation vacuously.
+        expect(result.data.modelIds).toHaveLength(1);
+        expect(result.data.modelIds![0].contextWindow).toBeUndefined();
+      }
+    },
+  );
 
   it("rejects a contextWindow that is zero, negative, fractional or out of bounds", () => {
     // 128 is the case the floor exists for: an Org Admin typing the number of
