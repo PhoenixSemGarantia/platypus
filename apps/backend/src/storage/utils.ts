@@ -211,8 +211,17 @@ export function rewriteStorageUrls(
 }
 
 /**
- * Extract all storage:// keys from messages.
+ * Extract all storage keys from messages.
  * Useful for cleanup operations (e.g., when deleting a chat).
+ *
+ * Because a Chat resubmits its full history every turn, and the read path
+ * rewrites `storage://` URLs to HTTP URLs, stored rows carry either form:
+ * - `storage://<key>` (the canonical form)
+ * - `<filesBase>/<key>` (the HTTP form the client returns on later turns, via
+ *   `rewriteStorageUrls`)
+ *
+ * Both forms must be recognised so cleanup never orphans a file. This mirrors
+ * `inlineFileUrls`, which already accepts both URL forms.
  *
  * @param messages - Array of chat messages
  * @returns Array of storage keys found in the messages
@@ -227,17 +236,54 @@ export function extractStorageKeys(messages: PlatypusUIMessage[]): string[] {
 
     for (const part of message.parts) {
       if (
-        part.type === "file" &&
-        "url" in part &&
-        typeof part.url === "string" &&
-        part.url.startsWith(STORAGE_URL_PREFIX)
+        part.type !== "file" ||
+        !("url" in part) ||
+        typeof part.url !== "string"
       ) {
-        keys.push(part.url.slice(STORAGE_URL_PREFIX.length));
+        continue;
+      }
+
+      const key = storageKeyFromUrl(part.url);
+      if (key) {
+        keys.push(key);
       }
     }
   }
 
   return keys;
+}
+
+/**
+ * Extract the storage key from a file part URL, accepting both stored forms:
+ * `storage://<key>`, or the HTTP form `<filesBase>/<key>` that
+ * `rewriteStorageUrls` produces. Returns undefined when the URL is neither.
+ */
+function storageKeyFromUrl(url: string): string | undefined {
+  if (url.startsWith(STORAGE_URL_PREFIX)) {
+    return url.slice(STORAGE_URL_PREFIX.length);
+  }
+
+  // A data: URL is inline content, not a stored reference.
+  if (url.startsWith("data:")) {
+    return undefined;
+  }
+
+  // When STORAGE_PUBLIC_URL is set, `rewriteStorageUrls` writes
+  // `{publicUrl}/{key}` (no `/files/` segment).
+  const publicUrl = process.env.STORAGE_PUBLIC_URL;
+  const normalizedPublicUrl = publicUrl?.replace(/\/+$/, "");
+  if (normalizedPublicUrl && url.startsWith(`${normalizedPublicUrl}/`)) {
+    return url.slice(normalizedPublicUrl.length + 1);
+  }
+
+  // Default rewrite form: `<baseUrl>/files/<key>`.
+  const filesMarker = "/files/";
+  const markerIndex = url.lastIndexOf(filesMarker);
+  if (markerIndex !== -1) {
+    return url.slice(markerIndex + filesMarker.length);
+  }
+
+  return undefined;
 }
 
 /**
