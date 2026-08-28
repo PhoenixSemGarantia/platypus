@@ -321,7 +321,6 @@ describe("Workspace Create Schema", () => {
   it("accepts an optional ownerId", () => {
     const result = workspaceCreateSchema.safeParse({
       name: "Test Workspace",
-      organizationId: "org-1",
       ownerId: "member-2",
     });
     expect(result.success).toBe(true);
@@ -330,7 +329,6 @@ describe("Workspace Create Schema", () => {
   it("is valid without an ownerId", () => {
     const result = workspaceCreateSchema.safeParse({
       name: "Test Workspace",
-      organizationId: "org-1",
     });
     expect(result.success).toBe(true);
   });
