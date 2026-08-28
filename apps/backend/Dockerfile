@@ -49,8 +49,10 @@ FROM base AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
+ENV STORAGE_DISK_PATH=/data/files
 
-# Don't run production as root
+# The compose volume is mounted at /data; keep it writable without granting the
+# application user ownership of the image filesystem.
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 hono && \
     mkdir -p /data/files && chown hono:nodejs /data/files
@@ -60,6 +62,8 @@ COPY --from=prod-deps /app .
 
 # Copy source code
 COPY --from=builder /app/out/full/ .
+
+USER hono
 
 # Expose port
 EXPOSE 4000
