@@ -37,6 +37,13 @@ function createPngDataUrl(): string {
   return `data:image/png;base64,${base64}`;
 }
 
+// Count stored object files (excluding .meta sidecars) under the given root.
+async function countPngFiles(root: string): Promise<number> {
+  const files = await fs.readdir(root, { recursive: true });
+  const all = files.flat();
+  return all.filter((f) => String(f).endsWith(".png")).length;
+}
+
 describe("Storage Utils", () => {
   let tempDir: string;
 
@@ -239,6 +246,124 @@ describe("Storage Utils", () => {
       expect(keys).toContain("org-1/ws-1/chat-1/msg-2/0-def67890.jpg");
     });
 
+    // The point of this test (issue #715): a test using only `storage://`
+    // fixtures would pass even while HTTP-form URLs — what the client actually
+    // returns on the second and later turns — leak on deletion.
+    it("should extract keys from HTTP-form URLs returned on later turns", () => {
+      const messages: PlatypusUIMessage[] = [
+        {
+          id: "msg-1",
+          role: "user",
+          parts: [
+            {
+              type: "file",
+              url: "http://localhost:4000/files/org-1/ws-1/chat-1/msg-1/1-abc12345.png",
+              mediaType: "image/png",
+            },
+          ],
+        },
+        {
+          id: "msg-2",
+          role: "user",
+          parts: [
+            {
+              type: "file",
+              url: "https://example.com/some/path/files/org-1/ws-1/chat-1/msg-2/0-def67890.jpg",
+              mediaType: "image/jpeg",
+            },
+          ],
+        },
+      ];
+
+      const keys = extractStorageKeys(messages);
+
+      expect(keys).toHaveLength(2);
+      expect(keys).toContain("org-1/ws-1/chat-1/msg-1/1-abc12345.png");
+      expect(keys).toContain("org-1/ws-1/chat-1/msg-2/0-def67890.jpg");
+    });
+
+    it("should extract keys from STORAGE_PUBLIC_URL URLs", () => {
+      process.env.STORAGE_PUBLIC_URL = "https://my-bucket.s3.amazonaws.com";
+
+      const messages: PlatypusUIMessage[] = [
+        {
+          id: "msg-1",
+          role: "user",
+          parts: [
+            {
+              type: "file",
+              url: "https://my-bucket.s3.amazonaws.com/org-1/ws-1/chat-1/msg-1/0-abc12345.png",
+              mediaType: "image/png",
+            },
+          ],
+        },
+      ];
+
+      const keys = extractStorageKeys(messages);
+
+      expect(keys).toContain("org-1/ws-1/chat-1/msg-1/0-abc12345.png");
+
+      delete process.env.STORAGE_PUBLIC_URL;
+    });
+
+    it("should extract a mix of storage and HTTP forms from the same chat", () => {
+      const messages: PlatypusUIMessage[] = [
+        {
+          id: "msg-1",
+          role: "user",
+          parts: [
+            {
+              type: "file",
+              url: "storage://org-1/ws-1/chat-1/msg-1/0-abc12345.png",
+              mediaType: "image/png",
+            },
+          ],
+        },
+        {
+          id: "msg-2",
+          role: "user",
+          parts: [
+            {
+              type: "file",
+              url: "http://localhost:4000/files/org-1/ws-1/chat-1/msg-2/1-def67890.jpg",
+              mediaType: "image/jpeg",
+            },
+          ],
+        },
+      ];
+
+      const keys = extractStorageKeys(messages);
+
+      expect(keys).toHaveLength(2);
+      expect(keys).toContain("org-1/ws-1/chat-1/msg-1/0-abc12345.png");
+      expect(keys).toContain("org-1/ws-1/chat-1/msg-2/1-def67890.jpg");
+    });
+
+    it("should ignore data URLs and external URLs", () => {
+      const messages: PlatypusUIMessage[] = [
+        {
+          id: "msg-1",
+          role: "user",
+          parts: [
+            {
+              type: "file",
+              url: createPngDataUrl(),
+              mediaType: "image/png",
+            },
+            {
+              type: "file",
+              url: "https://example.com/image.png",
+              mediaType: "image/png",
+            },
+            { type: "text", text: "Hello" },
+          ],
+        },
+      ];
+
+      const keys = extractStorageKeys(messages);
+      expect(keys).toHaveLength(0);
+    });
+
     it("should return empty array for messages without storage URLs", () => {
       const messages: PlatypusUIMessage[] = [
         {
@@ -308,6 +433,40 @@ describe("Storage Utils", () => {
 
       // Should not throw
       await expect(deleteFiles(messages)).resolves.not.toThrow();
+    });
+
+    // Issue #715: a file attached on the second turn onward is stored in the
+    // row as the HTTP form the client returned. Deleting the chat must still
+    // remove it from object storage. This exercises the full store → HTTP
+    // rewrite → delete cycle, so a regression to `extractStorageKeys` (failing
+    // to recognise the HTTP form) leaves a real file on disk.
+    it("should delete files whose stored URL is the HTTP form", async () => {
+      const dataUrl = createPngDataUrl();
+      const messages: PlatypusUIMessage[] = [
+        createMessageWithFile("msg-1", dataUrl),
+      ];
+
+      const context = {
+        orgId: "org-1",
+        workspaceId: "ws-1",
+        chatId: "chat-1",
+      };
+
+      const storedMessages = await extractFiles(messages, context);
+
+      // Simulate the second-turn read → write cycle: the client fetches the
+      // chat (storage:// → HTTP), then resubmits it on the next turn.
+      const httpMessages = rewriteStorageUrls(
+        storedMessages,
+        "http://localhost:4000",
+      );
+
+      const pngBefore = await countPngFiles(tempDir);
+      expect(pngBefore).toBe(1);
+
+      await deleteFiles(httpMessages);
+
+      expect(await countPngFiles(tempDir)).toBe(0);
     });
   });
 
