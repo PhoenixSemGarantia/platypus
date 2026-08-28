@@ -46,6 +46,27 @@ describe("Files Routes", () => {
       expect(body.error).toBe("File key required");
     });
 
+    // Each key here carries enough leading segments to satisfy
+    // `parseStorageKey`, so it is the key check — not the org/workspace parse —
+    // that rejects them. `c.req.path` is not percent-decoded, hence the
+    // encoded forms.
+    it.each([
+      [
+        "percent-encoded traversal",
+        "/files/org-1/ws-1/..%2f..%2f..%2fetc%2fpasswd",
+      ],
+      ["percent-encoded dots", "/files/org-1/ws-1/%2e%2e%2fsecret"],
+      ["backslash traversal", "/files/org-1/ws-1/..%5c..%5cwindows%5cwin.ini"],
+      ["single-segment encoded traversal", "/files/..%2f..%2fetc%2fpasswd"],
+    ])("should return 400 for a %s key", async (_label, url) => {
+      mockSession();
+      const res = await app.request(url);
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as Record<string, unknown>;
+      expect(body.error).toBe("Invalid file key");
+      expect(mockStorageGet).not.toHaveBeenCalled();
+    });
+
     it("should return 400 for invalid key format with less than 2 segments", async () => {
       mockSession();
       const res = await app.request("/files/just-one-segment");

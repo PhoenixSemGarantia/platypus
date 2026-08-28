@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import type { StorageBackend } from "./types.ts";
 import { logger } from "../logger.ts";
+import { ValidationError } from "../errors.ts";
 
 /**
  * Disk-based storage backend that stores files on the local filesystem.
@@ -17,21 +18,41 @@ export class DiskStorage implements StorageBackend {
   constructor(
     basePath: string = process.env.STORAGE_DISK_PATH || "./data/files",
   ) {
-    this.basePath = basePath;
+    this.basePath = path.resolve(basePath);
   }
 
   /**
    * Get the full filesystem path for a storage key.
+   *
+   * Keys reaching a backend from a client are validated where they enter
+   * Platypus (`storage/keys.ts`), which is the gate that also covers
+   * `S3Storage`. This check is not merely a second copy of that one: the Agent
+   * avatar path (`services/avatar.ts`) composes its own key and does not go
+   * through that gate, so for the disk backend this is the only containment
+   * guard it has. It is also the last point before a path reaches the
+   * filesystem, and this is the one backend where leaving the root reads an
+   * unrelated host file rather than missing an object.
    */
   private getFilePath(key: string): string {
-    return path.join(this.basePath, key);
+    const filePath = path.resolve(this.basePath, key);
+    // A trailing separator on the base stops a sibling root matching by prefix
+    // (`/data/files` must not admit `/data/files_secret`).
+    if (!filePath.startsWith(this.basePath + path.sep)) {
+      throw new ValidationError("Invalid file key");
+    }
+    return filePath;
   }
 
   /**
    * Get the path to the metadata sidecar file.
+   *
+   * Derived from the resolved object path, never from the key: appending
+   * `.meta` to the key before resolving lets the two paths disagree — a key
+   * ending in `..` would resolve one directory up for the object and stay put
+   * for the sidecar.
    */
   private getMetaPath(key: string): string {
-    return path.join(this.basePath, `${key}.meta`);
+    return `${this.getFilePath(key)}.meta`;
   }
 
   /**
